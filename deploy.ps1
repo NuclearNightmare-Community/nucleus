@@ -6,8 +6,9 @@
   Content/Paks/LogicMods/<name>.pak, and writes "<name> : 1" as the first line of mods.txt. Any previous install of
   core (and of the test dependent) is removed first.
   Refuses unless the installed UE4SS.dll is byte-identical to the pinned zip's, and BPModLoaderMod is present.
-  -Test also installs the walking-skeleton test dependent (test/<name>SkelTest) above Keybinds.
-  -Scenario breaks one part on purpose: skeleton (all parts), no-native (no dlls/main.dll), no-pak (no LogicMods pak).
+  -Test also installs the walking-skeleton test dependent (test/SkelTest, installed as Mods/<name>SkelTest) above Keybinds.
+  -Scenario breaks one part on purpose: skeleton (all parts), no-native (no dlls/main.dll), no-pak (no LogicMods pak);
+  bad-input installs all parts like skeleton. The scenario goes to the test dependent's Scripts/scenario.txt.
   Pass the main checkout's instance path when running from a worktree.
 .EXAMPLE
   ./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.0-build26022182 -Test
@@ -16,7 +17,7 @@
 param(
     [Parameter(Mandatory)] [string] $Instance,
     [switch] $Test,
-    [ValidateSet('skeleton', 'no-native', 'no-pak')]
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input')]
     [string] $Scenario = 'skeleton',
     [switch] $Remove
 )
@@ -81,7 +82,9 @@ if ($Scenario -ne 'no-pak') { Copy-Item (Join-Path $pkg "LogicMods\$name.pak") $
 # mods.txt: core is the very first line; the test dependent goes above the built-in Keybinds entry.
 $lines = @("$name : 1") + $lines
 if ($Test) {
-    Copy-Item (Join-Path $here "test\$testName") $modsDir -Recurse -Force
+    # The test takes core's name from its installed folder name (<name>SkelTest), so the source folder is name-free.
+    Copy-Item (Join-Path $here 'test\SkelTest') (Join-Path $modsDir $testName) -Recurse -Force
+    Set-Content (Join-Path $modsDir "$testName\Scripts\scenario.txt") $Scenario -NoNewline
     $i = [Array]::FindIndex([string[]]$lines, [Predicate[string]]{ param($l) $l -match '^\s*Keybinds\s*:' })
     $lines = if ($i -ge 0) { @($lines[0..($i-1)]) + "$testName : 1" + @($lines[$i..($lines.Count-1)]) } else { @($lines) + "$testName : 1" }
 }

@@ -5,7 +5,7 @@
   Every name-bearing identifier comes from mod.json "name" (and "version"). Steps, each timed, logs in build/logs/:
     native     VS 2026 + CMake + Ninja against the pinned UE4SS source (-Ue4ssSrc), Game__Shipping__Win64, target
                CoreNative only. Then mods/cpp-spike/abi-check.ps1 must report no missing imports.
-    blueprint  UE 5.6 (-Engine): compile the editor-only generator, run -run=NNCoreGen -CoreName=<name>, cook,
+    blueprint  UE 5.6 (-Engine): compile the editor-only generator, run -run=CoreGen -CoreName=<name>, cook,
                repak pack --version V11 (uncompressed) /Game/Mods/<name>/ as <name>.pak.
     lua        Stage lua/main.lua and lua/pkg/ as Scripts/main.lua and Scripts/<lowercase name>/, plus a generated
                Scripts/<lowercase name>/version.lua.
@@ -114,7 +114,7 @@ Step 'blueprint' {
     if ($uproj.Length -gt 140) { Write-Warning "Unreal project path is $($uproj.Length) characters; UBT may hit the 260-character limit" }
     Run 'bp-compile.log' $buildBat @('NuclearNightmareEditor', 'Win64', 'Development', "-Project=$uproj", '-WaitMutex')
     Remove-Item (Join-Path $proj 'Content\Mods') -Recurse -Force -ErrorAction SilentlyContinue
-    Run 'bp-generate.log' $editor @($uproj, '-run=NNCoreGen', "-CoreName=$name", '-unattended', '-nopause', '-nosplash', '-stdout', '-NoLogTimes')
+    Run 'bp-generate.log' $editor @($uproj, '-run=CoreGen', "-CoreName=$name", '-unattended', '-nopause', '-nosplash', '-stdout', '-NoLogTimes')
     $cookedRoot = Join-Path $proj 'Saved\Cooked\Windows\NuclearNightmare\Content\Mods'
     Remove-Item $cookedRoot -Recurse -Force -ErrorAction SilentlyContinue
     Run 'bp-cook.log' $editor @($uproj, '-run=cook', '-targetplatform=Windows', '-unversioned', '-unattended', '-nopause', '-nosplash', '-stdout', '-NoLogTimes')

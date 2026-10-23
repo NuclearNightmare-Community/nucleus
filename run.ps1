@@ -13,7 +13,7 @@
 #>
 param(
     [Parameter(Mandatory)] [string] $Instance,
-    [ValidateSet('skeleton', 'no-native', 'no-pak')]
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input')]
     [string] $Scenario = 'skeleton',
     [int] $TimeoutSec = 420
 )

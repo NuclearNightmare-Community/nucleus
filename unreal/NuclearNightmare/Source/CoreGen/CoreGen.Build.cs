@@ -1,8 +1,8 @@
 using UnrealBuildTool;
 
-public class NNCoreGen : ModuleRules
+public class CoreGen : ModuleRules
 {
-	public NNCoreGen(ReadOnlyTargetRules Target) : base(Target)
+	public CoreGen(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 		PrivateDependencyModuleNames.AddRange(new[]

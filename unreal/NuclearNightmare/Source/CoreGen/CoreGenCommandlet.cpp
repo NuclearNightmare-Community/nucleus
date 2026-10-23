@@ -1,4 +1,4 @@
-#include "NNCoreGenCommandlet.h"
+#include "CoreGenCommandlet.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Blueprint/SlateBlueprintLibrary.h"
@@ -24,7 +24,7 @@
 #include "UObject/SavePackage.h"
 #include "WidgetBlueprint.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogNNCoreGen, Log, All);
+DEFINE_LOG_CATEGORY_STATIC(LogCoreGen, Log, All);
 
 namespace
 {
@@ -167,11 +167,11 @@ namespace
 		FKismetEditorUtilities::CompileBlueprint(BP, EBlueprintCompileOptions::SkipGarbageCollection, &Results);
 		for (const TSharedRef<FTokenizedMessage>& M : Results.Messages)
 		{
-			UE_LOG(LogNNCoreGen, Display, TEXT("  [%s] %s"), *BP->GetName(), *M->ToText().ToString());
+			UE_LOG(LogCoreGen, Display, TEXT("  [%s] %s"), *BP->GetName(), *M->ToText().ToString());
 		}
 		if (BP->Status == BS_Error || Results.NumErrors > 0)
 		{
-			UE_LOG(LogNNCoreGen, Error, TEXT("%s failed to compile (%d errors)"), *BP->GetPathName(), Results.NumErrors);
+			UE_LOG(LogCoreGen, Error, TEXT("%s failed to compile (%d errors)"), *BP->GetPathName(), Results.NumErrors);
 			return false;
 		}
 		return true;
@@ -186,7 +186,7 @@ namespace
 		FSavePackageArgs Args;
 		Args.TopLevelFlags = RF_Public | RF_Standalone;
 		const bool bOk = UPackage::SavePackage(Pkg, BP, *File, Args);
-		UE_LOG(LogNNCoreGen, Display, TEXT("%s %s -> %s"), bOk ? TEXT("Saved") : TEXT("FAILED to save"), *Pkg->GetName(), *File);
+		UE_LOG(LogCoreGen, Display, TEXT("%s %s -> %s"), bOk ? TEXT("Saved") : TEXT("FAILED to save"), *Pkg->GetName(), *File);
 		return bOk;
 	}
 
@@ -194,7 +194,7 @@ namespace
 	{
 		UPackage* Pkg = CreatePackage(*LongName);
 		Pkg->FullyLoad();
-		return FKismetEditorUtilities::CreateBlueprint(Parent, Pkg, FName(FPackageName::GetShortName(LongName)), BPTYPE_Normal, BPClass, GenClass, TEXT("NNCoreGen"));
+		return FKismetEditorUtilities::CreateBlueprint(Parent, Pkg, FName(FPackageName::GetShortName(LongName)), BPTYPE_Normal, BPClass, GenClass, TEXT("CoreGen"));
 	}
 
 	/**
@@ -311,7 +311,7 @@ namespace
 	}
 }
 
-UNNCoreGenCommandlet::UNNCoreGenCommandlet()
+UCoreGenCommandlet::UCoreGenCommandlet()
 {
 	IsClient = false;
 	IsServer = false;
@@ -320,17 +320,17 @@ UNNCoreGenCommandlet::UNNCoreGenCommandlet()
 	ShowErrorCount = true;
 }
 
-int32 UNNCoreGenCommandlet::Main(const FString& Params)
+int32 UCoreGenCommandlet::Main(const FString& Params)
 {
 	FString Core;
 	if (!FParse::Value(*Params, TEXT("CoreName="), Core) || Core.IsEmpty())
 	{
-		UE_LOG(LogNNCoreGen, Error, TEXT("Pass -CoreName=<mod.json name>"));
+		UE_LOG(LogCoreGen, Error, TEXT("Pass -CoreName=<mod.json name>"));
 		return 1;
 	}
 	const FString Dir = TEXT("/Game/Mods/") + Core;
 	if (!BuildText(Dir, Core)) return 1;
 	if (!BuildActor(Dir, Core)) return 1;
-	UE_LOG(LogNNCoreGen, Display, TEXT("NNCoreGen: all assets for %s generated."), *Core);
+	UE_LOG(LogCoreGen, Display, TEXT("CoreGen: all assets for %s generated."), *Core);
 	return 0;
 }

@@ -5,7 +5,7 @@
 	"Description": "Mod authoring project for Nuclear Nightmare. Named like the game so cooked assets land under /Game. Holds only our own assets.",
 	"Modules": [
 		{
-			"Name": "NNCoreGen",
+			"Name": "CoreGen",
 			"Type": "Editor",
 			"LoadingPhase": "Default"
 		}

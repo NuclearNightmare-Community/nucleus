@@ -1,4 +1,5 @@
 -- Weak handles over core's natives (api-contract.md, "C++ natives"). Dependents keep handles, never UObjects.
+-- The natives validate everything themselves; these wrappers only turn a non-object into a clean error.
 local V = require((...):gsub("%.ref$", "") .. ".version")
 
 local M = {}
@@ -12,8 +13,10 @@ end
 
 -- ref(obj) -> handle. obj must be live now (just found or created); game thread only after load.
 function M.ref(obj)
-    if type(obj) ~= "userdata" then error("ref: expected a UObject", 2) end
-    return native("_Ref")(obj:GetAddress())
+    if type(obj) ~= "userdata" then error("ref: expected a UObject, got " .. type(obj), 2) end
+    local ok, addr = pcall(function() return obj:GetAddress() end)
+    if not ok or math.type(addr) ~= "integer" then error("ref: expected a UObject (it has no GetAddress)", 2) end
+    return native("_Ref")(addr)
 end
 
 -- deref(handle) -> obj or nil. nil once the object is gone, its slot reused, or the handle freed.

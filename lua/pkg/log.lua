@@ -1,4 +1,4 @@
--- One-line, mod-tagged logging for core and its dependents (api-contract.md, "nncore.log").
+-- One-line, mod-tagged logging for core and its dependents (api-contract.md, "<core>.log").
 -- UE4SS.log shows only the first line of a multi-line print, so every message is flattened to one line.
 local M = {}
 

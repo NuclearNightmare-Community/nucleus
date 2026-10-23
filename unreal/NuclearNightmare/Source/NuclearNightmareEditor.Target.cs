@@ -1,6 +1,6 @@
 using UnrealBuildTool;
 
-// Editor target only: the project's code is the editor-only asset generator (NNCoreGen), never cooked or shipped.
+// Editor target only: the project's code is the editor-only asset generator (CoreGen), never cooked or shipped.
 public class NuclearNightmareEditorTarget : TargetRules
 {
 	public NuclearNightmareEditorTarget(TargetInfo Target) : base(Target)
@@ -8,6 +8,6 @@ public class NuclearNightmareEditorTarget : TargetRules
 		Type = TargetType.Editor;
 		DefaultBuildSettings = BuildSettingsVersion.V5;
 		IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_6;
-		ExtraModuleNames.Add("NNCoreGen");
+		ExtraModuleNames.Add("CoreGen");
 	}
 }

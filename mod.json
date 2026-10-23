@@ -1,6 +1,6 @@
 {
-  "id": "nncore",
-  "name": "NNCore",
+  "id": "nucleus",
+  "name": "Nucleus",
   "version": "0.1.0",
   "scope": "all",
   "game": { "version": "V8.0", "build": "26022182" },

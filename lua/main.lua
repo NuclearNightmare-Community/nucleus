@@ -1,6 +1,7 @@
 -- Core's own Lua (api-contract.md, "Core's own start-up"): checks the native part, publishes state and version,
 -- answers the Blueprint channel <Core>_Call, and loads its Blueprint class itself when BPModLoaderMod has not.
--- The name comes from this mod's folder (Mods/<Core>/Scripts/main.lua), so nothing here hardcodes it.
+-- The name comes from this mod's folder (Mods/<Core>/Scripts/main.lua; the folder is mod.json "name", set by
+-- build.ps1), so nothing here spells it.
 local scriptDir = debug.getinfo(1, "S").source:gsub("^@", ""):match("^(.*)[/\\]")
 local NAME = scriptDir:match("([^/\\]+)[/\\][Ss]cripts$")
 local LOWER = NAME:lower()
@@ -11,6 +12,7 @@ local CLASS_PKG = "/Game/Mods/" .. NAME .. "/ModActor"
 local CLASS = CLASS_PKG .. ".ModActor_C"
 local CALL_FN = CLASS .. ":" .. NAME .. "_Call"
 local MAX_REQUEST = 4096
+local MAX_OP = 64
 
 local state = "loading"
 local function setState(s)
@@ -22,20 +24,35 @@ local boot = (tonumber(ModRef:GetSharedVariable(LOWER .. ".boot")) or 0) + 1
 ModRef:SetSharedVariable(LOWER .. ".boot", boot)
 ModRef:SetSharedVariable(LOWER .. ".version", V.version)
 
+-- The request as a Lua string, or the raw value when it is not one (handle() then replies err:bad-request).
 local function str(v)
     if type(v) == "string" then return v end
-    if type(v) == "userdata" and v.ToString then return v:ToString() end
-    return tostring(v)
+    if type(v) == "userdata" then
+        local ok, s = pcall(function() return v:ToString() end)
+        if ok and type(s) == "string" then return s end
+    end
+    return v
+end
+
+-- Echoes at most 64 printable bytes of untrusted text back into a reply or the log.
+local function quote(s)
+    return (tostring(s):sub(1, 64):gsub("[^%w%p ]", "?"))
 end
 
 -- The channel. Runs in core's Lua state on the caller's thread (callers must be on the game thread).
+-- Requests come from any mod, so nothing in them is trusted: every malformed request gets a clean err: reply.
+-- Request: <op> or <op>:<payload>, op = 1..64 of [A-Za-z0-9_-], at most MAX_REQUEST bytes in all.
 local function handle(request)
-    if #request > MAX_REQUEST then return "err:too-long" end
+    if type(request) ~= "string" then return "err:bad-request expected a string, got " .. type(request) end
+    if #request > MAX_REQUEST then return string.format("err:too-long %d bytes, cap %d", #request, MAX_REQUEST) end
+    if #request == 0 then return "err:bad-request empty request" end
     if state ~= "ready" then return "err:not-ready " .. state end
-    local op = request:match("^([%w_%-]+)")
+    local op = request:match("^([%w_%-]+):") or request:match("^([%w_%-]+)$")
+    if not op then return "err:bad-request malformed request '" .. quote(request) .. "' (want <op> or <op>:<payload>)" end
+    if #op > MAX_OP then return string.format("err:bad-request op is %d bytes, cap %d", #op, MAX_OP) end
     if op == "ping" then return string.format("ok:pong %s boot=%d", V.version, boot) end
     if op == "version" then return "ok:" .. V.version end
-    return "err:unknown-op " .. tostring(op)
+    return "err:unknown-op " .. quote(op)
 end
 
 local hooked = false
@@ -44,12 +61,21 @@ local function hookChannel(reason)
     local cls = StaticFindObject(CLASS)
     if not cls or not cls:IsValid() then return end
     hooked = true
-    -- Blueprint functions get post-hooks only; the return value replaces <Core>_Call's ReturnValue.
-    RegisterHook(CALL_FN, function(_, request)
-        local ok, reply = pcall(handle, str(request:get()))
-        if not ok then reply = "err:internal " .. tostring(reply) end
+    -- Blueprint functions get post-hooks only; the return value replaces <Core>_Call's ReturnValue. Everything,
+    -- reading the parameter included, runs under pcall: no error may escape a hook callback.
+    local ok, err = pcall(RegisterHook, CALL_FN, function(_, request)
+        local okH, reply = pcall(function() return handle(str(request:get())) end)
+        if not okH then
+            reply = "err:internal " .. quote(reply)
+            log.warn("CHANNEL request failed inside %s: %s", NAME, reply)
+        end
         return reply
     end)
+    if not ok then
+        hooked = false
+        log.error("CHANNEL could not hook %s: %s", CALL_FN, tostring(err))
+        return
+    end
     log.info("CHANNEL hooked %s (%s)", CALL_FN, reason)
 end
 
@@ -60,7 +86,7 @@ local function ensureClass()
     local helpers = StaticFindObject("/Script/AssetRegistry.Default__AssetRegistryHelpers")
     local cls = helpers:GetAsset({ PackageName = FName(CLASS_PKG), AssetName = FName("ModActor_C") })
     if cls and cls:IsValid() then
-        log.info("SELF_LOAD BPModLoaderMod had not loaded %s; core loaded it itself", CLASS)
+        log.info("SELF_LOAD BPModLoaderMod had not loaded %s; %s loaded it itself", CLASS, NAME)
         hookChannel("self-load")
     elseif not missingLogged then
         missingLogged = true
@@ -82,25 +108,28 @@ local function start()
         return
     end
 
-    NotifyOnNewObject(CLASS, function(obj)
-        hookChannel("NotifyOnNewObject")
+    NotifyOnNewObject(CLASS, function()
+        local okN, errN = pcall(hookChannel, "NotifyOnNewObject")
+        if not okN then log.error("channel hook from NotifyOnNewObject failed: %s", tostring(errN)) end
         return true
     end)
     hookChannel("main.lua")
 
     -- Fallback when BPModLoaderMod did not load core's class (disabled, or the pak missing or misnamed).
     RegisterLoadMapPostHook(function()
-        ExecuteWithDelay(3000, function()
-            ExecuteInGameThread(function()
+        local okL, errL = pcall(ExecuteWithDelay, 3000, function()
+            local okD, errD = pcall(ExecuteInGameThread, function()
                 local ok, err = pcall(ensureClass)
                 if not ok then log.error("class check failed: %s", tostring(err)) end
             end)
+            if not okD then log.error("class check could not be scheduled: %s", tostring(errD)) end
         end)
+        if not okL then log.error("class check could not be delayed: %s", tostring(errL)) end
     end)
 
     ModRef.OnUnload = function()
-        setState("stopped")
-        log.info("STOPPED")
+        local okU, errU = pcall(setState, "stopped")
+        log.info("STOPPED%s", okU and "" or (" (state not published: " .. tostring(errU) .. ")"))
     end
 
     setState("ready")

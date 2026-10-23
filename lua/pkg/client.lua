@@ -1,6 +1,7 @@
--- Dependent-side client (api-contract.md, "nncore.client"). Runs in the dependent's own Lua state; reaches the one
--- running core only through shared variables (state, version) and the Blueprint channel on ModActor's class default
--- object. connect() is asynchronous: the channel exists only once the first world has loaded core's class.
+-- Dependent-side client (api-contract.md, "<core>.client"; <core> is the lowercase mod.json name). Runs in the
+-- dependent's own Lua state; reaches the one running core only through shared variables (state, version) and the
+-- Blueprint channel on ModActor's class default object. connect() is asynchronous: the channel exists only once the
+-- first world has loaded core's class.
 local BASE = (...):gsub("%.client$", "")
 local V = require(BASE .. ".version")
 local semver = require(BASE .. ".semver")
@@ -17,7 +18,10 @@ local C = { name = NAME }
 
 local function str(v)
     if type(v) == "string" then return v end
-    if type(v) == "userdata" and v.ToString then return v:ToString() end
+    if type(v) == "userdata" then
+        local ok, s = pcall(function() return v:ToString() end)
+        if ok then return s end
+    end
     return tostring(v)
 end
 
@@ -26,14 +30,20 @@ local function found(path)
     return o ~= nil and o:IsValid() and o or nil
 end
 
--- call(op, payload) -> true, payload | false, reply-or-reason. Game thread only.
+-- call(op, payload) -> true, payload | false, reply-or-reason. Game thread only. Never raises: bad arguments come
+-- back as false, "err:bad-request ..." without reaching the channel.
 function C.call(op, payload)
+    if type(op) ~= "string" then return false, "err:bad-request op must be a string, got " .. type(op) end
+    if payload ~= nil and type(payload) ~= "string" and type(payload) ~= "number" then
+        return false, "err:bad-request payload must be a string or number, got " .. type(payload)
+    end
     local req = payload ~= nil and (op .. ":" .. tostring(payload)) or op
-    if #req > MAX_REQUEST then return false, "err:too-long" end
-    local cdo = found(CDO)
-    if not cdo then return false, "channel class not loaded" end
+    if #req > MAX_REQUEST then return false, string.format("err:too-long %d bytes, cap %d", #req, MAX_REQUEST) end
+    local okF, cdo = pcall(found, CDO)
+    if not okF or not cdo then return false, "channel class not loaded" end
     local ok, out = pcall(function() return str(cdo[CALL](cdo, req)) end)
     if not ok then return false, "call failed: " .. tostring(out) end
+    if type(out) ~= "string" then return false, "call failed: reply is " .. type(out) end
     if out:sub(1, 3) == "ok:" then return true, out:sub(4) end
     return false, out
 end
@@ -108,11 +118,15 @@ function C.connect(opts)
 
     LoopAsync(500, function()
         if not done then
-            ExecuteInGameThread(function()
+            local okE, errE = pcall(ExecuteInGameThread, function()
                 if done then return end
                 local ok, err = pcall(attempt)
-                if not ok then fail("connect failed: " .. tostring(err)) end
+                if not ok then
+                    local okF, errF = pcall(fail, "connect failed: " .. tostring(err))
+                    if not okF then done = true; print("[" .. tostring(mod) .. "] ERROR connect failed and so did reporting it: " .. tostring(errF) .. "\n") end
+                end
             end)
+            if not okE then pcall(fail, "connect could not reach the game thread: " .. tostring(errE)) end
         end
         return done
     end)
