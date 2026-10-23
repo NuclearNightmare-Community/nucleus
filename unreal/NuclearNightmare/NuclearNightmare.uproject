@@ -1,0 +1,19 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "5.6",
+	"Category": "",
+	"Description": "Mod authoring project for Nuclear Nightmare. Named like the game so cooked assets land under /Game. Holds only our own assets.",
+	"Modules": [
+		{
+			"Name": "NNCoreGen",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "AndroidFileServer",
+			"Enabled": false
+		}
+	]
+}

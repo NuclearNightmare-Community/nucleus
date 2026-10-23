@@ -1,0 +1,9 @@
+{
+  "id": "nncore",
+  "name": "NNCore",
+  "version": "0.1.0",
+  "scope": "all",
+  "game": { "version": "V8.0", "build": "26022182" },
+  "ue4ss": "v3.0.1-1181-g83330635",
+  "dependsOn": []
+}
