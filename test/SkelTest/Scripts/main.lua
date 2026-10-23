@@ -38,6 +38,11 @@ do
     else
         say("NATIVE main.lua %s_NativeVersion missing (type=%s)", CORE, type(fn))
     end
+    local clock = _G[CORE .. "_ClockMicros"]
+    if type(clock) == "function" then
+        local ok, us = pcall(clock)
+        say("NATIVE main.lua %s_ClockMicros ok=%s type=%s", CORE, tostring(ok), ok and tostring(math.type(us)) or tostring(us))
+    end
 end
 
 -- 2. The bootstrap every dependent carries (api-contract.md, "Dependent bootstrap").
@@ -361,6 +366,19 @@ local function nativeCases(phase)
     case(P .. "nv-arg", nNV .. "(1)", function() return NV(1) end, E.err(nNV .. ": expected 0 arguments, got 1"))
     case(P .. "nv-nil", nNV .. "(nil)", function() return NV(nil) end, E.err(nNV .. ": expected 0 arguments, got 1"))
 
+    -- ClockMicros: no arguments; a positive integer that never goes backwards.
+    local CM, nCM = native("_ClockMicros"), CORE .. "_ClockMicros"
+    local isMicros = function(r) return r.n == 1 and math.type(r[1]) == "integer" and r[1] > 0 end
+    case(P .. "clock-ok", nCM .. "()", CM, E.ret("one integer > 0", isMicros))
+    case(P .. "clock-mono", nCM .. "() twice", function() local a = CM() local b = CM() return a, b, b >= a end,
+        E.ret("second >= first", function(r) return r[3] == true end))
+    case(P .. "clock-arg", nCM .. "(1)", function() return CM(1) end, E.err(nCM .. ": expected 0 arguments, got 1"))
+    case(P .. "clock-nil", nCM .. "(nil)", function() return CM(nil) end, E.err(nCM .. ": expected 0 arguments, got 1"))
+    case(P .. "clock-str", nCM .. "(\"x\")", function() return CM("x") end, E.err(nCM .. ": expected 0 arguments, got 1"))
+    case(P .. "clock-table", nCM .. "({})", function() return CM({}) end, E.err(nCM .. ": expected 0 arguments, got 1"))
+    case(P .. "clock-two", nCM .. "(1, 2)", function() return CM(1, 2) end, E.err(nCM .. ": expected 0 arguments, got 2"))
+    case(P .. "wrap-clock", "core.clock.micros()", function() return core.clock.micros() end, E.ret("one integer > 0", isMicros))
+
     -- Ref: types, then addresses that are not live UObjects.
     typeCases(P .. "ref", nREF, REF, "address")
     local fr = intFn(REF)
@@ -461,11 +479,13 @@ local function offThreadCases(phase)
         S.offHandle = h
         local P = phase .. "."
         local NV, REF, DEREF, FREE = native("_NativeVersion"), native("_Ref"), native("_Deref"), native("_RefFree")
+        local CM = native("_ClockMicros")
         local nREF, nDEREF, nFREE = CORE .. "_Ref", CORE .. "_Deref", CORE .. "_RefFree"
         local doneOff = false
         LoopAsync(10, function()
             local ok, err = pcall(function()
                 case(P .. "off-nv", CORE .. "_NativeVersion() [off thread]", NV, E.ret("two strings", function(r) return r.n == 2 end))
+                case(P .. "off-clock", CORE .. "_ClockMicros() [off thread]", CM, E.ret("one integer > 0", function(r) return r.n == 1 and math.type(r[1]) == "integer" and r[1] > 0 end))
                 if addr then case(P .. "off-ref", nREF .. "(<HUD address>) [off thread]", function() return REF(addr) end, E.err(nREF .. " refused: called off the game thread")) end
                 case(P .. "off-ref-bad", nREF .. "(nil) [off thread]", function() return REF(nil) end, E.err(nREF .. " refused: called off the game thread"))
                 if h then case(P .. "off-deref", nDEREF .. "(" .. h .. ") [off thread]", function() return DEREF(h) end, E.err(nDEREF .. " refused: called off the game thread")) end
@@ -516,6 +536,32 @@ local function destroyedCase(phase)
     end)
 end
 
+-- <Core>_ClockMicros against real time across a 2 s wait (os.clock is wall time in the MSVC C runtime), then the
+-- cost of one call, timed over 10,000 calls by the clock itself (Lua loop overhead included).
+local function clockChecks(phase)
+    local t
+    step(phase .. ": clock start", function()
+        local CM = native("_ClockMicros")
+        t = { us = CM(), c = os.clock() }
+        return function() return os.clock() - t.c >= 2 end, 10, "clock wait"
+    end)
+    step(phase .. ": clock vs real time", function()
+        local CM = native("_ClockMicros")
+        local us, c = CM(), os.clock()
+        local dUs, dReal = (us - t.us) / 1e6, c - t.c
+        local ratio = dUs / dReal
+        check(ratio >= 0.8 and ratio <= 1.2, "CLOCKRT %s ClockMicros delta=%.6f s os.clock delta=%.3f s ratio=%.4f (expected 0.8..1.2)", phase, dUs, dReal, ratio)
+        local N = 10000
+        local a = CM()
+        for _ = 1, N do CM() end
+        local b = CM()
+        local wrap = core.clock.micros
+        for _ = 1, N do wrap() end
+        local c2 = CM()
+        say("CLOCKCOST %s n=%d native=%.1f ns per call wrapper=%.1f ns per call (Lua loop included, timed by ClockMicros)", phase, N, (b - a) * 1000 / N, (c2 - b) * 1000 / N)
+    end)
+end
+
 local function buildSkeleton()
     waitWorld("menu1", "NewMainMenu", 120)
     waitHud("menu1", 60)
@@ -555,6 +601,7 @@ local function buildBadInput()
     destroyedCase("match1")
     badInputCases("match1")
     refCost("match1", 200)
+    clockChecks("match1")
     step("summary", function()
         check(cases.total > 0 and cases.passed == cases.total, "CASES total=%d passed=%d failed=%d", cases.total, cases.passed, cases.total - cases.passed)
     end)

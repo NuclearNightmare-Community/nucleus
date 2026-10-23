@@ -7,6 +7,7 @@ local V = require(BASE .. ".version")
 local semver = require(BASE .. ".semver")
 local logm = require(BASE .. ".log")
 local refm = require(BASE .. ".ref")
+local clockm = require(BASE .. ".clock")
 
 local NAME, LOWER = V.name, V.name:lower()
 local CLASS = "/Game/Mods/" .. NAME .. "/ModActor.ModActor_C"
@@ -109,6 +110,7 @@ function C.connect(opts)
         local api = {
             name = NAME, version = version, log = log, call = C.call,
             ref = refm.ref, deref = refm.deref, free = refm.free,
+            clock = clockm,
         }
         if opts.onReady then
             local okR, err = pcall(opts.onReady, api)

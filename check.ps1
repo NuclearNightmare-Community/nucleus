@@ -53,6 +53,7 @@ $started = @(
     "\[$N\] READY version=$Ver native=$Ver ue4ss=v3\.0\.1-1181-g83330635"
     "\[$N\] CHANNEL hooked .*ModActor_C:${N}_Call"
     "\[$T\] NATIVE main\.lua ${N}_NativeVersion ok=true version=$Ver ue4ss=v3\.0\.1-1181-g83330635"
+    "\[$T\] NATIVE main\.lua ${N}_ClockMicros ok=true type=integer"
     "\[$T\] CONNECT ok $N $Ver \(pong $Ver boot=\d+\)"
     "\[$N\] native: GUObjectArray layout: .* scan mode contiguous chunks"
     "\[$N\] native: REF_COST calls=1 "
@@ -78,11 +79,14 @@ $badInput = $started + @(
     "\[$T\] OK CASE match1\.ref-destroyed "
     "\[$T\] OK CASES total=\d+ passed=\d+ failed=0"
     "\[$T\] REFCOST match1 n=200 "
+    "\[$T\] OK CLOCKRT match1 "
+    "\[$T\] CLOCKCOST match1 n=10000 "
     "\[$T\] END result=PASS"
 )
 # Every case of each group, in both worlds: the menu and the match after a map change.
 foreach ($p in 'menu1', 'match1') {
-    foreach ($id in 'nv-ok', 'nv-arg', 'ref-nil', 'ref-true', 'ref-table', 'ref-str', 'ref-float', 'ref-2\^53f', 'ref-0', 'ref--1',
+    foreach ($id in 'nv-ok', 'nv-arg', 'clock-ok', 'clock-mono', 'clock-arg', 'clock-nil', 'clock-str', 'clock-table', 'clock-two',
+                    'wrap-clock', 'off-clock', 'ref-nil', 'ref-true', 'ref-table', 'ref-str', 'ref-float', 'ref-2\^53f', 'ref-0', 'ref--1',
                     'ref-2\^53', 'ref-interior', 'ref-misaligned', 'ref-unmappedlo', 'ref-unmappedhi', 'ref-live', 'ref-rand8',
                     'ref-rand64-6', 'deref-live', 'free-1', 'free-2', 'deref-freed', 'deref-nil', 'deref-0', 'deref-2\^53',
                     'deref-rand8', 'free-nil', 'free-0', 'free-rand8', 'wrap-ref-nil', 'ch-ping', 'ch-nil', 'ch-long-client',

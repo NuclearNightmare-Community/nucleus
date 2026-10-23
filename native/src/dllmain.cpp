@@ -1,6 +1,6 @@
 // Core's native part (docs: _bmad-output/specs/spec-core-v0/api-contract.md, "C++ natives").
 //
-// Registers <Core>_NativeVersion, <Core>_Ref, <Core>_Deref and <Core>_RefFree into every Lua mod's state in
+// Registers <Core>_NativeVersion, <Core>_ClockMicros, <Core>_Ref, <Core>_Deref and <Core>_RefFree into every Lua mod's state in
 // on_lua_start, before that mod's main.lua runs. <Core> is CORE_NAME (core_config.hpp, generated from mod.json
 // "name"); nothing here spells the name. Weak handles are FWeakObjectPtr (GUObjectArray index + serial number), so a
 // handle never resolves to an object that took over a freed object's slot or address.
@@ -41,6 +41,15 @@
 
 #include "core_config.hpp"
 
+// QueryPerformanceCounter/Frequency (<Core>_ClockMicros). After the UE4SS headers, so their own Windows setup wins.
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <Windows.h>
+
 using namespace RC;
 using namespace RC::Unreal;
 using Lua = RC::LuaMadeSimple::Lua;
@@ -70,6 +79,7 @@ namespace
     const std::string g_fn_ref = std::string{CORE_NAME} + "_Ref";
     const std::string g_fn_deref = std::string{CORE_NAME} + "_Deref";
     const std::string g_fn_free = std::string{CORE_NAME} + "_RefFree";
+    const std::string g_fn_clock = std::string{CORE_NAME} + "_ClockMicros";
 
     // A problem with what the caller passed (or did). Its text is the whole Lua error message.
     struct ArgError : std::runtime_error
@@ -403,6 +413,33 @@ namespace
         });
     }
 
+    // <Core>_ClockMicros(): microseconds from QueryPerformanceCounter, a monotonic clock. The epoch is arbitrary
+    // (counts since boot on current Windows); only differences between two calls mean anything. Touches no UObject,
+    // so any thread may call it, also during main.lua. Normal path: no allocation, no lock, no logging.
+    // The frequency is fixed at boot; read it once, when the DLL loads.
+    const int64_t g_qpc_freq = [] {
+        LARGE_INTEGER f{};
+        return QueryPerformanceFrequency(&f) && f.QuadPart > 0 ? static_cast<int64_t>(f.QuadPart) : int64_t{0};
+    }();
+
+    int l_clock_micros(const Lua& lua)
+    {
+        return guarded(lua, g_fn_clock, [&] {
+            require_args(lua, g_fn_clock, 0, "");
+            if (g_qpc_freq <= 0) throw std::runtime_error("QueryPerformanceFrequency is unavailable");
+            LARGE_INTEGER c{};
+            QueryPerformanceCounter(&c);
+            const int64_t ticks = c.QuadPart;
+            // Whole seconds and remainder separately: ticks * 1'000'000 alone would overflow after ~10 days at 10 MHz.
+            const int64_t secs = ticks / g_qpc_freq;
+            const int64_t rem = ticks % g_qpc_freq;
+            Result r;
+            r.kind = Result::Kind::Integer;
+            r.integer = secs * 1'000'000 + rem * 1'000'000 / g_qpc_freq;
+            return r;
+        });
+    }
+
     // <Core>_Ref(address): address is obj:GetAddress() of an object the caller holds right now.
     int l_ref(const Lua& lua)
     {
@@ -582,6 +619,7 @@ class CoreNative : public CppUserModBase
             try
             {
                 lua.register_function(g_fn_version.c_str(), &l_native_version);
+                lua.register_function(g_fn_clock.c_str(), &l_clock_micros);
                 lua.register_function(g_fn_ref.c_str(), &l_ref);
                 lua.register_function(g_fn_deref.c_str(), &l_deref);
                 lua.register_function(g_fn_free.c_str(), &l_ref_free);

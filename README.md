@@ -1,6 +1,6 @@
 # Nucleus
 
-Core shared library for Nuclear Nightmare mods: a C++ DLL (weak object handles), a LogicMods Blueprint pak (the `Nucleus_Call` channel and the text widget `WBP_NucleusText`) and Lua (bootstrap, `connect`, logging).
+Core shared library for Nuclear Nightmare mods: a C++ DLL (weak object handles, a monotonic clock), a LogicMods Blueprint pak (the `Nucleus_Call` channel and the text widget `WBP_NucleusText`) and Lua (bootstrap, `connect`, logging).
 
 Spec, API contract and stories: `_bmad-output/specs/spec-core-v0/` in the workspace repo (they still say `NNCore`, the old working name).
 
@@ -54,15 +54,29 @@ The name is `mod.json` `name` (and `id`, its lowercase form). Change it there an
 
 | Part | Where the name comes from |
 |---|---|
-| C++ (`Nucleus_NativeVersion`, `_Ref`, `_Deref`, `_RefFree`, log prefix) | `CORE_NAME` in `native/src/core_config.hpp.in`, filled by CMake from `-DCORE_NAME` (`build.ps1` reads `mod.json`) |
+| C++ (`Nucleus_NativeVersion`, `_ClockMicros`, `_Ref`, `_Deref`, `_RefFree`, log prefix) | `CORE_NAME` in `native/src/core_config.hpp.in`, filled by CMake from `-DCORE_NAME` (`build.ps1` reads `mod.json`) |
 | Blueprint (`/Game/Mods/<name>/ModActor`, `<name>_Call`, `<name>_Abs*`, `WBP_<name>Text`) | the `-CoreName=` argument of the `CoreGen` commandlet (`build.ps1` passes `mod.json` `name`) |
 | Pak (`Content/Paks/LogicMods/<name>.pak`) and install folder (`Mods/<name>/`) | `build.ps1` and `deploy.ps1`, from `mod.json` |
 | Core's Lua (`[<name>]` log prefix, channel path, shared variables `<lowercase>.state`) | the folder it runs from (`Mods/<name>/Scripts/main.lua`) |
-| Lua modules (`<lowercase>.client`, `.log`, `.ref`, `.semver`) | `build.ps1` stages them as `Scripts/<lowercase>/` and writes `Scripts/<lowercase>/version.lua` |
+| Lua modules (`<lowercase>.client`, `.clock`, `.log`, `.ref`, `.semver`) | `build.ps1` stages them as `Scripts/<lowercase>/` and writes `Scripts/<lowercase>/version.lua` |
 | Test dependent (`<name>SkelTest`) | `deploy.ps1` installs `test/SkelTest` as `Mods/<name>SkelTest`; the test reads the name from that folder |
 | `run.ps1`, `check.ps1`, log folder `dumps/<copy>/<lowercase>/` | `mod.json` |
 
 Generic names that don't carry core's name, and so never change: the CMake target `CoreNative`, the Unreal module and commandlet `CoreGen`, the Unreal project `NuclearNightmare`. Real dependents keep their own `CORE` constant in their bootstrap and must update it.
+
+## Natives
+
+Registered into every Lua mod's state before its `main.lua` runs (names from `CORE_NAME`):
+
+| Native | Returns | Threads |
+|---|---|---|
+| `Nucleus_NativeVersion()` | core's version, the UE4SS build it was built for (two strings) | any |
+| `Nucleus_ClockMicros()` | microseconds from a monotonic clock (`QueryPerformanceCounter`), a Lua integer. The epoch is arbitrary: only the difference between two calls means anything. No allocation, lock or logging; wrapped as `<lowercase>.clock` `micros()` and `core.clock.micros()` in the `connect` API | any, also during `main.lua` |
+| `Nucleus_Ref(address)` | a weak handle (integer) to the live UObject at `address` | game thread |
+| `Nucleus_Deref(handle)` | the object, or `nil` once it is gone | game thread |
+| `Nucleus_RefFree(handle)` | nothing; idempotent | any |
+
+Natives that take no arguments refuse any (`<fn>: expected 0 arguments, got N`).
 
 ## Native hardening
 
