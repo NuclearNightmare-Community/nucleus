@@ -8,16 +8,19 @@
   Refuses unless the installed UE4SS.dll is byte-identical to the pinned zip's, and BPModLoaderMod is present.
   -Test also installs the walking-skeleton test dependent (test/SkelTest, installed as Mods/<name>SkelTest) above Keybinds.
   -Scenario breaks one part on purpose: skeleton (all parts), no-native (no dlls/main.dll), no-pak (no LogicMods pak);
-  bad-input installs all parts like skeleton. The scenario goes to the test dependent's Scripts/scenario.txt.
+  bad-input and manual install all parts like skeleton. The scenario goes to the test dependent's Scripts/scenario.txt.
+  manual is for hand testing: the test dependent never travels or presses keys, and keeps a text widget in the live
+  HUD's top-right corner (README.md, "Hand testing").
   Pass the main checkout's instance path when running from a worktree.
 .EXAMPLE
   ./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.0-build26022182 -Test
+  ./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.0-build26022182 -Test -Scenario manual
   ./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.0-build26022182 -Remove
 #>
 param(
     [Parameter(Mandatory)] [string] $Instance,
     [switch] $Test,
-    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input')]
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'manual')]
     [string] $Scenario = 'skeleton',
     [switch] $Remove
 )

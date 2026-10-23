@@ -22,6 +22,31 @@ $inst = 'C:\...\nuclear-nightmare\game-instances\v8.0-build26022182'   # absolut
 | `no-native` | no `main.dll`: one error line from core, one from the dependent |
 | `no-pak` | no LogicMods pak: one `MISSING` line, the dependent gives up |
 | `bad-input` | every native and the channel called with bad values, on and off the game thread; each case logs `OK CASE <id> ...` |
+| `manual` | for hand testing (below), not for `run.ps1`: `check.ps1` only checks that nothing broke |
+
+## Hand testing
+
+The `manual` scenario is for playing the game yourself with core and the test dependent installed. The test dependent never travels, presses keys or runs timed checks, and never logs `FAIL` for anything you do. It connects to core (`CONNECT ok`, or one line saying why it can't) and keeps a `Nucleus manual: <n>` label in the top-right corner of the HUD, attaching it again whenever the game rebuilds or replaces the HUD: first match, back to the menu, new match, death and revive. `n` counts the attaches. Each attach logs one `ATTACH` line with the HUD, whether it is visible (the menu and the lobby hide it; that's expected) and the label's rectangle. While the HUD is visible, it also logs an experimental `OVERLAP` report about 1 s and 4 s after an attach: every drawn widget whose on-screen rectangle intersects the label's (`OVERLAP none (...)` when nothing does), plus `OVERLAP near` lines for the other drawn widgets in the screen's top-right quarter.
+
+```powershell
+cd <workspace>\mods\Nucleus
+$inst = '<workspace>\game-instances\v8.0-build26022182'
+./build.ps1                                     # once, if build/package/ is missing or out of date
+./deploy.ps1 -Instance $inst -Test -Scenario manual
+..\..\tools\launch.ps1 -Instance $inst          # play; quit the game when done
+./check.ps1 -Instance $inst -Scenario manual    # nothing broke: no errors, CONNECT ok, at least one ATTACH
+./deploy.ps1 -Instance $inst -Remove            # take core and the test dependent out again
+```
+
+The log is `ue4ss\UE4SS.log` in the copy's `NuclearNightmare\Binaries\Win64`, and every launch overwrites it. Save a copy before launching again, and check the copy:
+
+```powershell
+$log = "$inst\NuclearNightmare\Binaries\Win64\ue4ss\UE4SS.log"
+Copy-Item $log "..\..\dumps\v8.0-build26022182\nucleus\manual-$(Get-Date -Format yyyyMMdd-HHmm).log"
+./check.ps1 -Log "..\..\dumps\v8.0-build26022182\nucleus\manual-<stamp>.log" -Scenario manual
+```
+
+`run.ps1` doesn't take `manual`: it waits for an end the manual test never reaches.
 
 ## Renaming
 

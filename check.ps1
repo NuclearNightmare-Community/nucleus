@@ -4,17 +4,19 @@
 .DESCRIPTION
   Prints core's, the test dependent's and UE4SS's relevant lines, then checks the patterns the scenario needs.
   A pattern must match somewhere; "!pattern" must match nowhere; "#N|pattern" must match exactly N lines;
-  "?pattern" is a soft check: reported as "warn:" when it does not match, without failing the run.
+  "?pattern" is a soft check: reported as "warn:" when it does not match, without failing the run; "?!pattern" is a soft
+  check that it matches nowhere.
   Exit code 1 when any check fails; otherwise prints "All checks passed."
   Core's name, the test dependent's name (<name>SkelTest) and the version come from mod.json.
 .EXAMPLE
   ./check.ps1 -Log C:\...\nuclear-nightmare\dumps\v8.0-build26022182\nucleus\skeleton.log -Scenario skeleton
   ./check.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.0-build26022182 -Scenario bad-input
+  ./check.ps1 -Log C:\...\my-hand-test.log -Scenario manual
 #>
 param(
     [string] $Instance,
     [string] $Log,
-    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input')]
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'manual')]
     [string] $Scenario = 'skeleton'
 )
 $manifest = Get-Content (Join-Path $PSScriptRoot 'mod.json') -Raw | ConvertFrom-Json
@@ -89,8 +91,20 @@ foreach ($p in 'menu1', 'match1') {
         $badInput += "\[$T\] OK CASE $p\.$id "
     }
 }
+# Hand testing: only that nothing broke. What the player did (where they went, whether the HUD showed) is not judged;
+# the manual test's own caught errors are soft (warn) checks.
+$manual = @(
+    "\[$T\] SCENARIO manual "
+    "\[$T\] CONNECT ok $N $Ver "
+    "\[$T\] ATTACH 1 "
+    "!\[$T\] FAIL "
+    "!\[$T\] ERROR"
+    "!\[$N\] ERROR"
+    "?!\[$T\] WARN manual "
+)
 $expect = @{
     'skeleton'  = $skeleton
+    'manual'    = $manual
     'bad-input' = $badInput
     'no-native' = @(
         "#1|\[$N\] "
@@ -118,6 +132,9 @@ foreach ($pattern in ($always + $expect[$Scenario])) {
         $hits = @($lines | Where-Object { $_ -match $p }).Count
         $ok = $hits -eq [int]$count
         $label = "$pattern (found $hits)"
+    } elseif ($pattern.StartsWith('?!')) {
+        if ($lines | Where-Object { $_ -match $pattern.Substring(2) }) { Write-Host "warn: $pattern"; $warned++ } else { Write-Host "ok:   $pattern" }
+        continue
     } elseif ($pattern.StartsWith('?')) {
         if ($lines | Where-Object { $_ -match $pattern.Substring(1) }) { Write-Host "ok:   $pattern" } else { Write-Host "warn: $pattern"; $warned++ }
         continue

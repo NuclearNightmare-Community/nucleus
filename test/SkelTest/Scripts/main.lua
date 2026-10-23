@@ -9,6 +9,10 @@
 --            each match it also times <Core>_Ref.
 -- bad-input: menu -> SmallMap?listen; calls every public native and the channel with bad values (bad-input cases
 --            below), on and off the game thread, and checks each answer against the contract.
+-- manual:    for hand testing. Never travels, requests keys, runs timed checks or logs FAIL. Keeps a
+--            "<Core> manual: <n>" text widget in the top-right corner of the live HUD's canvas, attaching again
+--            whenever the HUD is rebuilt, replaced or put back in the viewport (n counts attaches), and logs an
+--            experimental report of the drawn widgets its on-screen rectangle overlaps.
 -- Keys it can't press itself (Enter for touchdown) go to run.ps1 through request.txt / done.txt next to this file.
 -- Never keeps a UObject across steps: only paths, addresses (as integers, never dereferenced) and weak handles.
 local scriptDir = debug.getinfo(1, "S").source:gsub("^@", ""):match("^(.*)[/\\]")
@@ -42,7 +46,7 @@ package.path = package.path .. ";" .. mods .. "/" .. CORE .. "/Scripts/?.lua"
 local okReq, client = pcall(require, CORE:lower() .. ".client")
 if not okReq then
     say("%s is not installed. %s will not run. (%s)", CORE, ME, tostring(client))
-    say("END result=FAIL failures=1 reason=import")
+    if SCENARIO ~= "manual" then say("END result=FAIL failures=1 reason=import") end
     return
 end
 
@@ -586,10 +590,318 @@ local function tick()
     busy = false
 end
 
+-- ---------------------------------------------------------------- manual (hand testing)
+-- Polls on the game thread every 500 ms. Between ticks it keeps only strings and numbers (paths, counters) and the
+-- widget's weak handle; every UObject is re-found inside the tick that uses it. Nothing here travels, presses keys,
+-- waits with a deadline or logs FAIL: what the player does is only reported. Every error is caught and logged once
+-- per context as "WARN manual <context>: ...".
+local MANUAL_TICK_MS = 500
+local OVERLAP_CAP = 2000      -- widgets visited per overlap check
+local OVERLAP_LINES = 40      -- overlapping widgets logged per check
+local NEAR_LINES = 10         -- other drawn widgets in the screen's top-right quarter logged per check
+local REPORT_TICKS = { { 2, "+1s" }, { 8, "+4s" } } -- overlap reports after an attach (or the HUD showing)
+local VIS = { [0] = "Visible", [1] = "Collapsed", [2] = "Hidden", [3] = "HitTestInvisible", [4] = "SelfHitTestInvisible" }
+-- Widget classes that draw something themselves; containers (CanvasPanel, Overlay, SizeBox, ...) draw nothing.
+local DRAWN = { "Image", "TextBlock", "RichTextBlock", "ProgressBar", "Border", "Button", "CheckBox", "EditableText",
+    "EditableTextBox", "MultiLineEditableText", "MultiLineEditableTextBox", "Slider", "SpinBox", "Throbber",
+    "CircularThrobber", "ComboBoxString", "ComboBoxKey" }
+local MANUAL_PREFIX = CORE .. " manual: "
+
+local M = { count = 0, tick = 0, warned = {}, reports = {} }
+
+local function warnOnce(context, err)
+    if M.warned[context] then return end
+    M.warned[context] = true
+    say("WARN manual %s: %s (further warnings for this are not logged)", context, firstLine(err))
+end
+
+local function hudVis(hud)
+    local vis = tonumber(hud:GetVisibility()) or -1
+    return vis, not (vis == 1 or vis == 2)
+end
+
+local function isOurs(w)
+    if not valid(w) then return false end
+    if M.widgetPath and pathOf(w) == M.widgetPath then return true end
+    -- Also one left by an earlier Lua state of this mod (hot reload): our class and our text.
+    if w:GetClass():GetFName():ToString() ~= "WBP_" .. CORE .. "Text_C" then return false end
+    local ok, t = pcall(function() return w.Text:GetText():ToString() end)
+    return ok and type(t) == "string" and t:sub(1, #MANUAL_PREFIX) == MANUAL_PREFIX
+end
+
+-- Our widget among the canvas's direct children (the first one) and how many of ours there are.
+local function oursIn(canvas)
+    local first, n = nil, 0
+    for i = 0, canvas:GetChildrenCount() - 1 do
+        local c = canvas:GetChildAt(i)
+        if isOurs(c) then n = n + 1; first = first or c end
+    end
+    return first, n
+end
+
+-- The widget's rectangle in canvas space, computed like the skeleton's CORNER check.
+local function cornerRect(w, hud)
+    local slot = w.Slot
+    local an, al, pos = slot:GetAnchors(), slot:GetAlignment(), slot:GetPosition()
+    local ds = w:GetDesiredSize()
+    local world = hud:GetWorld()
+    local vp, scale = WLL():GetViewportSize(world), WLL():GetViewportScale(world)
+    local cw, ch = vp.X / scale, vp.Y / scale
+    local left = an.Minimum.X * cw + pos.X - al.X * ds.X
+    local top = an.Minimum.Y * ch + pos.Y - al.Y * ds.Y
+    return string.format("rect=(%.1f,%.1f)-(%.1f,%.1f) desired=(%.1fx%.1f) gapRight=%.1f gapTop=%.1f canvas=(%.0fx%.0f) dpi=%.3f",
+        left, top, left + ds.X, top + ds.Y, ds.X, ds.Y, cw - (left + ds.X), top, cw, ch, scale)
+end
+
+local function scheduleReports(what)
+    local list = {}
+    for _, r in ipairs(REPORT_TICKS) do list[#list + 1] = { at = M.tick + r[1], label = what .. " " .. r[2] } end
+    return list
+end
+
+local function attach(hud, nLive, reason)
+    local canvas = hud.OwningCanvas
+    if not valid(canvas) then warnOnce("attach", "the HUD has no OwningCanvas: " .. pathOf(hud)) return end
+    local w, mine = oursIn(canvas)
+    local how = "reused"
+    if not w then
+        local cls = textClass()
+        if not cls then warnOnce("attach", "text widget class not found: " .. TEXT_CLASS) return end
+        local owner = hud:GetOwningPlayer()
+        if not valid(owner) then owner = pc() end
+        if not valid(owner) then return end -- between worlds; the next tick tries again
+        w = WBL():Create(hud:GetWorld(), cls, owner)
+        if not valid(w) then warnOnce("attach", "creating the text widget failed") return end
+        canvas:AddChildToCanvas(w)
+        how, mine = "created", 1
+    end
+    local slot = w.Slot
+    slot:SetAutoSize(true)
+    slot:SetAnchors({ Minimum = { X = 1, Y = 0 }, Maximum = { X = 1, Y = 0 } })
+    slot:SetAlignment({ X = 1, Y = 0 })
+    slot:SetPosition({ X = -MARGIN, Y = MARGIN })
+    M.count = M.count + 1
+    w:SetText(MANUAL_PREFIX .. M.count)
+    pcall(function() w:ForceLayoutPrepass() end) -- so the desired size is measured before the first paint
+    local path = pathOf(w)
+    if path ~= M.widgetPath then
+        local okF, errF = pcall(core.free, M.handle)
+        if not okF then warnOnce("free", errF) end
+        M.handle, M.widgetPath = core.ref(w), path
+    end
+    M.hudPath, M.lastHudPath = pathOf(hud), pathOf(hud)
+    local vis, shown = hudVis(hud)
+    M.hudShown = shown
+    local okR, rect = pcall(cornerRect, w, hud)
+    say("ATTACH %d %s widget=%s hud=%s hudVisible=%s visibility=%s liveHuds=%d oursInCanvas=%d %s world=%s reason=%s",
+        M.count, how, path, M.hudPath, tostring(shown), VIS[vis] or tostring(vis), nLive, mine,
+        okR and rect or ("rect=? (" .. firstLine(rect) .. ")"), worldName():match("/Game/[^ ]+") or "?", reason)
+    M.reports = shown and scheduleReports("attach " .. M.count) or {}
+end
+
+-- ---- experimental overlap report
+local function absRect(cdo, w)
+    local tl = cdo[CORE .. "_AbsTopLeft"](cdo, w)
+    local br = cdo[CORE .. "_AbsBottomRight"](cdo, w)
+    return { l = tl.X, t = tl.Y, r = br.X, b = br.Y }
+end
+local function rectStr(r) return string.format("(%.0f,%.0f)-(%.0f,%.0f)", r.l, r.t, r.r, r.b) end
+local function hasArea(r) return r.r > r.l and r.b > r.t end
+local function intersects(a, b) return math.min(a.r, b.r) > math.max(a.l, b.l) and math.min(a.b, b.b) > math.max(a.t, b.t) end
+
+local function drawsSomething(w, kind)
+    local ok, yes = pcall(function()
+        if kind == "Border" then return tonumber(w.Background.DrawAs) ~= 0 and w.BrushColor.A > 0 end
+        if kind == "Image" then return tonumber(w.Brush.DrawAs) ~= 0 and w.ColorAndOpacity.A > 0 end
+        if kind == "TextBlock" then return w:GetText():ToString() ~= "" end
+        return true
+    end)
+    return not ok or yes -- when in doubt, report it
+end
+
+-- Top-level viewport widgets other than the HUD: WidgetBlueprintLibrary.GetAllWidgetsOfClass (TopLevelOnly) when
+-- UE4SS hands its out array back, otherwise every UserWidget FindAllOf returns that is in the viewport.
+-- Returns the count and the method used.
+local function topLevelWidgets(world, uwClass, push)
+    local n = 0
+    local function take(x)
+        if type(x) ~= "userdata" then return end
+        -- Array elements may come back wrapped (a RemoteUnrealParam with get()) instead of as the UObject itself.
+        if x.IsValid == nil and x.get ~= nil then x = x:get() end
+        if valid(x) and pathOf(x) ~= M.hudPath then n = n + 1; push(x) end
+    end
+    local ok, err = pcall(function()
+        local out = {}
+        WBL():GetAllWidgetsOfClass(world, out, uwClass, true)
+        local arr = out.FoundWidgets
+        if arr == nil and out[1] ~= nil then arr = out end
+        if arr == nil then
+            local keys = {}
+            for k, v in pairs(out) do keys[#keys + 1] = tostring(k) .. "=" .. type(v) if #keys >= 8 then break end end
+            error("no FoundWidgets in the out table (keys: " .. (#keys > 0 and table.concat(keys, ", ") or "none") .. ")")
+        end
+        if type(arr) == "table" then
+            for _, x in ipairs(arr) do take(x) end
+        else
+            arr:ForEach(function(_, e) take(e:get()) end)
+        end
+    end)
+    if ok then return n, "GetAllWidgetsOfClass" end
+    warnOnce("overlap GetAllWidgetsOfClass", err)
+    n = 0
+    for _, x in ipairs(FindAllOf("UserWidget") or {}) do
+        if valid(x) and x:IsInViewport() then take(x) end
+    end
+    return n, "FindAllOf(UserWidget) in viewport"
+end
+
+local function overlapReport(label)
+    local hud = found(M.hudPath)
+    if not hud then say("OVERLAP skipped (%s): the HUD is gone", label) return end
+    local _, shown = hudVis(hud)
+    if not shown then say("OVERLAP skipped (%s): the HUD is hidden", label) return end
+    local ours = core.deref(M.handle)
+    if not ours then say("OVERLAP skipped (%s): our widget is gone", label) return end
+    local cdo = found(ACTOR_CDO)
+    if not cdo then warnOnce("overlap", "core's ModActor class default object not found: " .. ACTOR_CDO) return end
+    local mine = absRect(cdo, ours)
+    if not hasArea(mine) then say("OVERLAP skipped (%s): our widget has no on-screen geometry yet %s", label, rectStr(mine)) return end
+    local screen = absRect(cdo, hud.OwningCanvas)
+    local sw, sh = screen.r - screen.l, screen.b - screen.t
+
+    local classes = {}
+    for _, n in ipairs(DRAWN) do
+        local c = found("/Script/UMG." .. n)
+        if c then classes[#classes + 1] = { name = n, cls = c } end
+    end
+    local UW, PANEL, SWITCH = found("/Script/UMG.UserWidget"), found("/Script/UMG.PanelWidget"), found("/Script/UMG.WidgetSwitcher")
+
+    local stack = { hud.OwningCanvas }
+    local function push(x) stack[#stack + 1] = x end
+    local okT, tops, via = pcall(topLevelWidgets, hud:GetWorld(), UW, push)
+    if not okT then warnOnce("overlap top-level widgets", tops); tops, via = "?", "failed" end
+
+    -- drawn: drawn widgets with an on-screen rectangle; quadrant: those of them in the screen's top-right quarter.
+    local seen, visited, hits, full, errors, drawn, quadrant, near = {}, 0, {}, 0, 0, 0, 0, {}
+    local topRight = { l = screen.l + sw / 2, t = screen.t, r = screen.r, b = screen.t + sh / 2 }
+    local function visit(x)
+        if not valid(x) then return end
+        local p = pathOf(x)
+        if seen[p] or p == M.widgetPath then return end -- our widget and everything inside it are skipped
+        seen[p] = true
+        local vis = tonumber(x:GetVisibility())
+        if vis == 1 or vis == 2 or x:GetRenderOpacity() <= 0 then return end -- not drawn, nor anything inside
+        local kind
+        for _, c in ipairs(classes) do if x:IsA(c.cls) then kind = c.name break end end
+        if kind and drawsSomething(x, kind) then
+            local r = absRect(cdo, x)
+            if hasArea(r) then
+                drawn = drawn + 1
+                if intersects(r, topRight) then quadrant = quadrant + 1 end
+            end
+            local isFull = r.r - r.l >= 0.9 * sw and r.b - r.t >= 0.9 * sh
+            local entry = { path = p, cls = x:GetClass():GetFName():ToString(), rect = r, vis = VIS[vis] or tostring(vis) }
+            if hasArea(r) and intersects(r, mine) then
+                if isFull then full = full + 1 else hits[#hits + 1] = entry end
+            elseif hasArea(r) and not isFull and intersects(r, topRight) then
+                near[#near + 1] = entry
+            end
+        end
+        if UW and x:IsA(UW) then
+            local tree = x.WidgetTree
+            if valid(tree) then push(tree.RootWidget) end
+        elseif SWITCH and x:IsA(SWITCH) then
+            push(x:GetActiveWidget())
+        elseif PANEL and x:IsA(PANEL) then
+            for i = x:GetChildrenCount() - 1, 0, -1 do push(x:GetChildAt(i)) end
+        end
+    end
+    while #stack > 0 and visited < OVERLAP_CAP do
+        local x = table.remove(stack)
+        visited = visited + 1
+        local ok, err = pcall(visit, x)
+        if not ok then errors = errors + 1; warnOnce("overlap visit", err) end
+    end
+
+    say("OVERLAP check (%s) ours=%s screen=(%.0fx%.0f) roots=HUD canvas + %s top-level widget(s) via %s", label, rectStr(mine), sw, sh, tostring(tops), tostring(via))
+    for i = 1, math.min(#hits, OVERLAP_LINES) do
+        local h = hits[i]
+        say("OVERLAP %s class=%s rect=%s visibility=%s", h.path, h.cls, rectStr(h.rect), h.vis)
+    end
+    -- Context, not overlaps: the other drawn widgets in the screen's top-right quarter (short names).
+    for i = 1, math.min(#near, NEAR_LINES) do
+        local h = near[i]
+        say("OVERLAP near %s class=%s rect=%s visibility=%s", h.path:match("[^%.:]+$") or h.path, h.cls, rectStr(h.rect), h.vis)
+    end
+    local extra = string.format(", %d drawn on screen, %d of them in the top-right quarter%s%s%s%s", drawn, quadrant,
+        full > 0 and (", " .. full .. " full-screen skipped") or "",
+        errors > 0 and (", " .. errors .. " error(s)") or "",
+        #stack > 0 and (", capped at " .. OVERLAP_CAP) or "",
+        #hits > OVERLAP_LINES and (", only " .. OVERLAP_LINES .. " listed") or "")
+    if #hits == 0 then say("OVERLAP none (checked %d widgets%s; %s)", visited, extra, label)
+    else say("OVERLAP found %d (checked %d widgets%s; %s)", #hits, visited, extra, label) end
+end
+
+local function manualTick()
+    M.tick = M.tick + 1
+    local hud, nLive = liveHud()
+    if not hud then
+        if M.hudPath then say("HUD gone from the viewport (was %s); waiting for a live HUD", M.hudPath) end
+        M.hudPath, M.cand, M.reports = nil, nil, {}
+        return
+    end
+    local path = pathOf(hud)
+    if path ~= M.hudPath then
+        -- A new, replaced or returning HUD: attach on the second tick that sees it, so a HUD the game replaces
+        -- right away is skipped.
+        if M.cand ~= path then M.cand = path return end
+        M.cand = nil
+        local reason = (M.hudPath and ("HUD replaced (was " .. M.hudPath .. ")"))
+            or (path == M.lastHudPath and "HUD back in the viewport") or "HUD appeared"
+        attach(hud, nLive, reason)
+        return
+    end
+    M.cand = nil
+    local canvas = hud.OwningCanvas
+    if valid(canvas) and not oursIn(canvas) then attach(hud, nLive, "our widget left the HUD canvas") return end
+    local vis, shown = hudVis(hud)
+    if shown ~= M.hudShown then
+        M.hudShown = shown
+        say("HUD %s now (visibility=%s, %s, attach %d)", shown and "visible" or "hidden", VIS[vis] or tostring(vis), path, M.count)
+        M.reports = shown and scheduleReports("shown at attach " .. M.count) or {}
+    end
+    for i = #M.reports, 1, -1 do
+        local r = M.reports[i]
+        if M.tick >= r.at then
+            table.remove(M.reports, i)
+            local ok, err = pcall(overlapReport, r.label)
+            if not ok then warnOnce("overlap", err) end
+        end
+    end
+end
+
+local function startManual()
+    say("MANUAL hand-testing mode: no travel, no keys, no timed checks; keeps '%s<n>' in the live HUD's top-right corner", MANUAL_PREFIX)
+    local queued = false
+    LoopAsync(MANUAL_TICK_MS, function()
+        if not queued then
+            queued = true
+            local okE, errE = pcall(ExecuteInGameThread, function()
+                local ok, err = pcall(manualTick)
+                if not ok then warnOnce("tick", err) end
+                queued = false
+            end)
+            if not okE then queued = false; warnOnce("scheduling", errE) end
+        end
+        return false
+    end)
+end
+
 client.connect{
     mod = ME, need = NEED,
     onReady = function(api)
         core = api
+        if SCENARIO == "manual" then startManual() return end
         if SCENARIO == "bad-input" then buildBadInput() else buildSkeleton() end
         LoopAsync(250, function()
             ExecuteInGameThread(tick)
@@ -597,7 +909,8 @@ client.connect{
         end)
     end,
     onFail = function(msg)
-        say("END result=FAIL checks=0 failures=1 reason=connect")
+        -- client.connect has already logged the one-line reason.
+        if SCENARIO ~= "manual" then say("END result=FAIL checks=0 failures=1 reason=connect") end
     end,
 }
 say("LOADED main.lua done; waiting for connect")
