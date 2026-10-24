@@ -13,11 +13,12 @@
 #>
 param(
     [Parameter(Mandatory)] [string] $Instance,
-    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input')]
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui')]
     [string] $Scenario = 'skeleton',
-    [int] $TimeoutSec = 420
+    [int] $TimeoutSec = 0  # 0: 420 s, or 900 s for ui (it travels four times and waits for layout)
 )
 $ErrorActionPreference = 'Stop'
+if ($TimeoutSec -le 0) { $TimeoutSec = if ($Scenario -eq 'ui') { 900 } else { 420 } }
 $here     = $PSScriptRoot
 $name     = (Get-Content (Join-Path $here 'mod.json') -Raw | ConvertFrom-Json).name
 $testName = "${name}SkelTest"

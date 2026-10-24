@@ -12,11 +12,12 @@
   ./check.ps1 -Log C:\...\nuclear-nightmare\dumps\v8.0-build26022182\nucleus\skeleton.log -Scenario skeleton
   ./check.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.0-build26022182 -Scenario bad-input
   ./check.ps1 -Log C:\...\my-hand-test.log -Scenario manual
+  ./check.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.0-build26022182 -Scenario ui
 #>
 param(
     [string] $Instance,
     [string] $Log,
-    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'manual')]
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'manual')]
     [string] $Scenario = 'skeleton'
 )
 $manifest = Get-Content (Join-Path $PSScriptRoot 'mod.json') -Raw | ConvertFrom-Json
@@ -61,6 +62,10 @@ $started = @(
     "!\[$N\] ERROR"
 )
 $skeleton = $started + @("\[$T\] SCENARIO skeleton ", "\[$T\] END result=PASS")
+# Story 8 AC 11: the Border around the text (alpha 0, padding 0) must not change the unstyled size. 283.8x29.2 canvas
+# units is what "Nucleus skeleton: match1" measured with the bare TextBlock (V8.0, 2026-10-23); soft, since another
+# core name or font changes it.
+$skeleton += "?\[$T\] GEOM match1 .* desired=\(283\.8x29\.2\)"
 foreach ($p in 'menu1', 'match1', 'menu2', 'match2') {
     $skeleton += "\[$T\] OK REFIND $p widget by handle -> .*WBP_${N}Text_C"
     $skeleton += "\[$T\] OK PARENT $p widget is in the live HUD canvas \(.*InventoryUI_C.*OwningCanvas\)"
@@ -95,12 +100,89 @@ foreach ($p in 'menu1', 'match1') {
         $badInput += "\[$T\] OK CASE $p\.$id "
     }
 }
+# The UI helpers' cases (stories 7-10), in both worlds, and the calls made before connect.
+foreach ($p in 'menu1', 'match1') {
+    foreach ($id in 'ui-watch-nil', 'ui-watch-str', 'ui-watch-two', 'ui-unwatch-str', 'ui-unwatch-float', 'ui-unwatch-unknown', 'ui-find-arg',
+                    'ui-find-ok', 'ui-isvisible-arg', 'ui-watch-ok', 'ui-elements-ok', 'ui-elements-arg', 'ui-create-none', 'ui-create-noid',
+                    'ui-create-emptyid', 'ui-create-numid', 'ui-create-65', 'ui-create-space', 'ui-create-text-table', 'ui-create-text-bool',
+                    'ui-create-text-func', 'ui-create-place-str', 'ui-create-unknown', 'ui-style-str', 'ui-style-purple', 'ui-style-r-neg',
+                    'ui-style-r-2', 'ui-style-r-str', 'ui-style-pad5', 'ui-style-bg', 'ui-create-ok', 'ui-create-64', 'ui-create-num',
+                    'ui-handle-write', 'ui-set-text-table', 'ui-setvis-none', 'ui-setvis-yes', 'ui-setvis-1', 'ui-set-h-forged',
+                    'ui-setvis-h-table', 'ui-remove-h-nil', 'ui-isshown-h-num', 'ui-place-h-str', 'ui-place-str', 'ui-place-empty',
+                    'ui-place-corner-abs', 'ui-place-typo', 'ui-place-corner-bad', 'ui-place-gap-bad', 'ui-place-off-a', 'ui-place-off-huge',
+                    'ui-place-off-nan', 'ui-place-off-5000', 'ui-place-off-key', 'ui-place-off-max', 'ui-place-near-mic', 'ui-place-abs-str',
+                    'ui-place-abs-anchor', 'ui-place-abs-9000', 'ui-place-abs-offset', 'ui-place-abs-ok', 'ui-remove-ok', 'ui-remove-again',
+                    'ui-removed-set', 'ui-removed-isshown', 'ui-removed-setvis', 'ui-removed-place', 'ui-recreate', 'ui-stats', 'ui-hud-stats',
+                    'off-ui-create', 'off-ui-set', 'off-ui-setstyle', 'off-ui-setvis', 'off-ui-remove', 'off-ui-isshown', 'off-ui-place',
+                    'off-ui-elements', 'off-ui-find', 'off-ui-watch', 'off-ui-unwatch', 'off-ui-isvisible', 'off-ui-after') {
+        $badInput += "\[$T\] OK CASE $p\.$id "
+    }
+}
+foreach ($id in 'pre-create', 'pre-watch', 'pre-find', 'pre-elements') { $badInput += "\[$T\] OK CASE $id " }
+$badInput += "\[$T\] OK CASES before-connect recorded=4"
+# UI helpers in game (stories 7-10): what run.ps1 -Scenario ui proves unattended. END result=PASS already means every
+# check the test made passed; these name the ones the stories' acceptance criteria rest on, plus core's own lines.
+$ui = $started + @(
+    "\[$T\] SCENARIO ui "
+    "\[$T\] END result=PASS"
+    "#1|\[$T\] hud seed FindAllOf\(InventoryUI_C\) call 1 "
+    "!\[$T\] hud seed FindAllOf\(InventoryUI_C\) call [2-9]"
+    "\[$T\] OK UIFINDALL match2 FindAllOf ran 1 time"
+    "\[$T\] ui attach 'pre' created "
+    "\[$T\] ui attach 'pre' reused .*\(HUD back in the viewport\)"
+    "\[$T\] EVENT \d+ attached reason=HUD appeared"
+    "\[$T\] EVENT \d+ shown "
+    "\[$T\] EVENT \d+ lost reason=HUD gone from the viewport"
+    "\[$T\] EVENT \d+ attached reason=HUD back in the viewport"
+    "#1|\[$T\] WARN hud watcher \d+: "
+    "#1|\[$T\] WARN text 'long': text is longer than 256 characters"
+    "!\[$T\] WARN (?!hud watcher \d+: |text 'long': |hud slow tick)"
+    "!\[$T\] ERROR"
+    "\[$T\] DEBUG hud tick n=\d+ "
+    "\[$T\] DEBUG ui 'pre': (widget gone with the HUD; freed handle|new widget .*; freed the handle)"
+    "?!\[$T\] WARN hud slow tick"
+    "?\[$T\] hud tick summary n="
+    "\[$T\] UITICK ticks=\d+ "
+    "\[$T\] OK UIDEREF match1 "
+    "\[$T\] OK UIDEREF menu2 "
+    "\[$T\] OK UITAG match1 "
+    "\[$T\] OK UIVIS match1 "
+    "\[$T\] OK UICORNER match1 'pre' top-right gap=16: "
+    "\[$T\] OK UICORNER match1 'c-tl' top-left gap=8: "
+    "\[$T\] OK UICORNER match1 'c-bl' bottom-left gap=32: "
+    "\[$T\] OK UICORNER match1 'c-br' bottom-right gap=16: "
+    "\[$T\] OK UICORNER match1 'pre' top-right gap=16 offsetX=40: "
+    "\[$T\] OK UICORNER match2 'pre' top-right gap=16: "
+    "\[$T\] OK UISAME match1 one widget"
+    "\[$T\] OK UINOOP match1 a second set"
+    "\[$T\] OK UILONG match1 "
+    "\[$T\] OK UIREMOVE match1 its weak handle was freed"
+    "\[$T\] OK UISTYLE match1 dim/normal is 8 units larger"
+    "\[$T\] OK UISTYLE match1 background none"
+    "\[$T\] OK UIHIDE match1 setVisible\(h, false\)"
+    "\[$T\] OK UIABS match1 absolute centre"
+    "\[$T\] OK UISTACK match1 pre, s1, s2, s3 stack 16 apart"
+    "\[$T\] OK UISTACK match1 an absolute element in top-right moves nothing"
+    "\[$T\] OK UISTACK match1 offset \{ x = -40 \} on s2 moves only s2"
+    "\[$T\] OK UISTACK match1 hiding s2 closes the gap"
+    "\[$T\] OK UISTACK match1 a two-line first element pushes the others down"
+    "\[$T\] OK UISTACK match1 removing s2 closes the gap"
+    "\[$T\] OK UINEAR match1 right of the crosshair, centred"
+    "\[$T\] OK UINEAR match1 HideCrosshair\(true\) collapses the element"
+    "\[$T\] OK UINEAR match1 HideCrosshair\(false\) brings it back"
+    "\[$T\] OK UILATE match1 "
+    "\[$T\] OK UIRAW match1 'pre' reused, not duplicated"
+    "\[$T\] OK UIHID match2 'hid' is still hidden on the new HUD"
+    "\[$T\] OK UIEVENTS "
+    "\[$T\] OK UICLEAN match2 "
+)
 # Hand testing: only that nothing broke. What the player did (where they went, whether the HUD showed) is not judged;
 # the manual test's own caught errors are soft (warn) checks.
 $manual = @(
     "\[$T\] SCENARIO manual "
     "\[$T\] CONNECT ok $N $Ver "
     "\[$T\] ATTACH 1 "
+    "\[$T\] ui attach 'manual' (created|reused) "
     "!\[$T\] FAIL "
     "!\[$T\] ERROR"
     "!\[$N\] ERROR"
@@ -108,6 +190,7 @@ $manual = @(
 )
 $expect = @{
     'skeleton'  = $skeleton
+    'ui'        = $ui
     'manual'    = $manual
     'bad-input' = $badInput
     'no-native' = @(
