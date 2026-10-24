@@ -8,6 +8,12 @@ local semver = require(BASE .. ".semver")
 local logm = require(BASE .. ".log")
 local refm = require(BASE .. ".ref")
 local clockm = require(BASE .. ".clock")
+-- UI helpers (ui-helpers-contract.md). Loading them registers the HUD creation callback (ui/hud.lua) in this Lua state.
+-- A failure here must not stop connect for mods that use no UI: core.ui is then missing and onReady is told why.
+local uiOk, uiErr = pcall(function()
+    return { common = require(BASE .. ".ui.common"), hud = require(BASE .. ".ui.hud"),
+             text = require(BASE .. ".ui.text"), place = require(BASE .. ".ui.place") }
+end)
 
 local NAME, LOWER = V.name, V.name:lower()
 local CLASS = "/Game/Mods/" .. NAME .. "/ModActor.ModActor_C"
@@ -112,6 +118,28 @@ function C.connect(opts)
             ref = refm.ref, deref = refm.deref, free = refm.free,
             clock = clockm,
         }
+        if uiOk then
+            local U = uiErr
+            api.ui = {
+                hud = { find = U.hud.find, watch = U.hud.watch, unwatch = U.hud.unwatch, isVisible = U.hud.isVisible, stats = U.hud.stats },
+                text = { create = U.text.create, set = U.text.set, setStyle = U.text.setStyle, setVisible = U.text.setVisible,
+                         remove = U.text.remove, isShown = U.text.isShown, stats = U.text.stats, tagOf = U.text.tagOf },
+                place = U.place.place,
+                elements = U.place.elements,
+            }
+            -- The UI helpers run in this mod's state with its logger; until now they refuse every call ("before connect").
+            U.common.bind{ mod = mod, log = log, ref = refm.ref, deref = refm.deref, free = refm.free, micros = clockm.micros }
+            -- One timing summary line when this mod unloads, chained in front of any OnUnload already set.
+            pcall(function()
+                local prev = ModRef.OnUnload
+                ModRef.OnUnload = function(...)
+                    pcall(U.hud._summary)
+                    if type(prev) == "function" then return prev(...) end
+                end
+            end)
+        else
+            log.error("%s's UI helpers failed to load (%s); core.ui is not available.", NAME, tostring(uiErr))
+        end
         if opts.onReady then
             local okR, err = pcall(opts.onReady, api)
             if not okR then log.error("onReady threw: %s", tostring(err)) end
