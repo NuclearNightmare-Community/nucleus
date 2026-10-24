@@ -5,6 +5,8 @@
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetBlueprintGeneratedClass.h"
 #include "Blueprint/WidgetTree.h"
+#include "Components/Border.h"
+#include "Components/BorderSlot.h"
 #include "Components/TextBlock.h"
 #include "Components/Widget.h"
 #include "EdGraphSchema_K2.h"
@@ -14,7 +16,9 @@
 #include "K2Node_CallFunction.h"
 #include "K2Node_FunctionEntry.h"
 #include "K2Node_FunctionResult.h"
+#include "K2Node_MakeStruct.h"
 #include "K2Node_VariableGet.h"
+#include "Kismet/KismetMathLibrary.h"
 #include "Kismet/KismetStringLibrary.h"
 #include "Kismet/KismetTextLibrary.h"
 #include "Kismet2/BlueprintEditorUtils.h"
@@ -41,6 +45,13 @@ namespace
 		return T;
 	}
 	FEdGraphPinType StrT() { return PinType(UEdGraphSchema_K2::PC_String); }
+	/** A Blueprint "Float" (UE5: real, double precision); Lua numbers pass straight in. */
+	FEdGraphPinType RealT()
+	{
+		FEdGraphPinType T = PinType(UEdGraphSchema_K2::PC_Real);
+		T.PinSubCategory = UEdGraphSchema_K2::PC_Double;
+		return T;
+	}
 	FEdGraphPinType Vec2T() { return PinType(UEdGraphSchema_K2::PC_Struct, TBaseStructure<FVector2D>::Get()); }
 	FEdGraphPinType ObjT(UClass* C) { return PinType(UEdGraphSchema_K2::PC_Object, C); }
 
@@ -78,6 +89,33 @@ namespace
 			Place(N);
 			C.Finalize();
 			return N;
+		}
+
+		/** A Make <Struct> node; its input pins are named after the struct's members. */
+		UK2Node_MakeStruct* MakeStruct(UScriptStruct* Struct)
+		{
+			FGraphNodeCreator<UK2Node_MakeStruct> C(*G);
+			UK2Node_MakeStruct* N = C.CreateNode(false);
+			N->StructType = Struct;
+			Place(N);
+			C.Finalize();
+			return N;
+		}
+
+		/** The node's one data output pin (a Make <Struct> node names it after the struct). */
+		UEdGraphPin* OnlyOutput(UEdGraphNode* N)
+		{
+			UEdGraphPin* Found = nullptr;
+			for (UEdGraphPin* P : N->Pins)
+			{
+				if (P->Direction == EGPD_Output && P->PinType.PinCategory != UEdGraphSchema_K2::PC_Exec)
+				{
+					checkf(!Found, TEXT("More than one output pin on %s"), *N->GetNodeTitle(ENodeTitleType::ListView).ToString());
+					Found = P;
+				}
+			}
+			checkf(Found, TEXT("No output pin on %s"), *N->GetNodeTitle(ENodeTitleType::ListView).ToString());
+			return Found;
 		}
 
 		UEdGraphPin* Pin(UEdGraphNode* N, FName Name)
@@ -198,15 +236,35 @@ namespace
 	}
 
 	/**
-	 * WBP_<Core>Text: one TextBlock "Text" (white, drop shadow, size 18) and SetText(NewText: String).
-	 * Lua creates it, parents it into a game canvas and calls SetText; it carries no logic of its own.
+	 * WBP_<Core>Text: Border "Background" -> TextBlock "Text" (white, drop shadow, size 18), and three functions:
+	 *   SetText(NewText: String)                  Text.SetText(NewText)
+	 *   SetBackground(R, G, B, A: Float)          Background.SetBrushColor((R, G, B, A)); A = 0 shows no box
+	 *   SetBackgroundPadding(Padding: Float)      Background.SetPadding(Padding on all four sides)
+	 * The Border is hit-test invisible and starts at alpha 0 with padding 0, so an unstyled element looks and measures
+	 * exactly like the bare TextBlock it replaces. Lua creates it, parents it into a game canvas and calls these; it
+	 * carries no logic of its own.
+	 *
+	 * Story 8 names the padding function SetPadding. UUserWidget already has a native SetPadding(FMargin) (padding
+	 * outside the root widget), so a Blueprint function of that name would collide with it; it is SetBackgroundPadding.
 	 */
 	UWidgetBlueprint* BuildText(const FString& Dir, const FString& Core)
 	{
 		UWidgetBlueprint* WBP = CastChecked<UWidgetBlueprint>(NewBlueprint(Dir / FString::Printf(TEXT("WBP_%sText"), *Core),
 			UUserWidget::StaticClass(), UWidgetBlueprint::StaticClass(), UWidgetBlueprintGeneratedClass::StaticClass()));
+		for (const TCHAR* Fn : {TEXT("SetText"), TEXT("SetBackground"), TEXT("SetBackgroundPadding")})
+		{
+			// A name the parent class already has would shadow or clash with it: fail loudly here, not in game.
+			checkf(!UUserWidget::StaticClass()->FindFunctionByName(Fn), TEXT("UUserWidget already has a function %s"), Fn);
+		}
 
 		UWidgetTree* T = WBP->WidgetTree;
+		UBorder* Background = T->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Background"));
+		Background->SetBrushColor(FLinearColor(0.f, 0.f, 0.f, 0.f));
+		Background->SetPadding(FMargin(0.f));
+		Background->SetVisibility(ESlateVisibility::HitTestInvisible);
+		Background->bIsVariable = true;
+		T->RootWidget = Background;
+
 		UTextBlock* Text = T->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Text"));
 		Text->SetText(FText::GetEmpty());
 		Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
@@ -215,13 +273,50 @@ namespace
 		FSlateFontInfo Font = Text->GetFont();
 		Font.Size = 18;
 		Text->SetFont(Font);
+		Text->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 		Text->bIsVariable = true;
-		T->RootWidget = Text;
+		UBorderSlot* TextSlot = CastChecked<UBorderSlot>(Background->AddChild(Text));
+		TextSlot->SetPadding(FMargin(0.f));
+		TextSlot->SetHorizontalAlignment(HAlign_Fill);
+		TextSlot->SetVerticalAlignment(VAlign_Fill);
+		WBP->OnVariableAdded(TEXT("Background"));
 		WBP->OnVariableAdded(TEXT("Text"));
 
-		// SetText(NewText): Text.SetText(NewText). Needs the compiled widget variable, so compile first.
+		// The functions need the compiled widget variables, so compile first.
 		FFunc SetText = AddFunction(WBP, TEXT("SetText"), {{TEXT("NewText"), StrT()}}, {});
+		FFunc SetBg = AddFunction(WBP, TEXT("SetBackground"),
+			{{TEXT("R"), RealT()}, {TEXT("G"), RealT()}, {TEXT("B"), RealT()}, {TEXT("A"), RealT()}}, {});
+		FFunc SetPad = AddFunction(WBP, TEXT("SetBackgroundPadding"), {{TEXT("Padding"), RealT()}}, {});
 		if (!Compile(WBP)) return nullptr;
+		{
+			// SetBackground(R, G, B, A): Background.SetBrushColor(MakeColor(R, G, B, A)).
+			FGraph G(WBP, SetBg.G);
+			UK2Node_VariableGet* GetBg = G.Get(TEXT("Background"));
+			UK2Node_CallFunction* Make = G.Call(UKismetMathLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, MakeColor));
+			G.Link(SetBg.Entry, TEXT("R"), Make, TEXT("R"));
+			G.Link(SetBg.Entry, TEXT("G"), Make, TEXT("G"));
+			G.Link(SetBg.Entry, TEXT("B"), Make, TEXT("B"));
+			G.Link(SetBg.Entry, TEXT("A"), Make, TEXT("A"));
+			UK2Node_CallFunction* Set = G.Call(UBorder::StaticClass(), GET_FUNCTION_NAME_CHECKED(UBorder, SetBrushColor));
+			G.Link(GetBg, TEXT("Background"), Set, PN_Self);
+			G.Link(Make, PN_Ret, Set, TEXT("InBrushColor"));
+			G.Chain({SetBg.Entry, Set});
+		}
+		{
+			// SetBackgroundPadding(Padding): Background.SetPadding(Margin(Padding, Padding, Padding, Padding)).
+			FGraph G(WBP, SetPad.G);
+			UK2Node_VariableGet* GetBg = G.Get(TEXT("Background"));
+			UK2Node_MakeStruct* Margin = G.MakeStruct(FMargin::StaticStruct());
+			for (const FName Side : {GET_MEMBER_NAME_CHECKED(FMargin, Left), GET_MEMBER_NAME_CHECKED(FMargin, Top),
+			                         GET_MEMBER_NAME_CHECKED(FMargin, Right), GET_MEMBER_NAME_CHECKED(FMargin, Bottom)})
+			{
+				G.Link(SetPad.Entry, TEXT("Padding"), Margin, Side);
+			}
+			UK2Node_CallFunction* Set = G.Call(UBorder::StaticClass(), GET_FUNCTION_NAME_CHECKED(UBorder, SetPadding));
+			G.Link(GetBg, TEXT("Background"), Set, PN_Self);
+			G.Link(G.OnlyOutput(Margin), G.Pin(Set, TEXT("InPadding")));
+			G.Chain({SetPad.Entry, Set});
+		}
 		{
 			FGraph G(WBP, SetText.G);
 			UK2Node_VariableGet* GetText = G.Get(TEXT("Text"));
