@@ -24,7 +24,7 @@
 local scriptDir = debug.getinfo(1, "S").source:gsub("^@", ""):match("^(.*)[/\\]")
 local ME = scriptDir:match("([^/\\]+)[/\\][Ss]cripts$")
 local CORE = ME:match("^(.-)SkelTest$") -- the one place the core's name comes from: this folder's name
-local NEED = "0.1.0"
+local NEED = "0.2.0"
 
 local function say(fmt, ...) print("[" .. ME .. "] " .. string.format(fmt, ...) .. "\n") end
 
@@ -941,6 +941,7 @@ local function buildUi()
         local hid = uiCreate("hid", { text = "hidden across map changes", place = { corner = "bottom-left" } })
         T().setVisible(hid, false)
         -- The recorder, and a watcher that always throws (story 7 AC 5: logged once, the others still hear).
+        UIS.t0 = os.time() -- the HUD poller (and its one-minute tick window) is running from here at the latest
         UIS.recorder = core.ui.hud.watch(recorder)
         UIS.thrower = core.ui.hud.watch(function() error("test watcher throws on purpose") end)
     end)
@@ -1267,6 +1268,12 @@ local function buildUi()
     touchdown("match2")
     step("match2: shown", function() return function() return T().isShown(UIS.pre) end, 120, "match2 'pre' isShown" end)
     step("match2: settle", function() return afterMs(1500), 3, "settle" end)
+    -- The helpers log their DEBUG tick summary once a minute (check.ps1 requires one), and on V8.1.1 the scenario gets
+    -- here in under a minute; wait in the live match until the first one-minute window has closed.
+    step("match2: one tick summary", function()
+        say("UIWAIT match2 waiting for the first one-minute hud tick summary (%d s since the first watcher)", os.time() - UIS.t0)
+        return function() return os.time() >= UIS.t0 + 63 end, 75, "first hud tick summary window"
+    end)
     step("match2: check", function()
         local _, n = widgetOf("pre")
         check(n == 1, "UIONE match2 'pre' exactly one widget (found %d)", n)

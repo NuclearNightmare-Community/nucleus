@@ -18,6 +18,7 @@ local TICK_MS = 500
 local MAX_PATHS = 16
 local SLOW_US = 1000             -- one tick over this logs a WARN (at most once a minute)
 local MINUTE_US = 60 * 1000000
+local LOST_TICK_S = 3              -- a queued tick that hasn't run after this many seconds is given up and re-queued
 
 -- ---- tracked HUD paths (strings only), oldest first
 local paths = {}                 -- list of path strings
@@ -261,8 +262,15 @@ local function startPoller()
     seed()
     local ok, err = pcall(LoopAsync, TICK_MS, function()
         if gen ~= S.gen then return true end
+        -- Watchdog: UE4SS may never run a queued game-thread callback (seen on V8.1.1 right after another callback
+        -- failed inside UE4SS). Without this, S.queued would stay true and the poller would stop for good.
+        if S.queued and os.time() - (S.queuedAt or 0) >= LOST_TICK_S then
+            S.queued = false
+            S.lostTicks = (S.lostTicks or 0) + 1
+            C.warnOnce("hud lost tick", "hud tick callback still not run %d s after it was queued (a map load, or UE4SS dropped it); queuing another (further ones not logged)", LOST_TICK_S)
+        end
         if not S.queued then
-            S.queued = true
+            S.queued, S.queuedAt = true, os.time()
             local okE, errE = pcall(ExecuteInGameThread, function()
                 if gen == S.gen then
                     local okT, errT = pcall(tick)

@@ -9,10 +9,10 @@
   Exit code 1 when any check fails; otherwise prints "All checks passed."
   Core's name, the test dependent's name (<name>SkelTest) and the version come from mod.json.
 .EXAMPLE
-  ./check.ps1 -Log C:\...\nuclear-nightmare\dumps\v8.0-build26022182\nucleus\skeleton.log -Scenario skeleton
-  ./check.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.0-build26022182 -Scenario bad-input
+  ./check.ps1 -Log C:\...\nuclear-nightmare\dumps\v8.1.1-build26172444\nucleus\skeleton.log -Scenario skeleton
+  ./check.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.1-build26172444 -Scenario bad-input
   ./check.ps1 -Log C:\...\my-hand-test.log -Scenario manual
-  ./check.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.0-build26022182 -Scenario ui
+  ./check.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.1-build26172444 -Scenario ui
 #>
 param(
     [string] $Instance,
@@ -136,11 +136,12 @@ $ui = $started + @(
     "\[$T\] EVENT \d+ attached reason=HUD back in the viewport"
     "#1|\[$T\] WARN hud watcher \d+: "
     "#1|\[$T\] WARN text 'long': text is longer than 256 characters"
-    "!\[$T\] WARN (?!hud watcher \d+: |text 'long': |hud slow tick)"
+    "!\[$T\] WARN (?!hud watcher \d+: |text 'long': |hud slow tick|hud tick callback still not run)"
     "!\[$T\] ERROR"
     "\[$T\] DEBUG hud tick n=\d+ "
     "\[$T\] DEBUG ui 'pre': (widget gone with the HUD; freed handle|new widget .*; freed the handle)"
     "?!\[$T\] WARN hud slow tick"
+    "?!\[$T\] WARN hud tick callback still not run"
     "?\[$T\] hud tick summary n="
     "\[$T\] UITICK ticks=\d+ "
     "\[$T\] OK UIDEREF match1 "
