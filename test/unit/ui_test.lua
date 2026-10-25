@@ -6,7 +6,7 @@
 local ROOT = (arg and arg[0] or ""):match("^(.*)[/\\]test[/\\]unit[/\\][^/\\]+$") or "."
 
 -- ---------------------------------------------------------------- module loading as Mods/Nucleus/Scripts/nucleus/*
-package.preload["nucleus.version"] = function() return { name = "Nucleus", version = "0.1.0" } end
+package.preload["nucleus.version"] = function() return { name = "Nucleus", version = "0.2.0" } end
 table.insert(package.searchers, 2, function(name)
     local rest = name:match("^nucleus%.(.+)$")
     if not rest then return nil end

@@ -9,7 +9,7 @@
   Keeps the log as <workspace>/dumps/<copy>/<name lowercase>/<scenario>.log (ignored by git) and runs check.ps1.
   Steam must be running. Don't type into the game while it runs.
 .EXAMPLE
-  ./run.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.0-build26022182 -Scenario skeleton
+  ./run.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.1-build26172444 -Scenario skeleton
 #>
 param(
     [Parameter(Mandatory)] [string] $Instance,

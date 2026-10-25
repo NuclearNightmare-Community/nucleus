@@ -5,7 +5,7 @@ Core shared library for Nuclear Nightmare mods: a C++ DLL (weak object handles, 
 Spec, API contract and stories: `_bmad-output/specs/spec-core-v0/` in the workspace repo (they still say `NNCore`, the old working name).
 
 ```powershell
-$inst = 'C:\...\nuclear-nightmare\game-instances\v8.0-build26022182'   # absolute, also from a worktree
+$inst = 'C:\...\nuclear-nightmare\game-instances\v8.1.1-build26172444'   # absolute, also from a worktree
 ./build.ps1                                   # native + blueprint + lua + package (needs VS 2026, UE 5.6, ue4ss-src)
 ./deploy.ps1 -Instance $inst                  # core only; -Test adds the test dependent; -Remove takes it all out
 ./run.ps1 -Instance $inst -Scenario skeleton  # unattended in-game run + check.ps1 (also no-native, no-pak, bad-input, ui)
@@ -31,7 +31,7 @@ The `manual` scenario is for playing the game yourself with core and the test de
 
 ```powershell
 cd <workspace>\mods\Nucleus
-$inst = '<workspace>\game-instances\v8.0-build26022182'
+$inst = '<workspace>\game-instances\v8.1.1-build26172444'
 ./build.ps1                                     # once, if build/package/ is missing or out of date
 ./deploy.ps1 -Instance $inst -Test -Scenario manual
 ..\..\tools\launch.ps1 -Instance $inst          # play; quit the game when done
@@ -43,8 +43,8 @@ The log is `ue4ss\UE4SS.log` in the copy's `NuclearNightmare\Binaries\Win64`, an
 
 ```powershell
 $log = "$inst\NuclearNightmare\Binaries\Win64\ue4ss\UE4SS.log"
-Copy-Item $log "..\..\dumps\v8.0-build26022182\nucleus\manual-$(Get-Date -Format yyyyMMdd-HHmm).log"
-./check.ps1 -Log "..\..\dumps\v8.0-build26022182\nucleus\manual-<stamp>.log" -Scenario manual
+Copy-Item $log "..\..\dumps\v8.1.1-build26172444\nucleus\manual-$(Get-Date -Format yyyyMMdd-HHmm).log"
+./check.ps1 -Log "..\..\dumps\v8.1.1-build26172444\nucleus\manual-<stamp>.log" -Scenario manual
 ```
 
 `run.ps1` doesn't take `manual`: it waits for an end the manual test never reaches.
@@ -87,9 +87,11 @@ Every native validates its arguments and answers bad input with one Lua error na
 
 Reached on the API that `connect`'s `onReady` receives; each dependent runs its own copy in its own Lua state. Contract: `ui-helpers-contract.md` and stories 7-10 in the workspace spec (where they disagree, the stories win). Every function runs only on the game thread (`<lowercase>.ui.<fn> called off the game thread`) and only after `connect` (`<lowercase>.ui: <fn> called before connect`), validates its input first and raises one clean error naming the function and the problem. Nothing keeps a UObject between calls: paths, weak handles and plain tables only.
 
+`core.ui` is new public API in core 0.2.0. Under the caret rule below 1.0.0 (same minor, `semver.lua`), a dependent connects with `need = "0.2.0"`; one that still asks for `0.1.x` is refused by core 0.2.0 and has to raise its `need`.
+
 | Module | What it does |
 |---|---|
-| `lua/pkg/ui/hud.lua` (UI-1) | `core.ui.hud.find()` returns the live HUD or `nil`, valid only inside the current game-thread callback. `watch(fn)` returns a token; `fn(hud, info)` gets `info = { event, reason, path, visible }` with `event` one of `attached`, `shown`, `hidden`, `lost`. Also `unwatch(token)`, `isVisible()` and `stats()` (diagnostic). One poller per Lua state, every 500 ms on the game thread; a new HUD path counts on the second tick that sees it. HUD paths come from `NotifyOnNewObject` on `InventoryUI_C` plus one seed `FindAllOf` per Lua state (logged as `hud seed FindAllOf(...) call 1 ... in <n> us`); ticks only `StaticFindObject` the known paths (at most 16). Ticks are timed with `core.clock.micros()`: `DEBUG hud tick n=... avg=... max=...` once a minute, `WARN hud slow tick` over 1 ms at most once a minute, a `hud tick summary` at unload. A throwing watcher is logged once (`WARN hud watcher <token>: ...`) |
+| `lua/pkg/ui/hud.lua` (UI-1) | `core.ui.hud.find()` returns the live HUD or `nil`, valid only inside the current game-thread callback. `watch(fn)` returns a token; `fn(hud, info)` gets `info = { event, reason, path, visible }` with `event` one of `attached`, `shown`, `hidden`, `lost`. Also `unwatch(token)`, `isVisible()` and `stats()` (diagnostic). One poller per Lua state, every 500 ms on the game thread; a new HUD path counts on the second tick that sees it. HUD paths come from `NotifyOnNewObject` on `InventoryUI_C` plus one seed `FindAllOf` per Lua state (logged as `hud seed FindAllOf(...) call 1 ... in <n> us`); ticks only `StaticFindObject` the known paths (at most 16). Ticks are timed with `core.clock.micros()`: `DEBUG hud tick n=... avg=... max=...` once a minute, `WARN hud slow tick` over 1 ms at most once a minute, a `hud tick summary` at unload. A throwing watcher is logged once (`WARN hud watcher <token>: ...`). If a queued tick still hasn't run 3 s later (map loads on V8.1.1; once UE4SS dropped it after another callback failed), the poller queues another and logs `WARN hud tick callback still not run` once |
 | `lua/pkg/ui/text.lua` (UI-2, UI-4) | `core.ui.text.create{ id, text, place, style }` returns a handle; `set(h, text)`, `setStyle(h, style)`, `setVisible(h, bool)`, `remove(h)`, `isShown(h)`, and `stats()` and `tagOf(id)` (diagnostic). Ids are 1-64 of `A-Z a-z 0-9 _ . -`; text is a string, a number or nil, cut at 256 characters with one `WARN` per element; an unchanged text, style or visibility makes no UObject call. Handles are read-only `{ id = ... }` tables. A UI-1 watcher re-attaches every element on each `attached` (reusing its widget or the one tagged with its id, removing duplicates and this mod's orphans) and re-applies text, style, visibility and placement; on `lost` it only frees handles whose widget is gone. Each widget's `ToolTipText` is `<lowercase>:<mod>:<id>`, and it is `SelfHitTestInvisible` |
 | `lua/pkg/ui/place.lua` (UI-3) | `core.ui.place(h, intent)` and `core.ui.elements()`. Intents: `{ corner, gap, offset = { x, y } }`, `{ near = "crosshair", side, align, gap, offset }` or `{ absolute = { anchor, x, y } }`. Gaps are tight 8, normal 16, loose 32 canvas units; offsets stay within ±4096 and absolute positions within ±8192; unknown keys and values raise. One mod's corner elements stack in creation order, `gap` apart; hidden and absolute ones take no space, and there is no cross-mod stacking in v0. A `near` element collapses while its element is absent or collapsed, re-checked every tick |
 | `lua/pkg/ui/theme.lua` | Style presets. Background `none`, `dim` (35% black), `dark` (70% black), or `{ r, g, b, a }` (0..1, `a` defaults to 1); padding `none`, `tight`, `normal`, `loose` = 0, 4, 8, 12 canvas units, `normal` by default when there is a background |
