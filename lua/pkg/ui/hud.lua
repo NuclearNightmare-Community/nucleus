@@ -19,6 +19,10 @@
 -- luaL_ref stores that value instead: the queued callback is lost for good, and UE4SS later calls whatever was stored
 -- (on V8.1.1 a UObject method closure: "A function requiring userdata as param #1 was called without userdata",
 -- traceback only "[C]: in ?"). Registering and running on the game thread leaves no second thread to race.
+-- Reproduced on V8.1.2 with a minimal mod (game-thread loop making UObject calls 4 ms in 10, async thread queuing an
+-- ExecuteInGameThread every 10 ms): both runs crashed inside UE4SS within 7 s, one after "[Lua::Registry::
+-- get_function_ref] Ref was not function"; queuing from the game thread instead (3495 callbacks) or with the game
+-- thread idle (6301) lost none. No watchdog is kept: a game-thread loop has no queued callback to lose.
 -- During a blocking map load no engine tick runs, so a tick simply waits; when the load ends the loop runs once and
 -- re-arms (no backlog).
 local BASE = (...):gsub("%.ui%.hud$", "")
