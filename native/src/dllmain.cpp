@@ -13,7 +13,7 @@
 //     "<fn>: <problem>"; any C++ exception becomes "<fn>: internal error ..." and is logged. Lua is only touched
 //     (results pushed, errors raised) outside the try block, so a Lua error never meets our catch clauses.
 //   - <Core>_Ref never reads through the address it is given. It looks the address up in GUObjectArray, comparing
-//     pointers only (scan_object_array), and builds the weak pointer from the slot index it found.
+//     pointers only (scan_object_array, newest slots first), and builds the weak pointer from the slot index it found.
 //   - Reads of engine memory (the object array, weak pointer resolution) run under SEH (__try/__except) as a last
 //     resort; a fault is logged with context and becomes a Lua error, never a crash.
 
@@ -121,6 +121,10 @@ namespace
     };
 
     // 1 = found, 0 = not in the array, -1 = SEH fault (fault code set). Compares pointers only: never reads *target.
+    // Scans from the last slot down to slot 0: objects a dependent just created (widgets, a new HUD) usually sit near
+    // the end of the array, so the common case stops after a few slots instead of after ~100k (the array reuses freed
+    // slots, so after a map change a new object can also sit lower). Same slots, same comparisons, only the order
+    // differs; a miss still compares every slot.
     int scan_object_array(const void* target, ScanResult* out)
     {
         out->index = -1;
@@ -129,20 +133,24 @@ namespace
         __try
         {
             const int32_t n = FUObjectArray::GetNumElements();
+            if (n <= 0) return 0;
             if (g_contiguous_chunks)
             {
-                for (int32_t base = 0; base < n; base += k_chunk)
+                for (int32_t base = ((n - 1) / k_chunk) * k_chunk; base >= 0; base -= k_chunk)
                 {
                     const auto* first = reinterpret_cast<const uint8_t*>(FUObjectArray::IndexToObject(base));
-                    if (!first) break;
+                    // A chunk that is not there (should not happen below n): nothing to compare in it; the older
+                    // chunks are still searched.
+                    if (!first) continue;
                     const int32_t count = (n - base < k_chunk) ? (n - base) : k_chunk;
-                    const uint8_t* p = first + g_object_offset;
-                    for (int32_t i = 0; i < count; ++i, p += g_item_stride)
+                    const uint8_t* slot0 = first + g_object_offset;
+                    for (int32_t i = count - 1; i >= 0; --i)
                     {
+                        const uint8_t* p = slot0 + static_cast<size_t>(i) * static_cast<size_t>(g_item_stride);
                         if (*reinterpret_cast<const void* const*>(p) == target)
                         {
                             out->index = base + i;
-                            out->scanned += i + 1;
+                            out->scanned += count - i;
                             return 1;
                         }
                     }
@@ -151,13 +159,13 @@ namespace
             }
             else
             {
-                for (int32_t i = 0; i < n; ++i)
+                for (int32_t i = n - 1; i >= 0; --i)
                 {
                     const auto* item = FUObjectArray::IndexToObject(i);
                     if (item && item->GetUObject() == target)
                     {
                         out->index = i;
-                        out->scanned = i + 1;
+                        out->scanned = n - i;
                         return 1;
                     }
                 }
@@ -466,7 +474,7 @@ namespace
             while (ns > prev_max && !g_scan_max_ns.compare_exchange_weak(prev_max, ns)) {}
             if ((calls & (calls - 1)) == 0)
             {
-                logf("REF_COST calls={} last={:.3f} ms avg={:.3f} ms max={:.3f} ms slots={} (scan of {} of {} slots)", calls, ns / 1e6,
+                logf("REF_COST calls={} last={:.3f} ms avg={:.3f} ms max={:.3f} ms slots={} (scan of {} of {} slots, newest first)", calls, ns / 1e6,
                      total / 1e6 / static_cast<double>(calls), g_scan_max_ns.load() / 1e6, FUObjectArray::GetNumElements(), scan.scanned,
                      FUObjectArray::GetNumElements());
             }
