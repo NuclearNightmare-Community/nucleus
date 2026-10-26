@@ -127,8 +127,25 @@ end
 
 -- 3. The live HUD: of the tracked paths that resolve, the in-viewport one owned by the local player, first by path
 -- order. Paths that no longer resolve are dropped. Returns hud, path, visibility (ESlateVisibility number).
-local function poll()
-    local live = {}
+--
+-- Steady state is three engine reads: Deref, IsInViewport and the Visibility property. Each costs 15-30 us in a
+-- tick (1-7 us in a warm loop; SOAKBENCH lines of the soak scenario), so a tick makes as few as it can:
+-- * a widget's owning player never changes, so a path once found to be the local player's is not asked again until
+--   it leaves the viewport (death, map change and RemoveAllWidgets all take it out);
+-- * Visibility is read as a property (no ProcessEvent), GetVisibility() only if that fails;
+-- * no closures and no per-tick tables on the common path (fewer Lua collector steps inside a tick).
+local function inViewportOf(w) return w:IsInViewport() end
+local function visibilityOf(w)
+    local ok, v = pcall(C.prop, w, "Visibility")
+    v = ok and tonumber(v) or nil
+    if v then return v end
+    return tonumber(w:GetVisibility()) or 0
+end
+local function owningPlayerOf(w) return w:GetOwningPlayer() end
+local function isLocalOf(pc) return pc:IsLocalController() end
+local liveW, liveP = {}, {}      -- scratch lists, reused every tick and emptied before poll returns (no UObject kept)
+local function pollLive()
+    local n = 0
     for i = #paths, 1, -1 do
         local p = paths[i]
         local t = C.pt()
@@ -138,55 +155,60 @@ local function poll()
             forget(p); table.remove(paths, i)
         else
             t = C.pt()
-            local ok, inVp = pcall(function() return w:IsInViewport() end)
+            local ok, inVp = pcall(inViewportOf, w)
             C.pa("poll.viewport", t)
-            if ok and inVp then live[#live + 1] = { w = w, p = p } end
+            if ok and inVp then n = n + 1; liveW[n], liveP[n] = w, p
+            else localOwned[p] = nil end
         end
     end
-    if #live == 0 then return nil end
-    table.sort(live, function(a, b) return a.p < b.p end)
+    for i = n + 1, #liveW do liveW[i], liveP[i] = nil, nil end
+    if n == 0 then return nil end
+    if n > 1 then -- rare: several HUDs in the viewport; order by path
+        local idx = {}
+        for i = 1, n do idx[i] = i end
+        table.sort(idx, function(a, b) return liveP[a] < liveP[b] end)
+        local w2, p2 = {}, {}
+        for i = 1, n do w2[i], p2[i] = liveW[idx[i]], liveP[idx[i]] end
+        for i = 1, n do liveW[i], liveP[i] = w2[i], p2[i] end
+    end
     -- Ownership: a HUD owned by the local player controller first; one whose owner can't be read (between worlds)
     -- second; never one owned by another controller.
     local pcAddr, fallback
-    for _, c in ipairs(live) do
-        -- A widget's owning player never changes, so a path once found to belong to the local player is not asked
-        -- again (the ownership check is most of a steady tick's UObject calls); only that its owner still exists (a
-        -- HUD left over from the last world would have lost it). Cleared when the path stops resolving.
-        local t
-        if localOwned[c.p] then
-            t = C.pt()
-            local okO, owner = pcall(function() return c.w:GetOwningPlayer() end)
-            local still = okO and C.valid(owner)
-            C.pa("poll.ownerCached", t)
-            if still then
-                t = C.pt()
-                local vis = tonumber(c.w:GetVisibility()) or 0
-                C.pa("poll.vis", t)
-                return c.w, c.p, vis
-            end
-            localOwned[c.p] = nil
+    for i = 1, n do
+        local w, p = liveW[i], liveP[i]
+        if localOwned[p] then
+            local t = C.pt()
+            local vis = visibilityOf(w)
+            C.pa("poll.vis", t)
+            return w, p, vis
         end
-        t = C.pt()
-        local okO, owner = pcall(function() return c.w:GetOwningPlayer() end)
+        local t = C.pt()
+        local okO, owner = pcall(owningPlayerOf, w)
         if okO and C.valid(owner) then
-            pcAddr = pcAddr or localPcAddr(c.w:GetWorld())
-            local okL, isLocal = pcall(function() return owner:IsLocalController() end)
+            pcAddr = pcAddr or localPcAddr(w:GetWorld())
+            local okL, isLocal = pcall(isLocalOf, owner)
             local mine = (pcAddr ~= 0 and owner:GetAddress() == pcAddr) or (pcAddr == 0 and okL and isLocal)
             C.pa("poll.owner", t)
             if mine then
-                localOwned[c.p] = true
+                localOwned[p] = true
                 t = C.pt()
-                local vis = tonumber(c.w:GetVisibility()) or 0
+                local vis = visibilityOf(w)
                 C.pa("poll.vis", t)
-                return c.w, c.p, vis
+                return w, p, vis
             end
         else
             C.pa("poll.owner", t)
-            if not fallback then fallback = c end
+            if not fallback then fallback = i end
         end
     end
-    if fallback then return fallback.w, fallback.p, tonumber(fallback.w:GetVisibility()) or 0 end
+    if fallback then return liveW[fallback], liveP[fallback], visibilityOf(liveW[fallback]) end
     return nil
+end
+
+local function poll()
+    local w, p, vis = pollLive()
+    for i = #liveW, 1, -1 do liveW[i], liveP[i] = nil, nil end
+    return w, p, vis
 end
 
 -- ---- public: find, isVisible
@@ -221,7 +243,7 @@ local S = {                      -- poller state: strings, numbers, booleans onl
 -- re-attached) are also counted apart from "steady" ones (nothing changed), because only steady ticks repeat.
 local function newTiming()
     return { n = 0, pollSum = 0, pollMax = 0, watchSum = 0, watchMax = 0,
-        stN = 0, stSum = 0, stMax = 0, evN = 0, evSum = 0, evMax = 0 }
+        stN = 0, stSum = 0, stMax = 0, stCleanMax = 0, stGcN = 0, evN = 0, evSum = 0, evMax = 0 }
 end
 local T = newTiming()            -- the current one-minute window
 T.windowStart, T.lastSlowWarn = nil, nil
@@ -290,7 +312,7 @@ local function decide(hud, path, vis)
     return nil
 end
 
-local function addTiming(t, pollUs, watchUs, event)
+local function addTiming(t, pollUs, watchUs, event, gc)
     local total = pollUs + watchUs
     t.n = t.n + 1
     t.pollSum, t.watchSum = t.pollSum + pollUs, t.watchSum + watchUs
@@ -302,25 +324,26 @@ local function addTiming(t, pollUs, watchUs, event)
     else
         t.stN, t.stSum = t.stN + 1, t.stSum + total
         if total > t.stMax then t.stMax = total end
+        if gc then t.stGcN = t.stGcN + 1 elseif total > t.stCleanMax then t.stCleanMax = total end
     end
 end
 
 local function avg(sum, n) return n > 0 and sum / n or 0 end
 
-local function account(pollUs, watchUs, now, event)
-    addTiming(T, pollUs, watchUs, event)
-    addTiming(TOT, pollUs, watchUs, event)
+local function account(pollUs, watchUs, now, event, gc)
+    addTiming(T, pollUs, watchUs, event, gc)
+    addTiming(TOT, pollUs, watchUs, event, gc)
     local total = pollUs + watchUs
     if total > SLOW_US and (T.lastSlowWarn == nil or now - T.lastSlowWarn >= MINUTE_US) then
         T.lastSlowWarn = now
         if C.log then C.log.warn("hud slow tick %d us (poll %d us, watchers %d us; %s)", total, pollUs, watchUs,
-            event and ("HUD event: " .. event) or "steady state") end
+            (event and ("HUD event: " .. event) or "steady state") .. (gc and ", a Lua GC step ran inside it" or "")) end
     end
     T.windowStart = T.windowStart or now
     if now - T.windowStart >= MINUTE_US then
-        if C.log then C.log.debug("hud tick n=%d avg=%.1f max=%d (poll avg %.1f max %d, watchers avg %.1f max %d) us findAll=%d paths=%d; steady n=%d avg %.1f max %d us, events n=%d avg %.1f max %d us",
+        if C.log then C.log.debug("hud tick n=%d avg=%.1f max=%d (poll avg %.1f max %d, watchers avg %.1f max %d) us findAll=%d paths=%d; steady n=%d avg %.1f max %d us (max %d us without a Lua GC step; %d tick(s) with one), events n=%d avg %.1f max %d us",
             T.n, (T.pollSum + T.watchSum) / T.n, math.max(T.pollMax, T.watchMax), T.pollSum / T.n, T.pollMax, T.watchSum / T.n, T.watchMax,
-            C.stats.findAllCalls, #paths, T.stN, avg(T.stSum, T.stN), T.stMax, T.evN, avg(T.evSum, T.evN), T.evMax) end
+            C.stats.findAllCalls, #paths, T.stN, avg(T.stSum, T.stN), T.stMax, T.stCleanMax, T.stGcN, T.evN, avg(T.evSum, T.evN), T.evMax) end
         local keep = T.lastSlowWarn
         T = newTiming()
         T.windowStart, T.lastSlowWarn = now, keep
@@ -329,7 +352,7 @@ end
 
 -- ---- profiler output (only while hud._profile(true)): every event tick as one line, steady ticks aggregated per phase
 -- once a minute, and every event tick's total in the unload summary.
-local PR = { n = 0, sum = 0, max = 0, phases = {}, windowStart = nil, events = {} }
+local PR = { n = 0, sum = 0, max = 0, phases = {}, windowStart = nil, events = {}, slow = 0, slowGc = 0 }
 local MAX_EVENT_RECORDS = 64
 
 local function phaseList(cur, calls, fmtOne)
@@ -351,6 +374,10 @@ local function profReport(prof, pollUs, watchUs, now, event)
         return
     end
     PR.n, PR.sum = PR.n + 1, PR.sum + total
+    if total > 500 then
+        PR.slow = PR.slow + 1
+        if prof.heapAfter < prof.heapBefore then PR.slowGc = PR.slowGc + 1 end -- Lua's collector ran inside the tick
+    end
     if total > PR.max then PR.max = total end
     for k, us in pairs(prof.cur) do
         local a = PR.phases[k] or { sum = 0, max = 0 }
@@ -362,15 +389,18 @@ local function profReport(prof, pollUs, watchUs, now, event)
     if now - PR.windowStart >= MINUTE_US and PR.n > 0 then
         local sums, maxes = {}, {}
         for k, a in pairs(PR.phases) do sums[k], maxes[k] = a.sum, a.max end
-        C.log.debug("hud prof steady n=%d avg=%.1f max=%d us; phases avg/max (us): %s", PR.n, PR.sum / PR.n, PR.max,
+        C.log.debug("hud prof steady n=%d avg=%.1f max=%d us, %d over 500 us (%d of them with a Lua GC step: heap shrank during the tick); phases avg/max (us): %s", PR.n, PR.sum / PR.n, PR.max, PR.slow, PR.slowGc,
             phaseList(sums, nil, function(k, s) return string.format("%s=%.1f/%d", k, s / PR.n, maxes[k]) end))
-        PR.n, PR.sum, PR.max, PR.phases, PR.windowStart = 0, 0, 0, {}, now
+        PR.n, PR.sum, PR.max, PR.phases, PR.windowStart, PR.slow, PR.slowGc = 0, 0, 0, {}, now, 0, 0
     end
 end
 
 local function tick()
-    local prof = C.profOn and { cur = {}, calls = {} } or nil
+    local prof = C.profOn and { cur = {}, calls = {}, heapBefore = collectgarbage("count") } or nil
     C.prof, C.tickEvent = prof, nil
+    -- A Lua collector step inside the tick shows as the heap shrinking across it (the only allocations in a tick are
+    -- a few userdata, far less than a step frees).
+    local heap0 = collectgarbage("count")
     local t0 = C.micros()
     local hud, path, vis = poll()
     local t1 = C.micros()
@@ -408,8 +438,9 @@ local function tick()
     local t2 = C.micros()
     C.prof = nil
     event = event or C.tickEvent -- text.lua sets it when a tick re-attached an element
-    account(t1 - t0, t2 - t1, t2, event)
-    if prof then profReport(prof, t1 - t0, t2 - t1, t2, event) end
+    local gc = collectgarbage("count") < heap0
+    account(t1 - t0, t2 - t1, t2, event, gc)
+    if prof then prof.heapAfter = collectgarbage("count"); profReport(prof, t1 - t0, t2 - t1, t2, event) end
 end
 
 local function startPoller()

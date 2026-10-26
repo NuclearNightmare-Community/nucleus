@@ -76,11 +76,16 @@ function C.describe(v)
 end
 
 -- ---- UObject helpers (call only inside the game-thread callback that found the object)
+-- Hot-path helpers take their object as an argument instead of capturing it in a closure: a tick allocates as
+-- little as possible, because every allocation brings the Lua collector closer to a step inside the tick.
+local function isValidOf(o) return o:IsValid() end
 function C.valid(o)
     if o == nil or type(o) ~= "userdata" then return false end
-    local ok, yes = pcall(function() return o:IsValid() end)
+    local ok, yes = pcall(isValidOf, o)
     return ok and yes == true
 end
+function C.call0(o, name) return o[name](o) end   -- pcall(C.call0, o, "Fn") calls o:Fn() without a closure
+function C.prop(o, name) return o[name] end
 function C.found(path)
     if type(path) ~= "string" then return nil end
     local o = StaticFindObject(path)

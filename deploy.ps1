@@ -13,9 +13,9 @@
   HUD's top-right corner (README.md, "Hand testing").
   Pass the main checkout's instance path when running from a worktree.
 .EXAMPLE
-  ./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.1-build26172444 -Test
-  ./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.1-build26172444 -Test -Scenario manual
-  ./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.1-build26172444 -Remove
+  ./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Test
+  ./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Test -Scenario manual
+  ./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Remove
 #>
 param(
     [Parameter(Mandatory)] [string] $Instance,

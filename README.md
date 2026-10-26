@@ -5,7 +5,7 @@ Core shared library for Nuclear Nightmare mods: a C++ DLL (weak object handles, 
 Spec, API contract and stories: `_bmad-output/specs/spec-core-v0/` in the workspace repo (they still say `NNCore`, the old working name).
 
 ```powershell
-$inst = 'C:\...\nuclear-nightmare\game-instances\v8.1.1-build26172444'   # absolute, also from a worktree
+$inst = 'C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463'   # absolute, also from a worktree
 ./build.ps1                                   # native + blueprint + lua + package (needs VS 2026, UE 5.6, ue4ss-src)
 ./deploy.ps1 -Instance $inst                  # core only; -Test adds the test dependent; -Remove takes it all out
 ./run.ps1 -Instance $inst -Scenario skeleton  # unattended in-game run + check.ps1 (also no-native, no-pak, bad-input, ui)
@@ -32,7 +32,7 @@ The `manual` scenario is for playing the game yourself with core and the test de
 
 ```powershell
 cd <workspace>\mods\Nucleus
-$inst = '<workspace>\game-instances\v8.1.1-build26172444'
+$inst = '<workspace>\game-instances\v8.1.2-build26193463'
 ./build.ps1                                     # once, if build/package/ is missing or out of date
 ./deploy.ps1 -Instance $inst -Test -Scenario manual
 ..\..\tools\launch.ps1 -Instance $inst          # play; quit the game when done
@@ -44,8 +44,8 @@ The log is `ue4ss\UE4SS.log` in the copy's `NuclearNightmare\Binaries\Win64`, an
 
 ```powershell
 $log = "$inst\NuclearNightmare\Binaries\Win64\ue4ss\UE4SS.log"
-Copy-Item $log "..\..\dumps\v8.1.1-build26172444\nucleus\manual-$(Get-Date -Format yyyyMMdd-HHmm).log"
-./check.ps1 -Log "..\..\dumps\v8.1.1-build26172444\nucleus\manual-<stamp>.log" -Scenario manual
+Copy-Item $log "..\..\dumps\v8.1.2-build26193463\nucleus\manual-$(Get-Date -Format yyyyMMdd-HHmm).log"
+./check.ps1 -Log "..\..\dumps\v8.1.2-build26193463\nucleus\manual-<stamp>.log" -Scenario manual
 ```
 
 `run.ps1` doesn't take `manual`: it waits for an end the manual test never reaches.

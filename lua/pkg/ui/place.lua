@@ -329,7 +329,7 @@ end
 
 function P.tick(hud, live)
     tickNo = tickNo + 1
-    local stacks = {} -- corner -> list of { el, w } (visible, live), only for corners still settling
+    local stacks = nil -- corner -> list of { el, w } (visible, live), only for corners still settling; made on demand
     for _, el in ipairs(C.order) do
         if not el.removed then
             local pl = el.place
@@ -352,6 +352,7 @@ function P.tick(hud, live)
             elseif pl.corner and el.visible and (settle[pl.corner] or 0) > 0 then
                 local w = live(el)
                 if w then
+                    stacks = stacks or {}
                     local list = stacks[pl.corner] or {}
                     stacks[pl.corner] = list
                     list[#list + 1] = { el = el, w = w }
@@ -361,6 +362,7 @@ function P.tick(hud, live)
     end
     for corner, n in pairs(settle) do settle[corner] = n > 1 and n - 1 or nil end
     -- Only a corner holding two or more elements can be pushed around by a height change.
+    if not stacks then return end
     for corner, list in pairs(stacks) do
         if #list >= 2 then
             local dirty = false

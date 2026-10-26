@@ -444,7 +444,7 @@ tick()
 ok(countLogs("^DEBUG hud tick n=") >= 1, "timing: minute summary at debug level")
 H._summary()
 ok(countLogs("hud tick summary n=") == 1, "timing: unload summary")
-ok(countLogs("^DEBUG hud tick n=.* steady n=%d+ avg [%d%.]+ max %d+ us, events n=%d+") >= 1, "timing: steady and event ticks apart")
+ok(countLogs("^DEBUG hud tick n=.* steady n=%d+ avg [%d%.]+ max %d+ us %(max %d+ us without a Lua GC step; %d+ tick%(s%) with one%), events n=%d+") >= 1, "timing: steady and event ticks apart")
 
 -- steady state: canvas membership (GetParent) is checked once per 10 ticks, not per element per tick
 local live0 = 0

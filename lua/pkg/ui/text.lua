@@ -430,29 +430,38 @@ end
 -- nothing but another mod's RemoveFromParent takes it out between HUD events. Nothing runs on the tick that just
 -- handled an attached event (the watcher did all of it).
 local MEMBER_TICKS = 10          -- 5 s
-local function onTick(hud)
+-- Liveness within one tick, memoised; emptied at the end of the tick (no widget kept between callbacks). Module-level
+-- functions and one reused table: the steady path allocates nothing of its own.
+local tickSeen = {}              -- element -> widget | false, this tick only
+local tickStrict = nil           -- liveIn(canvas) on a full membership tick, else nil (Deref only)
+local function liveNow(el)
+    local w = tickSeen[el]
+    if w == nil then
+        if tickStrict then w = tickStrict(el) or false
+        else w = (el.ref and C.deref(el.ref)) or false end
+        tickSeen[el] = w
+    end
+    return w or nil
+end
+local function endTick()
+    for k in pairs(tickSeen) do tickSeen[k] = nil end
+    tickStrict = nil
+end
+
+local function onTickBody(hud)
     tick = tick + 1
     if attachedThisTick then attachedThisTick = false return end
     if pendingLog then flushLog() C.tickEvent = "attach log" return end
     local full = tick % MEMBER_TICKS == 0
     local t = C.pt()
-    local live
     if full then
         local canvas = canvasOf(hud)
         if not canvas then return end
-        live = liveIn(canvas)
-    else
-        live = function(el) return el.ref and C.deref(el.ref) or nil end
-    end
-    local cache = {}
-    local function liveOnce(el)
-        local w = cache[el]
-        if w == nil then w = live(el) or false; cache[el] = w end
-        return w or nil
+        tickStrict = liveIn(canvas)
     end
     local missing = false
     for _, el in ipairs(C.order) do
-        if not el.removed and (el.retryAt == nil or tick >= el.retryAt) and not liveOnce(el) then missing = true break end
+        if not el.removed and (el.retryAt == nil or tick >= el.retryAt) and not liveNow(el) then missing = true break end
     end
     C.pa(full and "tick.membersFull" or "tick.members", t)
     if missing then
@@ -476,14 +485,20 @@ local function onTick(hud)
                 end
             end
             if any then placeAll(hud, canvas, true) end
-            cache = {}
-            live = strict
+            endTick()
+            tickStrict = strict
         end
         C.pa("tick.reattach", t)
     end
     t = C.pt()
-    P.tick(hud, liveOnce)
+    P.tick(hud, liveNow)
     C.pa("tick.place", t)
+end
+
+local function onTick(hud)
+    local ok, err = pcall(onTickBody, hud)
+    endTick()
+    if not ok then error(err, 0) end
 end
 
 local function ensureWatching()
