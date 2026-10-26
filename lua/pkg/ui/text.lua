@@ -26,10 +26,11 @@ local tick = 0
 local watching = false
 local attachedThisTick = false  -- set by the attached watcher, read by the same tick's onTick
 local pendingLog = nil           -- the attach line of the last attached event, logged on the next tick
+local pendingDebug = false       -- whether pendingLog is the DEBUG report (all attached) or the INFO one (some failed)
 local function flushLog()
     if not pendingLog then return end
     local t = C.pt()
-    C.log.info("%s", pendingLog)
+    if pendingDebug then C.log.debug("%s", pendingLog) else C.log.info("%s", pendingLog) end
     C.pa("core.log", t)
     pendingLog = nil
 end
@@ -298,11 +299,13 @@ local function attachOne(el, hud, canvas, byId, reason, report)
     end
     C.pa("attach.ref", t)
     el.attached, el.slotKey, el.appliedVis, el.retryAt = true, nil, nil, nil
+    -- DEBUG only: a log line costs 0.3-0.8 ms on the game thread, and a successful attach is routine. Failures keep
+    -- their INFO/WARN lines (onHud, warnOnce).
     if report then
-        report[#report + 1] = string.format("'%s' %s %s", el.id, how, path)
-    else
+        if report.build then report[#report + 1] = string.format("'%s' %s %s", el.id, how, path) end
+    elseif C.debugOn() then
         t = C.pt()
-        C.log.info("ui attach '%s' %s %s (%s)", el.id, how, path, reason)
+        C.log.debug("ui attach '%s' %s %s (%s)", el.id, how, path, reason)
         C.pa("attach.log", t)
     end
     return true
@@ -386,14 +389,20 @@ local function onHud(hud, info)
             C.log.info("ui removed %d orphan widget(s) of %s from the HUD canvas (ids: %s%s)", #orphans, C.mod, table.concat(ids, ", "), #orphans > 8 and ", ..." or "")
         end
         -- One log line for the whole event, not one per element: a UE4SS log line costs 150-500 us on the game
-        -- thread (measured on V8.1.2 with the console enabled).
-        local report = {}
+        -- thread (measured on V8.1.2 with the console enabled). The full report is DEBUG and is only built while
+        -- debug is on; an event where an element stayed pending always gets one short INFO line naming them.
+        local report = { build = C.debugOn() }
+        local pending = nil
         for _, el in ipairs(C.order) do
             if not el.removed then
                 t = C.pt()
                 local ok, res = pcall(attachOne, el, hud, canvas, byId, info.reason, report)
                 C.pa("core.attach", t)
-                if not ok or not res then el.attached, el.retryAt = false, tick + RETRY_TICKS end
+                if not ok or not res then
+                    el.attached, el.retryAt = false, tick + RETRY_TICKS
+                    pending = pending or {}
+                    if #pending < 8 then pending[#pending + 1] = "'" .. el.id .. "'" end
+                end
                 if not ok then C.warnOnce("attach:" .. el.id, "attach %s: %s", el.id, tostring(res):match("^[^\n]*")) end
             end
         end
@@ -402,7 +411,14 @@ local function onHud(hud, info)
         C.pa("core.placeAll", t)
         -- Logged on the next tick: the line costs 0.3-0.8 ms on V8.1.2 (the attach tick's largest item), so it gets a
         -- tick of its own.
-        if #report > 0 then pendingLog = string.format("ui attach %s (%s)", table.concat(report, ", "), tostring(info.reason)) end
+        if pending then
+            pendingDebug = false
+            pendingLog = string.format("ui attach left %s pending, retried in %d ticks%s (%s)", table.concat(pending, ", "), RETRY_TICKS,
+                #report > 0 and ("; attached " .. table.concat(report, ", ")) or "", tostring(info.reason))
+        elseif #report > 0 then
+            pendingDebug = true
+            pendingLog = string.format("ui attach %s (%s)", table.concat(report, ", "), tostring(info.reason))
+        end
         attachedThisTick = true
     elseif info.event == "lost" then
         -- Never touch the widgets: there may be none, and the old ones are the game's to clean up.

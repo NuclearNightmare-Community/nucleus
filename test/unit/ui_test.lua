@@ -158,7 +158,7 @@ local function logger()
     function L.info(f, ...) emit("", f, ...) end
     function L.warn(f, ...) emit("WARN ", f, ...) end
     function L.error(f, ...) emit("ERROR ", f, ...) end
-    function L.debug(f, ...) emit("DEBUG ", f, ...) end
+    function L.debug(f, ...) if L.debugEnabled then emit("DEBUG ", f, ...) end end
     return L
 end
 local handles, nextHandle, freed = {}, 0, 0
@@ -392,6 +392,15 @@ ok(events[#events] == "attached:HUD back in the viewport", "rebuild: attached ba
 local tagged = 0
 for _, ch in ipairs(canvas.children) do if ch.tip:find("^nucleus:TestMod:") then tagged = tagged + 1 end end
 ok(tagged == 2 and countLogs("ui attach 'a' reused") >= 1, "rebuild: reused, not duplicated", tagged)
+tick() -- the next tick writes the event's attach line
+ok(countLogs("^ui attach ") == 0 and countLogs("^DEBUG ui attach 'a' reused .*'c' reused .*%(HUD back in the viewport%)") >= 1, "attach line: one DEBUG line per event, no INFO line")
+
+-- with debug off, a successful attach logs nothing (the report is not even built)
+C.log.debugEnabled = false
+local nLogs = #logs
+hud1.inViewport = false; tick(); hud1.inViewport = true; tick(); tick(); tick()
+ok(events[#events] == "attached:HUD back in the viewport" and #logs == nLogs, "attach line: nothing logged with debug off", #logs - nLogs)
+C.log.debugEnabled = true
 
 -- duplicates and orphans on the next attached
 local dup = newText(PC); canvas:AddChildToCanvas(dup); dup.tip = "nucleus:TestMod:a"
@@ -436,6 +445,14 @@ local p1 = X.create{ id = "p1", text = "x" }
 X.create{ id = "p1", text = "y" }
 tick(); tick()
 ok(type(p1) == "table" and countLogs("text 'p1' stays pending") == 1, "pak missing: pending, one WARN")
+-- an attach event that leaves an element pending logs one INFO line naming it, debug on or off
+C.log.debugEnabled = false
+hud2.inViewport = false; tick(); hud2.inViewport = true; tick(); tick(); tick()
+ok(countLogs("^ui attach left 'p1' pending, retried in 10 ticks; attached 'a' reused .*%(HUD back in the viewport%)$") == 0
+   and countLogs("^ui attach left 'p1' pending, retried in 10 ticks %(HUD back in the viewport%)$") == 1, "attach line: INFO line for a pending element, debug off")
+C.log.debugEnabled = true
+hud2.inViewport = false; tick(); hud2.inViewport = true; tick(); tick(); tick()
+ok(countLogs("^ui attach left 'p1' pending, retried in 10 ticks; attached 'a' reused .*%(HUD back in the viewport%)$") == 1, "attach line: INFO line for a pending element names the attached ones with debug on")
 
 -- timing: a minute of ticks gives a DEBUG summary; a slow tick a WARN
 for _ = 1, 10 do tick() end
@@ -446,7 +463,10 @@ H._summary()
 ok(countLogs("hud tick summary n=") == 1, "timing: unload summary")
 ok(countLogs("^DEBUG hud tick n=.* steady n=%d+ avg [%d%.]+ max %d+ us %(max %d+ us without a Lua GC step; %d+ tick%(s%) with one%), events n=%d+") >= 1, "timing: steady and event ticks apart")
 
--- steady state: canvas membership (GetParent) is checked once per 10 ticks, not per element per tick
+-- steady state: canvas membership (GetParent) is checked once per 10 ticks, not per element per tick. The pending
+-- element (pak missing above) goes first: its retry every RETRY_TICKS checks membership too, on a tick that depends
+-- on how many ticks ran before, which is not what this measures.
+X.remove(p1)
 local live0 = 0
 for _, e in pairs(C.els) do if e.ref and deref(e.ref) then live0 = live0 + 1 end end
 PARENT_CALLS = 0

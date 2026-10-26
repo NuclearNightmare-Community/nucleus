@@ -37,6 +37,10 @@ function C.bind(api)
     C.bound = true
 end
 
+-- Whether the dependent's logger writes DEBUG lines (core.log.debugEnabled; it can change at any time). Lines that
+-- only matter when debugging (the per-attach report) are not even built when it is off.
+function C.debugOn() return C.log ~= nil and C.log.debugEnabled == true end
+
 -- Raises a clean error: no position prefix, so the first line is exactly the message.
 function C.fail(fmt, ...)
     local ok, msg = pcall(string.format, fmt, ...)

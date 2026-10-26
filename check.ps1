@@ -52,6 +52,8 @@ $always = @(
     # lua/pkg/ui/hud.lua), and the old poller's lost-tick watchdog: neither may happen any more.
     '!A function requiring userdata as param #1 was called without userdata'
     '!hud tick callback still not run'
+    # A successful attach is logged at DEBUG only (lua/pkg/ui/text.lua); INFO is for elements left pending.
+    "!\[$T\] ui attach '"
 )
 $started = @(
     "\[$N\] native: loaded, version $Ver for UE4SS v3\.0\.1-1181-g83330635"
@@ -65,7 +67,7 @@ $started = @(
     "!\[$T\] FAIL "
     "!\[$N\] ERROR"
 )
-$skeleton = $started + @("\[$T\] SCENARIO skeleton ", "\[$T\] END result=PASS")
+$skeleton = $started + @("\[$T\] SCENARIO skeleton ", "\[$T\] END result=PASS", "!\[$T\] DEBUG ui attach")
 # Story 8 AC 11: the Border around the text (alpha 0, padding 0) must not change the unstyled size. 283.8x29.2 canvas
 # units is what "Nucleus skeleton: match1" measured with the bare TextBlock (V8.0, 2026-10-23); soft, since another
 # core name or font changes it.
@@ -84,6 +86,7 @@ foreach ($p in 'menu1', 'match1', 'menu2', 'match2') {
 }
 $badInput = $started + @(
     "\[$T\] SCENARIO bad-input "
+    "!\[$T\] DEBUG ui attach"
     "\[$T\] OK DEREF match1 previous widget from menu1 -> nil"
     "\[$T\] OK CASE match1\.ref-destroyed "
     "\[$T\] OK CASES total=\d+ passed=\d+ failed=0"
@@ -132,8 +135,8 @@ $ui = $started + @(
     "#1|\[$T\] hud seed FindAllOf\(InventoryUI_C\) call 1 "
     "!\[$T\] hud seed FindAllOf\(InventoryUI_C\) call [2-9]"
     "\[$T\] OK UIFINDALL match2 FindAllOf ran 1 time"
-    "\[$T\] ui attach (.*, )?'pre' created "
-    "\[$T\] ui attach (.*, )?'pre' reused .*\(HUD back in the viewport\)"
+    "\[$T\] DEBUG ui attach (.*, )?'pre' created "
+    "\[$T\] DEBUG ui attach (.*, )?'pre' reused .*\(HUD back in the viewport\)"
     "\[$T\] EVENT \d+ attached reason=HUD appeared"
     "\[$T\] EVENT \d+ shown "
     "\[$T\] EVENT \d+ lost reason=HUD gone from the viewport"
@@ -196,7 +199,7 @@ $soak = $started + @(
     "\[$T\] SOAK idle "
     "\[$T\] SOAKTICK ticks=\d+ .*findAll=1$"
     "\[$T\] OK SOAKONE "
-    "\[$T\] ui attach 'soak' created "
+    "\[$T\] DEBUG ui attach 'soak' created "
     "!\[$T\] WARN (?!hud slow tick .*(; HUD event: |steady state, a Lua GC step ran inside it))"
     "!\[$T\] ERROR"
     "!\[$T\] WARN hud slow tick .*steady state\)"
@@ -212,7 +215,7 @@ $manual = @(
     "\[$T\] SCENARIO manual "
     "\[$T\] CONNECT ok $N $Ver "
     "\[$T\] ATTACH 1 "
-    "\[$T\] ui attach 'manual' (created|reused) "
+    "\[$T\] DEBUG ui attach 'manual' (created|reused) "
     "!\[$T\] FAIL "
     "!\[$T\] ERROR"
     "!\[$N\] ERROR"

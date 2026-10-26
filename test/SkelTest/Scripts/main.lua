@@ -1420,7 +1420,7 @@ end
 
 -- ---------------------------------------------------------------- manual (hand testing)
 -- Runs on core's UI helpers (stories 7-10): one element "manual" ("<Core> manual: <n>") in the top-right corner,
--- created once with core.ui.text.create; core re-attaches it after every HUD rebuild and logs "ui attach 'manual'
+-- created once with core.ui.text.create; core re-attaches it after every HUD rebuild and logs "DEBUG ui attach 'manual'
 -- created|reused ...". A core.ui.hud watcher logs every HUD event; on attached, n counts the attaches and an ATTACH
 -- line reports the HUD, its visibility, the element's widget (found by its tag) and its rectangle. Overlap reports
 -- follow about 1 s and 4 s after an attach or the HUD showing, from a 500 ms game-thread loop. The helpers' DEBUG lines
