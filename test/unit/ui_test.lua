@@ -48,6 +48,7 @@ end
 
 local TEXT_SHORT = "WBP_NucleusText_C"
 local CALLS = 0
+PARENT_CALLS = 0
 local function newText(owner)
     local w = { __class = TEXT_SHORT, text = "", bg = { 0, 0, 0, 0 }, pad = 0, vis = 0, tip = "" }
     obj(w, "/Engine/Transient.GameEngine_1:GameInstance_1." .. TEXT_SHORT .. "_" .. nextAddr)
@@ -64,7 +65,7 @@ local function newText(owner)
         if p then for i, c in ipairs(p.children) do if c == self then table.remove(p.children, i) break end end end
         self.parent = nil
     end
-    function w:GetParent() return self.parent end
+    function w:GetParent() PARENT_CALLS = PARENT_CALLS + 1; return self.parent end
     function w:ForceLayoutPrepass() end
     function w:GetDesiredSize()
         if self.vis == 1 then return vec(0, 0) end
@@ -443,6 +444,16 @@ ok(countLogs("^DEBUG hud tick n=") >= 1, "timing: minute summary at debug level"
 H._summary()
 ok(countLogs("hud tick summary n=") == 1, "timing: unload summary")
 ok(countLogs("^DEBUG hud tick n=.* steady n=%d+ avg [%d%.]+ max %d+ us, events n=%d+") >= 1, "timing: steady and event ticks apart")
+
+-- steady state: canvas membership (GetParent) is checked once per 10 ticks, not per element per tick
+local live0 = 0
+for _, e in pairs(C.els) do if e.ref and deref(e.ref) then live0 = live0 + 1 end end
+PARENT_CALLS = 0
+local pc0 = {}
+for i = 1, 20 do local b = PARENT_CALLS; tick(); pc0[#pc0+1] = PARENT_CALLS - b end
+local busyTicks = 0
+for _, n in ipairs(pc0) do if n > 0 then busyTicks = busyTicks + 1 end end
+ok(live0 > 0 and busyTicks <= 2, "steady: GetParent only on one tick in 10", table.concat(pc0, ","))
 
 -- profiler: off by default; on, an event tick is one line and steady ticks one line a minute
 ok(countLogs("hud prof") == 0, "profiler: off by default")

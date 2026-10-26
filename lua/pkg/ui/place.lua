@@ -286,6 +286,7 @@ function P.restack(corner, live, prepass)
     end
     local out = P.stack(corner, items)
     for i, s in ipairs(out) do setSlot(els[i], ws[i], s, s.ax, s.ay) end
+    P.settle(corner) -- Slate may measure later than this: re-check the heights for a few ticks
 end
 
 -- Places an element whose widget is live now. Corner elements re-stack their whole corner.
@@ -298,21 +299,59 @@ function P.apply(el, w, hud, live, prepass)
     end
 end
 
--- Per tick (text.lua): near elements follow their element's presence and rectangle; stacks follow height changes.
+-- Per tick (text.lua). Steady state must cost next to nothing (story 7: a tick under 0.5 ms), so:
+-- * near elements: every tick only whether their element is drawn (three reads; story 9 re-checks presence every
+--   tick); its rectangle is re-read every NEAR_RECT_TICKS ticks, or at once when it comes back;
+-- * corner stacks: heights are re-measured only for SETTLE_TICKS ticks after the corner was stacked (an attach, a
+--   HUD shown, a set or setStyle), which is when Slate's measure arrives. Text changes go through set/setStyle,
+--   which re-stack on their own; nothing else changes an element's height.
+local NEAR_RECT_TICKS = 4
+local SETTLE_TICKS = 4
+local settle = {}                -- corner -> ticks left to re-measure
+local tickNo = 0
+
+-- Marks one corner, or every corner (nil), for re-measuring on the next SETTLE_TICKS ticks.
+function P.settle(corner)
+    if corner then settle[corner] = SETTLE_TICKS return end
+    for c in pairs(CORNERS) do settle[c] = SETTLE_TICKS end
+end
+
+local function nearDrawn(hud, name)
+    local target = hud[ELEMENTS[name].prop]
+    if not C.valid(target) then return false end
+    if not C.drawn(tonumber(target:GetVisibility()) or 0) then return false end
+    if name == "crosshair" then
+        local okH, hiding = pcall(function() return hud.HidingCrosshair end)
+        if okH and hiding == true then return false end
+    end
+    return true
+end
+
 function P.tick(hud, live)
-    local stacks = {} -- corner -> list of { el, w } (visible, live)
+    tickNo = tickNo + 1
+    local stacks = {} -- corner -> list of { el, w } (visible, live), only for corners still settling
     for _, el in ipairs(C.order) do
         if not el.removed then
-            local w = live(el)
-            if w then
-                local pl = el.place
-                if pl.near then
+            local pl = el.place
+            if pl.near then
+                local w = live(el)
+                if w then
                     local t = C.pt()
-                    local okR, r = pcall(nearTarget, hud, pl.near)
+                    local okD, drawn = pcall(nearDrawn, hud, pl.near)
+                    drawn = okD and drawn
                     C.pa("place.nearCheck", t)
-                    local key = okR and r and not r.stretched and string.format("%g,%g,%g,%g,%g,%g", r.l, r.t, r.r, r.b, r.ax, r.ay) or nil
-                    if (key == nil) ~= (el.nearAbsent == true) or key ~= el.nearRect then placeSingle(el, w, hud) end
-                elseif pl.corner and el.visible then
+                    local wasAbsent = el.nearAbsent == true
+                    if drawn == wasAbsent or (drawn and tickNo % NEAR_RECT_TICKS == 0) then
+                        t = C.pt()
+                        local okR, r = pcall(nearTarget, hud, pl.near)
+                        local key = okR and r and not r.stretched and string.format("%g,%g,%g,%g,%g,%g", r.l, r.t, r.r, r.b, r.ax, r.ay) or nil
+                        if (key == nil) ~= wasAbsent or key ~= el.nearRect then placeSingle(el, w, hud) end
+                        C.pa("place.nearRect", t)
+                    end
+                end
+            elseif pl.corner and el.visible and (settle[pl.corner] or 0) > 0 then
+                local w = live(el)
+                if w then
                     local list = stacks[pl.corner] or {}
                     stacks[pl.corner] = list
                     list[#list + 1] = { el = el, w = w }
@@ -320,6 +359,7 @@ function P.tick(hud, live)
             end
         end
     end
+    for corner, n in pairs(settle) do settle[corner] = n > 1 and n - 1 or nil end
     -- Only a corner holding two or more elements can be pushed around by a height change.
     for corner, list in pairs(stacks) do
         if #list >= 2 then

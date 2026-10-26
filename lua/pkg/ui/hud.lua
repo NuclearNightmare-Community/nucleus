@@ -33,6 +33,7 @@ local MINUTE_US = 60 * 1000000
 -- ---- tracked HUD paths (strings only), oldest first
 local paths = {}                 -- list of path strings
 local known = {}                 -- path -> true
+local localOwned = {}            -- path -> true once its owning player was found to be the local one
 local seeded = false
 local droppedLiveWarned = false
 
@@ -46,12 +47,12 @@ local function track(p, resolveOk)
     if type(p) ~= "string" or known[p] or isTemplate(p) then return end
     if #paths >= MAX_PATHS and resolveOk then
         for i = #paths, 1, -1 do
-            if not C.found(paths[i]) then known[paths[i]] = nil; table.remove(paths, i) end
+            if not C.found(paths[i]) then known[paths[i]], localOwned[paths[i]] = nil, nil; table.remove(paths, i) end
         end
     end
     if #paths >= MAX_PATHS then
         local old = table.remove(paths, 1)
-        known[old] = nil
+        known[old], localOwned[old] = nil, nil
         if resolveOk and C.found(old) and not droppedLiveWarned then
             droppedLiveWarned = true
             if C.log then C.log.warn("hud tracking is full (%d paths): dropped a live HUD %s; is something creating HUDs in a loop?", MAX_PATHS, old) end
@@ -103,7 +104,7 @@ local function poll()
         local w = C.found(p)
         C.pa("poll.find", t)
         if not w then
-            known[p] = nil; table.remove(paths, i)
+            known[p], localOwned[p] = nil, nil; table.remove(paths, i)
         else
             t = C.pt()
             local ok, inVp = pcall(function() return w:IsInViewport() end)
@@ -117,7 +118,24 @@ local function poll()
     -- second; never one owned by another controller.
     local pcAddr, fallback
     for _, c in ipairs(live) do
-        local t = C.pt()
+        -- A widget's owning player never changes, so a path once found to belong to the local player is not asked
+        -- again (the ownership check is most of a steady tick's UObject calls); only that its owner still exists (a
+        -- HUD left over from the last world would have lost it). Cleared when the path stops resolving.
+        local t
+        if localOwned[c.p] then
+            t = C.pt()
+            local okO, owner = pcall(function() return c.w:GetOwningPlayer() end)
+            local still = okO and C.valid(owner)
+            C.pa("poll.ownerCached", t)
+            if still then
+                t = C.pt()
+                local vis = tonumber(c.w:GetVisibility()) or 0
+                C.pa("poll.vis", t)
+                return c.w, c.p, vis
+            end
+            localOwned[c.p] = nil
+        end
+        t = C.pt()
         local okO, owner = pcall(function() return c.w:GetOwningPlayer() end)
         if okO and C.valid(owner) then
             pcAddr = pcAddr or localPcAddr(c.w:GetWorld())
@@ -125,6 +143,7 @@ local function poll()
             local mine = (pcAddr ~= 0 and owner:GetAddress() == pcAddr) or (pcAddr == 0 and okL and isLocal)
             C.pa("poll.owner", t)
             if mine then
+                localOwned[c.p] = true
                 t = C.pt()
                 local vis = tonumber(c.w:GetVisibility()) or 0
                 C.pa("poll.vis", t)

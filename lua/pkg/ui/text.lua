@@ -24,6 +24,7 @@ local TAG_PREFIX = C.LOWER .. ":" -- full tag: <core>:<modTag>:<id>
 
 local tick = 0
 local watching = false
+local attachedThisTick = false  -- set by the attached watcher, read by the same tick's onTick
 
 -- ---------------------------------------------------------------- validation (pure)
 
@@ -370,6 +371,7 @@ local function onHud(hud, info)
         t = C.pt()
         placeAll(hud, canvas, true)
         C.pa("core.placeAll", t)
+        attachedThisTick = true
     elseif info.event == "lost" then
         -- Never touch the widgets: there may be none, and the old ones are the game's to clean up.
         for _, el in ipairs(C.order) do
@@ -382,47 +384,70 @@ local function onHud(hud, info)
                 end
             end
         end
+    elseif info.event == "shown" then
+        P.settle() -- children of a HUD that was hidden may only now be measured: re-check stack heights
     end
-    -- shown / hidden: nothing to do; the elements share the HUD's visibility.
+    -- hidden: nothing to do; the elements share the HUD's visibility.
 end
 
--- Per tick while a HUD is attached: re-attach an element whose widget left the canvas, follow near elements and
--- stack heights.
+-- Per tick while a HUD is attached: re-attach an element whose widget is gone or left the canvas, follow near
+-- elements and settling stacks. Steady state is one native Deref per element: whether a widget is still a child
+-- of the live canvas (GetParent, a UFunction call per element) is checked only every MEMBER_TICKS ticks, since
+-- nothing but another mod's RemoveFromParent takes it out between HUD events. Nothing runs on the tick that just
+-- handled an attached event (the watcher did all of it).
+local MEMBER_TICKS = 10          -- 5 s
 local function onTick(hud)
     tick = tick + 1
+    if attachedThisTick then attachedThisTick = false return end
+    local full = tick % MEMBER_TICKS == 0
     local t = C.pt()
-    local canvas = canvasOf(hud)
-    C.pa("tick.canvas", t)
-    if not canvas then return end
-    local live = liveIn(canvas)
-    local missing = false
-    t = C.pt()
-    for _, el in ipairs(C.order) do
-        if not el.removed and not live(el) and (el.retryAt == nil or tick >= el.retryAt) then missing = true break end
+    local live
+    if full then
+        local canvas = canvasOf(hud)
+        if not canvas then return end
+        live = liveIn(canvas)
+    else
+        live = function(el) return el.ref and C.deref(el.ref) or nil end
     end
-    C.pa("tick.members", t)
+    local cache = {}
+    local function liveOnce(el)
+        local w = cache[el]
+        if w == nil then w = live(el) or false; cache[el] = w end
+        return w or nil
+    end
+    local missing = false
+    for _, el in ipairs(C.order) do
+        if not el.removed and (el.retryAt == nil or tick >= el.retryAt) and not liveOnce(el) then missing = true break end
+    end
+    C.pa(full and "tick.membersFull" or "tick.members", t)
     if missing then
         C.tickEvent = "re-attach"
         t = C.pt()
-        local okS, byId = pcall(scan, canvas)
-        if not okS then byId = {} end
-        local any = false
-        for _, el in ipairs(C.order) do
-            if not el.removed and not live(el) and (el.retryAt == nil or tick >= el.retryAt) then
-                local ok, res = pcall(attachOne, el, hud, canvas, byId, "its widget left the HUD canvas")
-                if not ok or not res then
-                    el.retryAt = tick + RETRY_TICKS
-                    if not ok then C.warnOnce("attach:" .. el.id, "attach %s: %s", el.id, tostring(res):match("^[^\n]*")) end
-                else
-                    any = true
+        local canvas = canvasOf(hud)
+        if canvas then
+            local strict = liveIn(canvas)
+            local okS, byId = pcall(scan, canvas)
+            if not okS then byId = {} end
+            local any = false
+            for _, el in ipairs(C.order) do
+                if not el.removed and not strict(el) and (el.retryAt == nil or tick >= el.retryAt) then
+                    local ok, res = pcall(attachOne, el, hud, canvas, byId, "its widget left the HUD canvas")
+                    if not ok or not res then
+                        el.retryAt = tick + RETRY_TICKS
+                        if not ok then C.warnOnce("attach:" .. el.id, "attach %s: %s", el.id, tostring(res):match("^[^\n]*")) end
+                    else
+                        any = true
+                    end
                 end
             end
+            if any then placeAll(hud, canvas, true) end
+            cache = {}
+            live = strict
         end
-        if any then placeAll(hud, canvas, true) end
         C.pa("tick.reattach", t)
     end
     t = C.pt()
-    P.tick(hud, live)
+    P.tick(hud, liveOnce)
     C.pa("tick.place", t)
 end
 
