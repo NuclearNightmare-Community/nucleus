@@ -5,7 +5,9 @@
   Launches only through the workspace's tools/launch.ps1 (which passes -userdir). Stops when the test dependent logs
   its END line, the game exits (crash), or -TimeoutSec runs out (hang); then closes the game, force-killing it
   (and any crash reporter) after 15 s. The test dependent writes "<seq> key ENTER" to its Scripts/request.txt for
-  touchdown; this script presses it only if the game window is in front, then writes <seq> to done.txt.
+  touchdown; this script posts the key to the game window's message queue (PostMessage WM_KEYDOWN/WM_KEYUP; no
+  foreground change and no global input, so it works behind a dialog and never types into another program), then
+  writes <seq> to done.txt.
   Keeps the log as <workspace>/dumps/<copy>/<name lowercase>/<scenario>.log (ignored by git) and runs check.ps1.
   Steam must be running. Don't type into the game while it runs.
 .EXAMPLE
@@ -13,12 +15,12 @@
 #>
 param(
     [Parameter(Mandatory)] [string] $Instance,
-    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui')]
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'soak')]
     [string] $Scenario = 'skeleton',
-    [int] $TimeoutSec = 0  # 0: 420 s, or 900 s for ui (it travels four times and waits for layout)
+    [int] $TimeoutSec = 0  # 0: 420 s, 900 s for ui (it travels four times and waits for layout), 1000 s for soak (10 min idle)
 )
 $ErrorActionPreference = 'Stop'
-if ($TimeoutSec -le 0) { $TimeoutSec = if ($Scenario -eq 'ui') { 900 } else { 420 } }
+if ($TimeoutSec -le 0) { $TimeoutSec = switch ($Scenario) { 'ui' { 900 } 'soak' { 1000 } default { 420 } } }
 $here     = $PSScriptRoot
 $name     = (Get-Content (Join-Path $here 'mod.json') -Raw | ConvertFrom-Json).name
 $testName = "${name}SkelTest"
@@ -31,38 +33,34 @@ $exeName  = 'NuclearNightmare-Win64-Shipping'
 New-Item -ItemType Directory -Force $outDir | Out-Null
 
 Add-Type -Namespace CoreRun -Name Win -MemberDefinition @'
-[DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr h);
-[DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow();
-[DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, System.UIntPtr extra);
+[DllImport("user32.dll")] public static extern bool PostMessage(System.IntPtr h, uint msg, System.IntPtr w, System.IntPtr l);
 '@
 
+# Only the game this script started: the Shipping exe under this instance. Never the real install (the player may
+# start it while a run is going), never another copy.
+function Get-OurGame { Get-Process -Name $exeName -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($inst, [StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1 }
 function Stop-Game {
-    $p = Get-Process -Name $exeName -ErrorAction SilentlyContinue | Select-Object -First 1
+    $p = Get-OurGame
     if ($p) { [void]$p.CloseMainWindow(); if (-not $p.WaitForExit(15000)) { Stop-Process -Id $p.Id -Force } }
-    Get-Process -Name 'CrashReportClient*' -ErrorAction SilentlyContinue | Stop-Process -Force
+    Get-Process -Name 'CrashReportClient*' -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($inst, [StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force
     $deadline = (Get-Date).AddSeconds(30)
-    while ((Get-Process -Name $exeName -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
-}
-function Get-GameWindow { (Get-Process -Name $exeName -ErrorAction SilentlyContinue | Select-Object -First 1).MainWindowHandle }
-function Enter-Game {
-    $h = Get-GameWindow
-    if (-not $h -or $h -eq [IntPtr]::Zero) { return $false }
-    [CoreRun.Win]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero); [CoreRun.Win]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero) # Alt tap lifts the foreground lock
-    [void][CoreRun.Win]::SetForegroundWindow($h)
-    Start-Sleep -Milliseconds 300
-    return ([CoreRun.Win]::GetForegroundWindow() -eq $h)
+    while ((Get-OurGame) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
 }
 function Invoke-Request([string] $cmd) {
     if ($cmd -eq 'key ENTER') {
-        # Never type into another application.
-        if (-not (Enter-Game)) { Write-Host '  key skipped: the game window is not in front'; return }
-        [CoreRun.Win]::keybd_event(0x0D, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 80
-        [CoreRun.Win]::keybd_event(0x0D, 0, 2, [UIntPtr]::Zero)
-        Write-Host '  pressed ENTER'
+        # Posted to the game window's own message queue: no foreground change, no global keystroke, so it reaches the
+        # game even behind another window or a system dialog, and can never type into another program.
+        $p = Get-OurGame
+        $h = if ($p) { $p.MainWindowHandle } else { [IntPtr]::Zero }
+        if ($h -eq [IntPtr]::Zero) { Write-Host '  key skipped: no game window'; return }
+        $down = [CoreRun.Win]::PostMessage($h, 0x0100, [IntPtr]0x0D, [IntPtr]0x001C0001)            # WM_KEYDOWN, VK_RETURN, scan 0x1C
+        Start-Sleep -Milliseconds 80
+        $up = [CoreRun.Win]::PostMessage($h, 0x0101, [IntPtr]0x0D, [IntPtr]([int64]0xC01C0001))   # WM_KEYUP
+        Write-Host ("  posted ENTER to the game window (down={0} up={1})" -f $down, $up)
     } else { Write-Host "  unknown request: $cmd" }
 }
 
-if (Get-Process -Name $exeName -ErrorAction SilentlyContinue) { throw 'Nuclear Nightmare is already running; close it first.' }
+if (Get-Process -Name 'NuclearNightmare*' -ErrorAction SilentlyContinue) { throw 'Nuclear Nightmare is already running (a dev copy or the real game); not launching.' }
 & (Join-Path $here 'deploy.ps1') -Instance $inst -Test -Scenario $Scenario
 Remove-Item $log -ErrorAction SilentlyContinue
 $sw = [Diagnostics.Stopwatch]::StartNew()
@@ -76,7 +74,7 @@ $result = 'timeout (hang?)'
 Start-Sleep -Seconds 5
 try {
     while ((Get-Date) -lt $deadline) {
-        if (-not (Get-Process -Name $exeName -ErrorAction SilentlyContinue)) { $result = 'game exited (crash?)'; break }
+        if (-not (Get-OurGame)) { $result = 'game exited (crash?)'; break }
         if (Test-Path $req) {
             $text = Get-Content $req -Raw -ErrorAction SilentlyContinue
             if ($text -match '^(\d+) (.+)$' -and [int]$Matches[1] -gt $lastSeq) {

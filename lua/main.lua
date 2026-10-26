@@ -116,15 +116,15 @@ local function start()
     hookChannel("main.lua")
 
     -- Fallback when BPModLoaderMod did not load core's class (disabled, or the pak missing or misnamed).
+    -- The LoadMap hook runs on the game thread, so the delayed check is scheduled from there and runs there. Not
+    -- ExecuteWithDelay + ExecuteInGameThread: an ExecuteInGameThread from the async thread can lose its callback while
+    -- this state's Lua runs on the game thread (the channel hook, for one); lua/pkg/ui/hud.lua explains the race.
     RegisterLoadMapPostHook(function()
-        local okL, errL = pcall(ExecuteWithDelay, 3000, function()
-            local okD, errD = pcall(ExecuteInGameThread, function()
-                local ok, err = pcall(ensureClass)
-                if not ok then log.error("class check failed: %s", tostring(err)) end
-            end)
-            if not okD then log.error("class check could not be scheduled: %s", tostring(errD)) end
+        local okL, errL = pcall(ExecuteInGameThreadWithDelay, 3000, function()
+            local ok, err = pcall(ensureClass)
+            if not ok then log.error("class check failed: %s", tostring(err)) end
         end)
-        if not okL then log.error("class check could not be delayed: %s", tostring(errL)) end
+        if not okL then log.error("class check could not be scheduled: %s", tostring(errL)) end
     end)
 
     ModRef.OnUnload = function()

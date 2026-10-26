@@ -128,8 +128,13 @@ function StaticFindObject(path) return objects[path] or INVALID end
 function FName(s) return s end
 function FText(s) return { s = s } end
 local loops = {}
-function LoopAsync(ms, fn) loops[#loops + 1] = fn end
-function ExecuteInGameThread(fn) fn() end
+-- The poller must never use the async thread (hud.lua, top): LoopAsync and ExecuteInGameThread fail the test.
+local asyncUsed = 0
+function LoopAsync() asyncUsed = asyncUsed + 1 end
+function ExecuteInGameThread() asyncUsed = asyncUsed + 1 end
+function LoopInGameThreadWithDelay(ms, fn) loops[#loops + 1] = fn; return #loops end
+local cancelled = 0
+function CancelDelayedAction(h) if loops[h] then loops[h] = function() end; cancelled = cancelled + 1 end return true end
 ModRef = {}
 local offThread = false
 function Nucleus_Deref(h)
@@ -437,7 +442,27 @@ tick()
 ok(countLogs("^DEBUG hud tick n=") >= 1, "timing: minute summary at debug level")
 H._summary()
 ok(countLogs("hud tick summary n=") == 1, "timing: unload summary")
+ok(countLogs("^DEBUG hud tick n=.* steady n=%d+ avg [%d%.]+ max %d+ us, events n=%d+") >= 1, "timing: steady and event ticks apart")
+
+-- profiler: off by default; on, an event tick is one line and steady ticks one line a minute
+ok(countLogs("hud prof") == 0, "profiler: off by default")
+H._profile(true)
+local cur; for _, x in ipairs(HUDS) do if x.__alive and x.inViewport then cur = x end end
+cur.inViewport = false; tick() -- lost: an event tick
+ok(countLogs("^DEBUG hud prof event=lost total=%d+ us .*poll%.find=") == 1, "profiler: event tick line", logs[#logs])
+cur.inViewport = true; tick(); tick() -- back in the viewport: attached, re-attach work
+ok(countLogs("^DEBUG hud prof event=attached .*watch%.core=") == 1, "profiler: attach tick names core's watcher")
+for _ = 1, 3 do tick() end
+clock = clock + 61 * 1000000
+tick()
+ok(countLogs("^DEBUG hud prof steady n=%d+ avg=") == 1, "profiler: steady minute line")
+H._summary()
+ok(countLogs("hud prof event ticks %(event:us%): lost:%d+ attached:%d+") == 1, "profiler: event ticks in the summary")
+H._profile(false)
+ok(C.prof == nil, "profiler: nothing left after a tick")
 
 H.unwatch(token); H.unwatch(throws)
+ok(asyncUsed == 0, "poller: never LoopAsync or ExecuteInGameThread", asyncUsed)
+ok(cancelled == 0 or H.stats().running == true, "poller: a stop cancels its loop")
 print(string.format("ui_test: %d passed, %d failed", pass, fail))
 os.exit(fail == 0 and 0 or 1)

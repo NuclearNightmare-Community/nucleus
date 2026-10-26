@@ -1299,6 +1299,37 @@ local function buildUi()
     end)
 end
 
+-- ---------------------------------------------------------------- soak (story 7 AC 7, unattended)
+-- menu -> match, Enter at touchdown, then SOAK_S seconds idle in the match with one element and one watcher, the way
+-- a real dependent sits there. The helpers' one-minute DEBUG tick lines (and the profiler's) are the measurement;
+-- check.ps1 judges them. Never travels again and never touches the HUD itself.
+local SOAK_S = 600
+local function buildSoak()
+    step("soak: watch and create", function()
+        UIS.recorder = core.ui.hud.watch(recorder)
+        uiCreate("soak", { text = CORE .. " soak" })
+    end)
+    waitWorld("menu1", "NewMainMenu", 120)
+    travel("match1", MATCH_MAP, "listen")
+    waitWorld("match1", "SmallMap", 150)
+    touchdown("match1")
+    step("match1: shown", function() return function() return core.ui.text.isShown(UIS.soak) end, 120, "match1 'soak' isShown" end)
+    step("match1: idle", function()
+        UIS.soakStart = os.time()
+        say("SOAK idle %d s in the match from here", SOAK_S)
+        return function() return os.time() >= UIS.soakStart + SOAK_S end, SOAK_S + 30, "soak idle"
+    end)
+    step("match1: report", function()
+        local _, n = widgetOf("soak")
+        check(n == 1 and core.ui.text.isShown(UIS.soak), "SOAKONE match1 'soak' still shown, one widget (found %d)", n)
+        local st = core.ui.hud.stats()
+        say("SOAKTICK ticks=%d poll avg=%.1f max=%d us, watchers avg=%.1f max=%d us; steady n=%d avg=%.1f max=%d us; events n=%d avg=%.1f max=%d us; findAll=%d",
+            st.ticks, st.pollAvg, st.pollMax, st.watchAvg, st.watchMax, st.steadyTicks, st.steadyAvg, st.steadyMax,
+            st.eventTicks, st.eventAvg, st.eventMax, st.findAllCalls)
+        check((EV.count.attached or 0) >= 2, "SOAKEVENTS attached=%d shown=%d hidden=%d lost=%d", EV.count.attached or 0, EV.count.shown or 0, EV.count.hidden or 0, EV.count.lost or 0)
+    end)
+end
+
 -- ---------------------------------------------------------------- runner (game thread, every 250 ms)
 local idx, waiting, busy, finished = 0, nil, false, false
 local function finish()
@@ -1593,35 +1624,41 @@ local function startManual()
         if not ok then warnOnce("event " .. tostring(info and info.event), err) end
     end)
     if not okW then warnOnce("watch", errW) end
-    local queued = false
-    LoopAsync(MANUAL_TICK_MS, function()
-        if not queued then
-            queued = true
-            local okE, errE = pcall(ExecuteInGameThread, function()
-                local ok, err = pcall(manualTick)
-                if not ok then warnOnce("tick", err) end
-                queued = false
-            end)
-            if not okE then queued = false; warnOnce("scheduling", errE) end
-        end
-        return false
+    -- A game-thread loop registered from the game thread (onReady runs there): never LoopAsync + ExecuteInGameThread,
+    -- which can lose callbacks in the pinned UE4SS (core's ui/hud.lua explains the race).
+    local okL, errL = pcall(LoopInGameThreadWithDelay, MANUAL_TICK_MS, function()
+        local ok, err = pcall(manualTick)
+        if not ok then warnOnce("tick", err) end
     end)
+    if not okL then warnOnce("scheduling", errL) end
+end
+
+-- The helpers' per-phase tick profiler (diagnostic, not core's public API): the same module instance core.ui uses,
+-- since both live in this Lua state.
+local function profile(on)
+    local ok, err = pcall(function() require(CORE:lower() .. ".ui.hud")._profile(on) end)
+    if not ok then say("WARN could not switch the UI tick profiler: %s", firstLine(err)) end
 end
 
 client.connect{
     mod = ME, need = NEED,
     onReady = function(api)
         core = api
-        if SCENARIO == "manual" then startManual() return end
+        if SCENARIO == "manual" then profile(true) startManual() return end
         if SCENARIO == "bad-input" then buildBadInput()
-        elseif SCENARIO == "ui" then
+        elseif SCENARIO == "ui" or SCENARIO == "soak" then
             core.log.debugEnabled = true -- the helpers' DEBUG lines (tick summaries, freed handles) are part of the check
-            buildUi()
+            profile(true)
+            if SCENARIO == "ui" then buildUi() else buildSoak() end
         else buildSkeleton() end
-        LoopAsync(250, function()
-            ExecuteInGameThread(tick)
-            return finished
+        -- The runner: a game-thread loop registered here on the game thread, cancelled once finished. Never
+        -- LoopAsync + ExecuteInGameThread (core's ui/hud.lua: the pinned UE4SS can lose such callbacks).
+        local runner
+        local okL, res = pcall(LoopInGameThreadWithDelay, 250, function()
+            tick()
+            if finished and runner then pcall(CancelDelayedAction, runner); runner = nil end
         end)
+        if okL then runner = res else say("END result=FAIL checks=0 failures=1 reason=runner (%s)", firstLine(res)) end
     end,
     onFail = function(msg)
         -- client.connect has already logged the one-line reason.

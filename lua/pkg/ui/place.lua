@@ -176,12 +176,14 @@ end
 local function setSlot(el, w, s, ax, ay)
     local key = string.format("%g,%g,%g,%g,%g,%g", ax, ay, s.alx, s.aly, s.x, s.y)
     if el.slotKey == key then return end
+    local t = C.pt()
     local slot = w.Slot
     C.count(); slot:SetAutoSize(true)
     C.count(); slot:SetAnchors({ Minimum = { X = ax, Y = ay }, Maximum = { X = ax, Y = ay } })
     C.count(); slot:SetAlignment({ X = s.alx, Y = s.aly })
     C.count(); slot:SetPosition({ X = s.x, Y = s.y })
     el.slotKey = key
+    C.pa("place.slot", t)
 end
 
 -- The near element's rectangle in its anchor's frame, and its anchors; nil when it is absent or not drawn.
@@ -215,8 +217,10 @@ end
 function P.applyVisibility(el, w)
     local want = P.wantedVisibility(el)
     if el.appliedVis == want then return end
+    local t = C.pt()
     C.count(); w:SetVisibility(want)
     el.appliedVis = want
+    C.pa("place.vis", t)
 end
 
 -- Places one near or absolute element (corner elements go through restack).
@@ -247,8 +251,12 @@ end
 
 -- Height of a live widget for stacking (desired size after a layout prepass when asked).
 local function heightOf(w, prepass)
+    local t = C.pt()
     if prepass then pcall(function() C.count(); w:ForceLayoutPrepass() end) end
+    C.pa("place.prepass", t)
+    t = C.pt()
     local ds = w:GetDesiredSize()
+    C.pa("place.measure", t)
     return tonumber(ds.Y) or 0
 end
 
@@ -299,7 +307,9 @@ function P.tick(hud, live)
             if w then
                 local pl = el.place
                 if pl.near then
+                    local t = C.pt()
                     local okR, r = pcall(nearTarget, hud, pl.near)
+                    C.pa("place.nearCheck", t)
                     local key = okR and r and not r.stretched and string.format("%g,%g,%g,%g,%g,%g", r.l, r.t, r.r, r.b, r.ax, r.ay) or nil
                     if (key == nil) ~= (el.nearAbsent == true) or key ~= el.nearRect then placeSingle(el, w, hud) end
                 elseif pl.corner and el.visible then

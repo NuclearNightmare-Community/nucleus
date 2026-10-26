@@ -205,6 +205,7 @@ end
 -- Puts one element's widget into the canvas: reuses the element's own widget or one tagged with its id, else creates
 -- one. Then re-applies text and style; placement and visibility follow in placeAll. Raises on failure (callers pcall).
 local function attachOne(el, hud, canvas, byId, reason)
+    local t = C.pt()
     local live = liveIn(canvas)
     local w = live(el)
     local tagged = byId[el.id] or {}
@@ -218,14 +219,18 @@ local function attachOne(el, hud, canvas, byId, reason)
             if d:GetAddress() ~= keep then removeWidget(d); extra = extra + 1 end
         end
     end
+    C.pa("attach.find", t)
     if extra > 0 then C.log.warn("text '%s': removed %d duplicate widget(s) from the HUD canvas", el.id, extra) end
     byId[el.id] = nil
     if not w then
+        t = C.pt()
         local cls = textClass()
+        C.pa("attach.class", t)
         if not cls then
             C.warnOnce("pak:" .. el.id, "text '%s' stays pending: %s is not loaded (is Content/Paks/LogicMods/%s.pak installed?)", el.id, C.TEXT_CLASS, C.NAME)
             return false
         end
+        t = C.pt()
         local owner
         local okO, o = pcall(function() return hud:GetOwningPlayer() end)
         if okO and C.valid(o) then owner = o end
@@ -234,29 +239,46 @@ local function attachOne(el, hud, canvas, byId, reason)
             local okP, pc = pcall(function() return StaticFindObject("/Script/Engine.Default__GameplayStatics"):GetPlayerController(world, 0) end)
             if okP and C.valid(pc) then owner = pc end
         end
+        C.pa("attach.owner", t)
         if not owner then return false end -- between worlds; the next HUD event tries again
         C.count()
+        t = C.pt()
         w = StaticFindObject("/Script/UMG.Default__WidgetBlueprintLibrary"):Create(world, cls, owner)
+        C.pa("attach.create", t)
         if not C.valid(w) then error("creating " .. C.TEXT_SHORT .. " failed") end
+        t = C.pt()
         setTag(w, el.id)
+        C.pa("attach.tag", t)
         el.appliedVis = nil
+        t = C.pt()
         P.applyVisibility(el, w) -- before it joins the canvas, so a hidden element never flashes
+        C.pa("attach.vis", t)
+        t = C.pt()
         C.count(); canvas:AddChildToCanvas(w)
+        C.pa("attach.add", t)
         how = "created"
         C.stats.attachCreated = C.stats.attachCreated + 1
     else
         C.stats.attachReused = C.stats.attachReused + 1
     end
+    t = C.pt()
     applyText(el, w)
+    C.pa("attach.text", t)
+    t = C.pt()
     applyStyle(el, w)
+    C.pa("attach.style", t)
+    t = C.pt()
     local path = C.pathOf(w)
     if path ~= el.path or not el.ref then
         if el.ref then C.log.debug("ui '%s': new widget %s; freed the handle %s of the old one (%s)", el.id, path, tostring(el.ref), tostring(el.path)) end
         freeRef(el)
         el.ref, el.path = C.ref(w), path
     end
+    C.pa("attach.ref", t)
     el.attached, el.slotKey, el.appliedVis, el.retryAt = true, nil, nil, nil
+    t = C.pt()
     C.log.info("ui attach '%s' %s %s (%s)", el.id, how, path, reason)
+    C.pa("attach.log", t)
     return true
 end
 
@@ -321,9 +343,13 @@ end
 -- UI-1 watcher: the behaviour behind create and place (story 10).
 local function onHud(hud, info)
     if info.event == "attached" then
+        local t = C.pt()
         local canvas = canvasOf(hud)
+        C.pa("core.canvas", t)
         if not canvas then C.warnOnce("nocanvas", "the HUD has no OwningCanvas (%s); elements stay pending", tostring(info.path)) return end
+        t = C.pt()
         local okS, byId, orphans = pcall(scan, canvas)
+        C.pa("core.scan", t)
         if not okS then C.warnOnce("scan", "scanning the HUD canvas failed: %s", tostring(byId)) byId, orphans = {}, {} end
         -- Orphans: widgets tagged with this mod but an id it doesn't know (a hot reload's leftovers, or removed
         -- elements on a HUD that came back). Removed, never adopted.
@@ -334,12 +360,16 @@ local function onHud(hud, info)
         end
         for _, el in ipairs(C.order) do
             if not el.removed then
+                t = C.pt()
                 local ok, res = pcall(attachOne, el, hud, canvas, byId, info.reason)
+                C.pa("core.attach", t)
                 if not ok or not res then el.attached, el.retryAt = false, tick + RETRY_TICKS end
                 if not ok then C.warnOnce("attach:" .. el.id, "attach %s: %s", el.id, tostring(res):match("^[^\n]*")) end
             end
         end
+        t = C.pt()
         placeAll(hud, canvas, true)
+        C.pa("core.placeAll", t)
     elseif info.event == "lost" then
         -- Never touch the widgets: there may be none, and the old ones are the game's to clean up.
         for _, el in ipairs(C.order) do
@@ -360,14 +390,20 @@ end
 -- stack heights.
 local function onTick(hud)
     tick = tick + 1
+    local t = C.pt()
     local canvas = canvasOf(hud)
+    C.pa("tick.canvas", t)
     if not canvas then return end
     local live = liveIn(canvas)
     local missing = false
+    t = C.pt()
     for _, el in ipairs(C.order) do
         if not el.removed and not live(el) and (el.retryAt == nil or tick >= el.retryAt) then missing = true break end
     end
+    C.pa("tick.members", t)
     if missing then
+        C.tickEvent = "re-attach"
+        t = C.pt()
         local okS, byId = pcall(scan, canvas)
         if not okS then byId = {} end
         local any = false
@@ -383,8 +419,11 @@ local function onTick(hud)
             end
         end
         if any then placeAll(hud, canvas, true) end
+        C.pa("tick.reattach", t)
     end
+    t = C.pt()
     P.tick(hud, live)
+    C.pa("tick.place", t)
 end
 
 local function ensureWatching()

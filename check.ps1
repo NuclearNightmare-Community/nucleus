@@ -17,7 +17,7 @@
 param(
     [string] $Instance,
     [string] $Log,
-    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'manual')]
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'soak', 'manual')]
     [string] $Scenario = 'skeleton'
 )
 $manifest = Get-Content (Join-Path $PSScriptRoot 'mod.json') -Raw | ConvertFrom-Json
@@ -48,6 +48,10 @@ $always = @(
     "!internal error"
     "!\[$N\] WARN CHANNEL request failed"
     "!\[$T\] .*STEP '.*' threw"
+    # UE4SS calling a registry value that is not the callback it queued (the cross-thread ExecuteInGameThread race,
+    # lua/pkg/ui/hud.lua), and the old poller's lost-tick watchdog: neither may happen any more.
+    '!A function requiring userdata as param #1 was called without userdata'
+    '!hud tick callback still not run'
 )
 $started = @(
     "\[$N\] native: loaded, version $Ver for UE4SS v3\.0\.1-1181-g83330635"
@@ -136,12 +140,14 @@ $ui = $started + @(
     "\[$T\] EVENT \d+ attached reason=HUD back in the viewport"
     "#1|\[$T\] WARN hud watcher \d+: "
     "#1|\[$T\] WARN text 'long': text is longer than 256 characters"
-    "!\[$T\] WARN (?!hud watcher \d+: |text 'long': |hud slow tick|hud tick callback still not run)"
+    "!\[$T\] WARN (?!hud watcher \d+: |text 'long': |hud slow tick .*; HUD event: )"
     "!\[$T\] ERROR"
     "\[$T\] DEBUG hud tick n=\d+ "
     "\[$T\] DEBUG ui 'pre': (widget gone with the HUD; freed handle|new widget .*; freed the handle)"
-    "?!\[$T\] WARN hud slow tick"
-    "?!\[$T\] WARN hud tick callback still not run"
+    # Story 7: steady-state ticks never pass 1 ms. A tick that handles a HUD event (attach after a new HUD) may; soft.
+    "!\[$T\] WARN hud slow tick .*steady state"
+    "?!\[$T\] WARN hud slow tick .*HUD event"
+    "\[$T\] DEBUG hud prof event=attached "
     "?\[$T\] hud tick summary n="
     "\[$T\] UITICK ticks=\d+ "
     "\[$T\] OK UIDEREF match1 "
@@ -177,6 +183,24 @@ $ui = $started + @(
     "\[$T\] OK UIEVENTS "
     "\[$T\] OK UICLEAN match2 "
 )
+# Story 7 AC 7 unattended: 10 minutes idle in one match with one element and one watcher. The one-minute DEBUG lines
+# are judged against story 7's targets below the pattern checks (every full window after "SOAK idle": steady
+# maximum under 500 us, poll average under 100 us), with the profiler on, so the numbers include its probes.
+$soak = $started + @(
+    "\[$T\] SCENARIO soak "
+    "\[$T\] END result=PASS"
+    "#1|\[$T\] hud seed FindAllOf\(InventoryUI_C\) call 1 "
+    "\[$T\] SOAK idle "
+    "\[$T\] SOAKTICK ticks=\d+ .*findAll=1$"
+    "\[$T\] OK SOAKONE "
+    "\[$T\] ui attach 'soak' created "
+    "!\[$T\] WARN (?!hud slow tick .*; HUD event: )"
+    "!\[$T\] ERROR"
+    "!\[$T\] WARN hud slow tick .*steady state"
+    "?!\[$T\] WARN hud slow tick .*HUD event"
+    "\[$T\] DEBUG hud tick n=\d+ "
+    "\[$T\] DEBUG hud prof steady n=\d+ "
+)
 # Hand testing: only that nothing broke. What the player did (where they went, whether the HUD showed) is not judged;
 # the manual test's own caught errors are soft (warn) checks.
 $manual = @(
@@ -192,6 +216,7 @@ $manual = @(
 $expect = @{
     'skeleton'  = $skeleton
     'ui'        = $ui
+    'soak'      = $soak
     'manual'    = $manual
     'bad-input' = $badInput
     'no-native' = @(
@@ -234,6 +259,24 @@ foreach ($pattern in ($always + $expect[$Scenario])) {
         $label = $pattern
     }
     if ($ok) { Write-Host "ok:   $label" } else { Write-Host "FAIL: $label"; $failed++ }
+}
+if ($Scenario -eq 'soak') {
+    # Story 7 AC 7: the one-minute windows that lie wholly in the idle match (the first one after "SOAK idle" may
+    # still hold the touchdown's HUD events, so only windows with no event tick count).
+    $idle = [Array]::FindIndex([string[]]$lines, [Predicate[string]]{ param($l) $l -match "\[$T\] SOAK idle " })
+    $windows = 0
+    if ($idle -ge 0) {
+        foreach ($l in $lines[$idle..($lines.Count - 1)]) {
+            if ($l -match "\[$T\] DEBUG hud tick n=(\d+) .*poll avg ([\d.]+) max (\d+), .*steady n=(\d+) avg ([\d.]+) max (\d+) us, events n=(\d+)") {
+                if ([int]$Matches[7] -gt 0) { continue }
+                $windows++
+                $ok = ([double]$Matches[2] -lt 100) -and ([int]$Matches[6] -lt 500)
+                Write-Host ("{0} window {1}: steady n={2} avg {3} max {4} us, poll avg {5} max {6} us (targets: poll avg < 100, max < 500)" -f $(if ($ok) { 'ok:  ' } else { 'FAIL:' }), $windows, $Matches[4], $Matches[5], $Matches[6], $Matches[2], $Matches[3])
+                if (-not $ok) { $failed++ }
+            }
+        }
+    }
+    if ($windows -lt 8) { Write-Host "FAIL: only $windows event-free one-minute window(s) in the idle match (expected at least 8)"; $failed++ }
 }
 if ($failed) { Write-Host "$failed check(s) failed."; exit 1 }
 Write-Host ("All checks passed{0}." -f $(if ($warned) { " ($warned soft check(s) not met)" } else { '' }))
