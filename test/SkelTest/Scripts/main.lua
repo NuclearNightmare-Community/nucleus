@@ -1243,6 +1243,24 @@ local function buildUi()
         UIS.oldPre = wp and { handle = core.ref(wp), path = pathOf(wp) } or nil
     end)
 
+    -- hidden / shown on the same HUD (story 7 AC 2), made here rather than relied on: whether the lobby's hidden HUD
+    -- lasts the two ticks an attach takes depends on load timing.
+    step("match1: hide the HUD", function()
+        local hud = core.ui.hud.find()
+        UIS.hudVis = tonumber(hud:GetVisibility()) or 0
+        UIS.evBefore = #EV.list
+        hud:SetVisibility(2) -- Hidden
+        return eventAfter(UIS.evBefore, "hidden"), 10, "hidden after SetVisibility(Hidden)"
+    end)
+    step("match1: show the HUD", function()
+        check(core.ui.hud.isVisible() == false and T().isShown(UIS.pre) == false, "UIHUDHIDE match1 HUD hidden: isVisible=false, 'pre' isShown=false")
+        core.ui.hud.find():SetVisibility(UIS.hudVis)
+        return eventAfter(UIS.evBefore, "shown"), 10, "shown after restoring visibility"
+    end)
+    step("match1: shown again", function()
+        check(core.ui.hud.isVisible() == true and T().isShown(UIS.pre) == true, "UIHUDSHOW match1 HUD visibility restored (%d): isVisible=true, 'pre' isShown=true", UIS.hudVis)
+    end)
+
     -- Map changes: menu2 and match2 (story 10 AC 3, story 8 AC 13), with the handle of the old widget freed.
     travel("menu2", MENU_MAP, "")
     waitWorld("menu2", "NewMainMenu", 150)

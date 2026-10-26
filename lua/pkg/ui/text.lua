@@ -25,6 +25,14 @@ local TAG_PREFIX = C.LOWER .. ":" -- full tag: <core>:<modTag>:<id>
 local tick = 0
 local watching = false
 local attachedThisTick = false  -- set by the attached watcher, read by the same tick's onTick
+local pendingLog = nil           -- the attach line of the last attached event, logged on the next tick
+local function flushLog()
+    if not pendingLog then return end
+    local t = C.pt()
+    C.log.info("%s", pendingLog)
+    C.pa("core.log", t)
+    pendingLog = nil
+end
 
 -- ---------------------------------------------------------------- validation (pure)
 
@@ -110,14 +118,27 @@ end
 
 local function tagOf(id) return TAG_PREFIX .. C.modTag .. ":" .. id end
 
+-- The widget class, kept as a weak handle between ticks. Never StaticFindObject(C.TEXT_CLASS): when the class isn't
+-- loaded that misses, and a miss in the pinned UE4SS scans every object (4-5 ms per call on V8.1.2, twice per HUD
+-- event with two elements). GetAsset returns the loaded class at once and loads it otherwise.
+local classRef = nil
 local function textClass()
-    local cls = C.found(C.TEXT_CLASS)
-    if cls then return cls end
+    if classRef then
+        local okD, cls = pcall(C.deref, classRef)
+        if okD and cls then return cls end
+        pcall(C.free, classRef)
+        classRef = nil
+    end
+    local t = C.pt()
     local helpers = StaticFindObject("/Script/AssetRegistry.Default__AssetRegistryHelpers")
     local ok, got = pcall(function()
         return helpers:GetAsset({ PackageName = FName(C.TEXT_PKG), AssetName = FName(C.TEXT_SHORT) })
     end)
-    return ok and C.valid(got) and got or nil
+    C.pa("class.load", t)
+    if not (ok and C.valid(got)) then return nil end
+    local okR, h = pcall(C.ref, got)
+    if okR then classRef = h end
+    return got
 end
 
 local function canvasOf(hud)
@@ -205,7 +226,7 @@ end
 
 -- Puts one element's widget into the canvas: reuses the element's own widget or one tagged with its id, else creates
 -- one. Then re-applies text and style; placement and visibility follow in placeAll. Raises on failure (callers pcall).
-local function attachOne(el, hud, canvas, byId, reason)
+local function attachOne(el, hud, canvas, byId, reason, report)
     local t = C.pt()
     local live = liveIn(canvas)
     local w = live(el)
@@ -277,9 +298,13 @@ local function attachOne(el, hud, canvas, byId, reason)
     end
     C.pa("attach.ref", t)
     el.attached, el.slotKey, el.appliedVis, el.retryAt = true, nil, nil, nil
-    t = C.pt()
-    C.log.info("ui attach '%s' %s %s (%s)", el.id, how, path, reason)
-    C.pa("attach.log", t)
+    if report then
+        report[#report + 1] = string.format("'%s' %s %s", el.id, how, path)
+    else
+        t = C.pt()
+        C.log.info("ui attach '%s' %s %s (%s)", el.id, how, path, reason)
+        C.pa("attach.log", t)
+    end
     return true
 end
 
@@ -343,6 +368,7 @@ end
 
 -- UI-1 watcher: the behaviour behind create and place (story 10).
 local function onHud(hud, info)
+    flushLog()
     if info.event == "attached" then
         local t = C.pt()
         local canvas = canvasOf(hud)
@@ -359,10 +385,13 @@ local function onHud(hud, info)
             for i, o in ipairs(orphans) do removeWidget(o.w); if i <= 8 then ids[#ids + 1] = o.id end end
             C.log.info("ui removed %d orphan widget(s) of %s from the HUD canvas (ids: %s%s)", #orphans, C.mod, table.concat(ids, ", "), #orphans > 8 and ", ..." or "")
         end
+        -- One log line for the whole event, not one per element: a UE4SS log line costs 150-500 us on the game
+        -- thread (measured on V8.1.2 with the console enabled).
+        local report = {}
         for _, el in ipairs(C.order) do
             if not el.removed then
                 t = C.pt()
-                local ok, res = pcall(attachOne, el, hud, canvas, byId, info.reason)
+                local ok, res = pcall(attachOne, el, hud, canvas, byId, info.reason, report)
                 C.pa("core.attach", t)
                 if not ok or not res then el.attached, el.retryAt = false, tick + RETRY_TICKS end
                 if not ok then C.warnOnce("attach:" .. el.id, "attach %s: %s", el.id, tostring(res):match("^[^\n]*")) end
@@ -371,19 +400,24 @@ local function onHud(hud, info)
         t = C.pt()
         placeAll(hud, canvas, true)
         C.pa("core.placeAll", t)
+        -- Logged on the next tick: the line costs 0.3-0.8 ms on V8.1.2 (the attach tick's largest item), so it gets a
+        -- tick of its own.
+        if #report > 0 then pendingLog = string.format("ui attach %s (%s)", table.concat(report, ", "), tostring(info.reason)) end
         attachedThisTick = true
     elseif info.event == "lost" then
         -- Never touch the widgets: there may be none, and the old ones are the game's to clean up.
+        local freed = {}
         for _, el in ipairs(C.order) do
             el.attached = false
             if el.ref then
                 local okD, w = pcall(C.deref, el.ref)
                 if okD and w == nil then
-                    C.log.debug("ui '%s': widget gone with the HUD; freed handle %s", el.id, tostring(el.ref))
+                    freed[#freed + 1] = string.format("'%s' %s", el.id, tostring(el.ref))
                     freeRef(el)
                 end
             end
         end
+        if #freed > 0 then C.log.debug("ui widget(s) gone with the HUD; freed handle(s) %s", table.concat(freed, ", ")) end
     elseif info.event == "shown" then
         P.settle() -- children of a HUD that was hidden may only now be measured: re-check stack heights
     end
@@ -399,6 +433,7 @@ local MEMBER_TICKS = 10          -- 5 s
 local function onTick(hud)
     tick = tick + 1
     if attachedThisTick then attachedThisTick = false return end
+    if pendingLog then flushLog() C.tickEvent = "attach log" return end
     local full = tick % MEMBER_TICKS == 0
     local t = C.pt()
     local live
@@ -456,6 +491,9 @@ local function ensureWatching()
     watching = true
     H._watch(onHud)
     H._ticker(onTick)
+    -- The widget class is loaded again after a map change (nothing keeps it alive): do that on the tick before the
+    -- attach.
+    H._prepare(function() if #C.order > 0 then textClass() end end)
 end
 
 -- Attaches one element now when a HUD is live (create, or place on a pending element).

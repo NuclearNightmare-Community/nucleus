@@ -30,9 +30,14 @@ local MAX_PATHS = 16
 local SLOW_US = 1000             -- one tick over this logs a WARN (at most once a minute)
 local MINUTE_US = 60 * 1000000
 
--- ---- tracked HUD paths (strings only), oldest first
+-- ---- tracked HUDs: path strings plus a weak handle each, oldest first
+-- A tick re-finds each HUD by its weak handle (<Core>_Deref: a lookup in core's table, nil once the object is gone),
+-- not by StaticFindObject(path): in the pinned UE4SS a StaticFindObject that misses falls back to a scan of every
+-- object (UObjectGlobals.cpp FindObject, "A miss falls through to the scan"), 4-6.5 ms on V8.1.2 in the first tick
+-- after a map change. The path stays as the fallback for a HUD learned before connect (no natives yet).
 local paths = {}                 -- list of path strings
 local known = {}                 -- path -> true
+local handleOf = {}              -- path -> weak handle
 local localOwned = {}            -- path -> true once its owning player was found to be the local one
 local seeded = false
 local droppedLiveWarned = false
@@ -41,31 +46,57 @@ local function isTemplate(p)
     return p:find("Default__", 1, true) ~= nil or p:sub(1, #"/Game/Graphics/Inventory/InventoryUI.") == "/Game/Graphics/Inventory/InventoryUI."
 end
 
--- Adds a path; at the cap, drops paths that no longer resolve first, then the oldest. resolveOk: whether this runs where
--- StaticFindObject may be called (not inside the creation callback).
-local function track(p, resolveOk)
+local function forget(p)
+    if handleOf[p] and C.free then pcall(C.free, handleOf[p]) end
+    known[p], handleOf[p], localOwned[p] = nil, nil, nil
+end
+
+-- The live HUD object for a tracked path, or nil. Never scans once the path has a handle.
+local function resolve(p)
+    local h = handleOf[p]
+    if h then
+        local ok, w = pcall(C.deref, h)
+        return ok and w or nil
+    end
+    local w = C.found(p)
+    if w and C.ref then
+        local ok, nh = pcall(C.ref, w)
+        if ok then handleOf[p] = nh end
+    end
+    return w
+end
+
+-- Adds a path (and a handle to obj when the natives are bound); at the cap, drops paths that no longer resolve
+-- first, then the oldest.
+local function track(p, obj)
     if type(p) ~= "string" or known[p] or isTemplate(p) then return end
-    if #paths >= MAX_PATHS and resolveOk then
+    if #paths >= MAX_PATHS then
         for i = #paths, 1, -1 do
-            if not C.found(paths[i]) then known[paths[i]], localOwned[paths[i]] = nil, nil; table.remove(paths, i) end
+            if not resolve(paths[i]) then forget(paths[i]); table.remove(paths, i) end
         end
     end
     if #paths >= MAX_PATHS then
         local old = table.remove(paths, 1)
-        known[old], localOwned[old] = nil, nil
-        if resolveOk and C.found(old) and not droppedLiveWarned then
+        local wasLive = resolve(old) ~= nil
+        forget(old)
+        if wasLive and not droppedLiveWarned then
             droppedLiveWarned = true
             if C.log then C.log.warn("hud tracking is full (%d paths): dropped a live HUD %s; is something creating HUDs in a loop?", MAX_PATHS, old) end
         end
     end
     paths[#paths + 1] = p
     known[p] = true
+    if obj and C.ref then
+        local ok, h = pcall(C.ref, obj)
+        if ok then handleOf[p] = h end
+    end
 end
 
--- 1. Learn new HUDs from their creation. Only the path is recorded: the widget is still being constructed, so nothing
--- is called on it but GetFullName. Never returns true (that would unregister the callback).
+-- 1. Learn new HUDs from their creation. Only its path is read and a weak handle taken (an address lookup in
+-- GUObjectArray): nothing is called on the widget, which may still be under construction. The pinned UE4SS runs
+-- these callbacks on the game thread, from its engine-tick processing. Never returns true (that would unregister).
 local okNotify, errNotify = pcall(NotifyOnNewObject, C.HUD_CLASS, function(obj)
-    pcall(function() track(C.pathOf(obj), false) end)
+    pcall(function() track(C.pathOf(obj), obj) end)
     return false
 end)
 
@@ -78,7 +109,7 @@ local function seed()
     local list = FindAllOf(C.HUD_SHORT) or {}
     local n = 0
     for _, w in ipairs(list) do
-        if C.valid(w) then n = n + 1; track(C.pathOf(w), true) end
+        if C.valid(w) then n = n + 1; track(C.pathOf(w), w) end
     end
     local dt = C.micros and (C.micros() - t0) or 0
     if C.log then C.log.info("hud seed FindAllOf(%s) call %d found %d HUD(s) in %d us; new HUDs come from their creation callback%s",
@@ -101,10 +132,10 @@ local function poll()
     for i = #paths, 1, -1 do
         local p = paths[i]
         local t = C.pt()
-        local w = C.found(p)
+        local w = resolve(p)
         C.pa("poll.find", t)
         if not w then
-            known[p], localOwned[p] = nil, nil; table.remove(paths, i)
+            forget(p); table.remove(paths, i)
         else
             t = C.pt()
             local ok, inVp = pcall(function() return w:IsInViewport() end)
@@ -196,6 +227,7 @@ local T = newTiming()            -- the current one-minute window
 T.windowStart, T.lastSlowWarn = nil, nil
 local TOT = newTiming()          -- since the poller first started
 local tickers = {}               -- internal per-tick callbacks (text.lua): fn(hud, path)
+local preparers = {}             -- internal (text.lua): fn() on the tick that first sees a new HUD, a tick before attached
 
 local function deliver(w, hud, info)
     if w.dead then return end
@@ -241,7 +273,7 @@ local function decide(hud, path, vis)
     if path ~= S.path then
         -- A new, replaced or returning HUD counts on the second tick that sees it, so one the game replaces at once
         -- is skipped.
-        if S.cand ~= path then S.cand = path return nil end
+        if S.cand ~= path then S.cand, S.prepare = path, true return nil end
         S.cand = nil
         local reason = (S.path and ("HUD replaced (was " .. S.path .. ")"))
             or (path == S.gonePath and "HUD back in the viewport") or "HUD appeared"
@@ -344,6 +376,18 @@ local function tick()
     local t1 = C.micros()
     local info = decide(hud, path, vis)
     local event = info and info.event
+    if S.prepare then
+        -- A new HUD was seen once; it is attached on the next tick. Work that doesn't need it (loading the widget
+        -- class) is done now, so the attach tick carries less.
+        S.prepare = false
+        for _, f in ipairs(preparers) do
+            local t = C.pt()
+            local ok, err = pcall(f)
+            C.pa("prepare", t)
+            if not ok then C.warnOnce("hud prepare", "hud prepare failed: %s (further failures not logged)", tostring(err):match("^[^\n]*")) end
+        end
+        event = event or "prepare"
+    end
     if info then
         dispatch(info.event ~= "lost" and hud or nil, info, false)
     elseif S.path and hud and path == S.path then
@@ -447,6 +491,7 @@ end
 -- ---- internal (text.lua)
 function H._watch(fn) return addWatcher(fn, true) end
 function H._ticker(fn) tickers[#tickers + 1] = fn end
+function H._prepare(fn) preparers[#preparers + 1] = fn end
 function H._poll() seed() return poll() end
 
 -- Diagnostic (not semver API): the per-phase tick profiler. Off by default; costs two clock reads per probe when on.

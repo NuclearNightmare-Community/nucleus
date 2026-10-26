@@ -124,6 +124,7 @@ end
 local GS = obj({ GetPlayerController = function() return PC end }, "/Script/Engine.Default__GameplayStatics")
 local WBL = obj({ Create = function(_, world, cls, owner) return newText(owner) end }, "/Script/UMG.Default__WidgetBlueprintLibrary")
 local TEXTCLASS = obj({}, "/Game/Mods/Nucleus/WBP_NucleusText.WBP_NucleusText_C")
+obj({ GetAsset = function(_, a) return objects[a.PackageName .. "." .. a.AssetName] or { IsValid = function() return false end } end }, "/Script/AssetRegistry.Default__AssetRegistryHelpers")
 local INVALID = { IsValid = function() return false end }
 function StaticFindObject(path) return objects[path] or INVALID end
 function FName(s) return s end
@@ -406,7 +407,7 @@ for _, ch in ipairs(canvas.children) do kill(ch) end
 kill(canvas); kill(hud1)
 tick()
 ok(events[#events] == "lost:HUD gone from the viewport", "map change: lost")
-ok(countLogs("widget gone with the HUD; freed handle") == 2, "map change: dead widgets' handles freed (debug)")
+ok(countLogs("widget%(s%) gone with the HUD; freed handle%(s%) 'a' %d+, 'c' %d+") == 1, "map change: dead widgets' handles freed (debug)")
 local hud2 = newHud(2)
 for _, nfy in ipairs(notify) do nfy.fn(hud2) end -- the creation callback learns the new path
 tick(); tick()
@@ -430,7 +431,7 @@ raises(function() H.unwatch("x") end, "nucleus.ui.hud.unwatch: token must be an 
 raises(function() H.watch(1) end, "nucleus.ui.hud.watch: fn must be a function, got 1", "watch: number")
 
 -- pak missing: pending, one WARN per element
-objects["/Game/Mods/Nucleus/WBP_NucleusText.WBP_NucleusText_C"] = nil
+kill(TEXTCLASS) -- unloaded: its weak handle derefs to nil, GetAsset finds nothing
 local p1 = X.create{ id = "p1", text = "x" }
 X.create{ id = "p1", text = "y" }
 tick(); tick()
@@ -468,7 +469,7 @@ clock = clock + 61 * 1000000
 tick()
 ok(countLogs("^DEBUG hud prof steady n=%d+ avg=") == 1, "profiler: steady minute line")
 H._summary()
-ok(countLogs("hud prof event ticks %(event:us%): lost:%d+ attached:%d+") == 1, "profiler: event ticks in the summary")
+ok(countLogs("hud prof event ticks %(event:us%): lost:%d+ prepare:%d+ attached:%d+") == 1, "profiler: event ticks in the summary")
 H._profile(false)
 ok(C.prof == nil, "profiler: nothing left after a tick")
 
