@@ -146,20 +146,22 @@ function C.connect(opts)
         end
     end
 
-    LoopAsync(500, function()
+    -- A game-thread loop, registered once here and cancelled from inside once done. Not LoopAsync +
+    -- ExecuteInGameThread: in the pinned UE4SS an ExecuteInGameThread from the async thread can lose its callback (and
+    -- register a stray value instead) while this mod's Lua runs on the game thread (ui/hud.lua explains the race).
+    local handle
+    local okL, res = pcall(LoopInGameThreadWithDelay, 500, function()
         if not done then
-            local okE, errE = pcall(ExecuteInGameThread, function()
-                if done then return end
-                local ok, err = pcall(attempt)
-                if not ok then
-                    local okF, errF = pcall(fail, "connect failed: " .. tostring(err))
-                    if not okF then done = true; print("[" .. tostring(mod) .. "] ERROR connect failed and so did reporting it: " .. tostring(errF) .. "\n") end
-                end
-            end)
-            if not okE then pcall(fail, "connect could not reach the game thread: " .. tostring(errE)) end
+            local ok, err = pcall(attempt)
+            if not ok then
+                local okF, errF = pcall(fail, "connect failed: " .. tostring(err))
+                if not okF then done = true; print("[" .. tostring(mod) .. "] ERROR connect failed and so did reporting it: " .. tostring(errF) .. "\n") end
+            end
         end
-        return done
+        if done and handle then pcall(CancelDelayedAction, handle); handle = nil end
     end)
+    if okL and math.type(res) == "integer" then handle = res
+    else fail("connect could not reach the game thread: " .. (okL and ("LoopInGameThreadWithDelay returned " .. tostring(res)) or tostring(res))) end
 end
 
 return C

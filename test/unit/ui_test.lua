@@ -48,6 +48,7 @@ end
 
 local TEXT_SHORT = "WBP_NucleusText_C"
 local CALLS = 0
+PARENT_CALLS = 0
 local function newText(owner)
     local w = { __class = TEXT_SHORT, text = "", bg = { 0, 0, 0, 0 }, pad = 0, vis = 0, tip = "" }
     obj(w, "/Engine/Transient.GameEngine_1:GameInstance_1." .. TEXT_SHORT .. "_" .. nextAddr)
@@ -64,7 +65,7 @@ local function newText(owner)
         if p then for i, c in ipairs(p.children) do if c == self then table.remove(p.children, i) break end end end
         self.parent = nil
     end
-    function w:GetParent() return self.parent end
+    function w:GetParent() PARENT_CALLS = PARENT_CALLS + 1; return self.parent end
     function w:ForceLayoutPrepass() end
     function w:GetDesiredSize()
         if self.vis == 1 then return vec(0, 0) end
@@ -123,13 +124,19 @@ end
 local GS = obj({ GetPlayerController = function() return PC end }, "/Script/Engine.Default__GameplayStatics")
 local WBL = obj({ Create = function(_, world, cls, owner) return newText(owner) end }, "/Script/UMG.Default__WidgetBlueprintLibrary")
 local TEXTCLASS = obj({}, "/Game/Mods/Nucleus/WBP_NucleusText.WBP_NucleusText_C")
+obj({ GetAsset = function(_, a) return objects[a.PackageName .. "." .. a.AssetName] or { IsValid = function() return false end } end }, "/Script/AssetRegistry.Default__AssetRegistryHelpers")
 local INVALID = { IsValid = function() return false end }
 function StaticFindObject(path) return objects[path] or INVALID end
 function FName(s) return s end
 function FText(s) return { s = s } end
 local loops = {}
-function LoopAsync(ms, fn) loops[#loops + 1] = fn end
-function ExecuteInGameThread(fn) fn() end
+-- The poller must never use the async thread (hud.lua, top): LoopAsync and ExecuteInGameThread fail the test.
+local asyncUsed = 0
+function LoopAsync() asyncUsed = asyncUsed + 1 end
+function ExecuteInGameThread() asyncUsed = asyncUsed + 1 end
+function LoopInGameThreadWithDelay(ms, fn) loops[#loops + 1] = fn; return #loops end
+local cancelled = 0
+function CancelDelayedAction(h) if loops[h] then loops[h] = function() end; cancelled = cancelled + 1 end return true end
 ModRef = {}
 local offThread = false
 function Nucleus_Deref(h)
@@ -400,7 +407,7 @@ for _, ch in ipairs(canvas.children) do kill(ch) end
 kill(canvas); kill(hud1)
 tick()
 ok(events[#events] == "lost:HUD gone from the viewport", "map change: lost")
-ok(countLogs("widget gone with the HUD; freed handle") == 2, "map change: dead widgets' handles freed (debug)")
+ok(countLogs("widget%(s%) gone with the HUD; freed handle%(s%) 'a' %d+, 'c' %d+") == 1, "map change: dead widgets' handles freed (debug)")
 local hud2 = newHud(2)
 for _, nfy in ipairs(notify) do nfy.fn(hud2) end -- the creation callback learns the new path
 tick(); tick()
@@ -424,7 +431,7 @@ raises(function() H.unwatch("x") end, "nucleus.ui.hud.unwatch: token must be an 
 raises(function() H.watch(1) end, "nucleus.ui.hud.watch: fn must be a function, got 1", "watch: number")
 
 -- pak missing: pending, one WARN per element
-objects["/Game/Mods/Nucleus/WBP_NucleusText.WBP_NucleusText_C"] = nil
+kill(TEXTCLASS) -- unloaded: its weak handle derefs to nil, GetAsset finds nothing
 local p1 = X.create{ id = "p1", text = "x" }
 X.create{ id = "p1", text = "y" }
 tick(); tick()
@@ -437,7 +444,37 @@ tick()
 ok(countLogs("^DEBUG hud tick n=") >= 1, "timing: minute summary at debug level")
 H._summary()
 ok(countLogs("hud tick summary n=") == 1, "timing: unload summary")
+ok(countLogs("^DEBUG hud tick n=.* steady n=%d+ avg [%d%.]+ max %d+ us %(max %d+ us without a Lua GC step; %d+ tick%(s%) with one%), events n=%d+") >= 1, "timing: steady and event ticks apart")
+
+-- steady state: canvas membership (GetParent) is checked once per 10 ticks, not per element per tick
+local live0 = 0
+for _, e in pairs(C.els) do if e.ref and deref(e.ref) then live0 = live0 + 1 end end
+PARENT_CALLS = 0
+local pc0 = {}
+for i = 1, 20 do local b = PARENT_CALLS; tick(); pc0[#pc0+1] = PARENT_CALLS - b end
+local busyTicks = 0
+for _, n in ipairs(pc0) do if n > 0 then busyTicks = busyTicks + 1 end end
+ok(live0 > 0 and busyTicks <= 2, "steady: GetParent only on one tick in 10", table.concat(pc0, ","))
+
+-- profiler: off by default; on, an event tick is one line and steady ticks one line a minute
+ok(countLogs("hud prof") == 0, "profiler: off by default")
+H._profile(true)
+local cur; for _, x in ipairs(HUDS) do if x.__alive and x.inViewport then cur = x end end
+cur.inViewport = false; tick() -- lost: an event tick
+ok(countLogs("^DEBUG hud prof event=lost total=%d+ us .*poll%.find=") == 1, "profiler: event tick line", logs[#logs])
+cur.inViewport = true; tick(); tick() -- back in the viewport: attached, re-attach work
+ok(countLogs("^DEBUG hud prof event=attached .*watch%.core=") == 1, "profiler: attach tick names core's watcher")
+for _ = 1, 3 do tick() end
+clock = clock + 61 * 1000000
+tick()
+ok(countLogs("^DEBUG hud prof steady n=%d+ avg=") == 1, "profiler: steady minute line")
+H._summary()
+ok(countLogs("hud prof event ticks %(event:us%): lost:%d+ prepare:%d+ attached:%d+") == 1, "profiler: event ticks in the summary")
+H._profile(false)
+ok(C.prof == nil, "profiler: nothing left after a tick")
 
 H.unwatch(token); H.unwatch(throws)
+ok(asyncUsed == 0, "poller: never LoopAsync or ExecuteInGameThread", asyncUsed)
+ok(cancelled == 0 or H.stats().running == true, "poller: a stop cancels its loop")
 print(string.format("ui_test: %d passed, %d failed", pass, fail))
 os.exit(fail == 0 and 0 or 1)

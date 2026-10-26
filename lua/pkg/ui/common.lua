@@ -76,11 +76,16 @@ function C.describe(v)
 end
 
 -- ---- UObject helpers (call only inside the game-thread callback that found the object)
+-- Hot-path helpers take their object as an argument instead of capturing it in a closure: a tick allocates as
+-- little as possible, because every allocation brings the Lua collector closer to a step inside the tick.
+local function isValidOf(o) return o:IsValid() end
 function C.valid(o)
     if o == nil or type(o) ~= "userdata" then return false end
-    local ok, yes = pcall(function() return o:IsValid() end)
+    local ok, yes = pcall(isValidOf, o)
     return ok and yes == true
 end
+function C.call0(o, name) return o[name](o) end   -- pcall(C.call0, o, "Fn") calls o:Fn() without a closure
+function C.prop(o, name) return o[name] end
 function C.found(path)
     if type(path) ~= "string" then return nil end
     local o = StaticFindObject(path)
@@ -89,6 +94,22 @@ end
 function C.pathOf(o) return (o:GetFullName():gsub("^%S+ ", "")) end
 function C.addr(o) return o:GetAddress() end
 function C.count() C.stats.uobjectCalls = C.stats.uobjectCalls + 1 end
+
+-- ---- tick profiler (diagnostic; off unless hud._profile(true)). Times named phases of one HUD tick with the
+-- microsecond clock. Every probe is `local t = C.pt()` ... `C.pa("phase", t)`; with the profiler off C.pt() returns nil
+-- and C.pa does nothing, so the cost when off is two function calls per probe.
+C.prof = nil                     -- nil, or { cur = { phase -> us }, calls = { phase -> n } } while a tick runs
+C.profOn = false
+function C.pt() if C.prof then return C.micros() end end
+function C.pa(key, t0)
+    local p = C.prof
+    if p and t0 then
+        local dt = C.micros() - t0
+        p.cur[key] = (p.cur[key] or 0) + dt
+        p.calls[key] = (p.calls[key] or 0) + 1
+        return dt
+    end
+end
 
 -- One log line per key for the life of this Lua state.
 local warned = {}

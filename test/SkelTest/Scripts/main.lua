@@ -1243,6 +1243,24 @@ local function buildUi()
         UIS.oldPre = wp and { handle = core.ref(wp), path = pathOf(wp) } or nil
     end)
 
+    -- hidden / shown on the same HUD (story 7 AC 2), made here rather than relied on: whether the lobby's hidden HUD
+    -- lasts the two ticks an attach takes depends on load timing.
+    step("match1: hide the HUD", function()
+        local hud = core.ui.hud.find()
+        UIS.hudVis = tonumber(hud:GetVisibility()) or 0
+        UIS.evBefore = #EV.list
+        hud:SetVisibility(2) -- Hidden
+        return eventAfter(UIS.evBefore, "hidden"), 10, "hidden after SetVisibility(Hidden)"
+    end)
+    step("match1: show the HUD", function()
+        check(core.ui.hud.isVisible() == false and T().isShown(UIS.pre) == false, "UIHUDHIDE match1 HUD hidden: isVisible=false, 'pre' isShown=false")
+        core.ui.hud.find():SetVisibility(UIS.hudVis)
+        return eventAfter(UIS.evBefore, "shown"), 10, "shown after restoring visibility"
+    end)
+    step("match1: shown again", function()
+        check(core.ui.hud.isVisible() == true and T().isShown(UIS.pre) == true, "UIHUDSHOW match1 HUD visibility restored (%d): isVisible=true, 'pre' isShown=true", UIS.hudVis)
+    end)
+
     -- Map changes: menu2 and match2 (story 10 AC 3, story 8 AC 13), with the handle of the old widget freed.
     travel("menu2", MENU_MAP, "")
     waitWorld("menu2", "NewMainMenu", 150)
@@ -1268,7 +1286,7 @@ local function buildUi()
     touchdown("match2")
     step("match2: shown", function() return function() return T().isShown(UIS.pre) end, 120, "match2 'pre' isShown" end)
     step("match2: settle", function() return afterMs(1500), 3, "settle" end)
-    -- The helpers log their DEBUG tick summary once a minute (check.ps1 requires one), and on V8.1.1 the scenario gets
+    -- The helpers log their DEBUG tick summary once a minute (check.ps1 requires one), and on V8.1.2 the scenario gets
     -- here in under a minute; wait in the live match until the first one-minute window has closed.
     step("match2: one tick summary", function()
         say("UIWAIT match2 waiting for the first one-minute hud tick summary (%d s since the first watcher)", os.time() - UIS.t0)
@@ -1296,6 +1314,77 @@ local function buildUi()
         core.ui.hud.unwatch(UIS.thrower)
         core.ui.hud.unwatch(UIS.recorder)
         check(uiStats().elements == 0, "UICLEAN match2 every element removed")
+    end)
+end
+
+-- ---------------------------------------------------------------- soak (story 7 AC 7, unattended)
+-- menu -> match, Enter at touchdown, then SOAK_S seconds idle in the match with one element and one watcher, the way
+-- a real dependent sits there. The helpers' one-minute DEBUG tick lines (and the profiler's) are the measurement;
+-- check.ps1 judges them. Never travels again and never touches the HUD itself.
+local SOAK_S = 600
+local function buildSoak()
+    step("soak: watch and create", function()
+        UIS.recorder = core.ui.hud.watch(recorder)
+        uiCreate("soak", { text = CORE .. " soak" })
+    end)
+    waitWorld("menu1", "NewMainMenu", 120)
+    travel("match1", MATCH_MAP, "listen")
+    waitWorld("match1", "SmallMap", 150)
+    touchdown("match1")
+    step("match1: shown", function() return function() return core.ui.text.isShown(UIS.soak) end, 120, "match1 'soak' isShown" end)
+    -- Ten idle minutes get the player killed (V8.1.2's monsters), and death takes the HUD away: god mode, through the
+    -- cheat manager CheatManagerEnablerMod puts on the controller.
+    step("match1: god mode", function()
+        local ok, err = pcall(function() pc().CheatManager:God() end)
+        say("SOAKGOD %s", ok and "ok (CheatManager:God)" or ("not available: " .. firstLine(err)))
+    end)
+    -- What one UE4SS call costs here, for the tick's budget: n calls of each, average and worst single call (us).
+    step("match1: call costs", function()
+        local hud = core.ui.hud.find()
+        if not hud then return end
+        local h = core.ref(hud)
+        local micros = core.clock.micros
+        local function bench(name, fn)
+            local n, sum, max = 300, 0, 0
+            for _ = 1, n do
+                local t0 = micros(); fn(); local dt = micros() - t0
+                sum = sum + dt; if dt > max then max = dt end
+            end
+            say("SOAKBENCH %-34s avg %6.2f max %5d us (n=%d)", name, sum / n, max, n)
+        end
+        bench("hud:GetVisibility()", function() return hud:GetVisibility() end)
+        bench("hud.Visibility (property)", function() return hud.Visibility end)
+        bench("hud:IsInViewport()", function() return hud:IsInViewport() end)
+        bench("pcall(closure: IsInViewport)", function() return pcall(function() return hud:IsInViewport() end) end)
+        bench("hud:GetOwningPlayer()", function() return hud:GetOwningPlayer() end)
+        bench("hud:IsValid()", function() return hud:IsValid() end)
+        bench("core.deref(handle)", function() return core.deref(h) end)
+        bench("StaticFindObject(hud path) hit", function() return StaticFindObject(EV.hudPath) end)
+        bench("micros() alone", function() end)
+        core.free(h)
+    end)
+    step("match1: idle", function()
+        UIS.soakStart = os.time()
+        UIS.soakLost = EV.count.lost or 0
+        say("SOAK idle %d s in the match from here", SOAK_S)
+        return function() return os.time() >= UIS.soakStart + SOAK_S end, SOAK_S + 30, "soak idle"
+    end)
+    step("match1: report", function()
+        -- About 7 minutes into an idle match on V8.1.2 the game restarts the player (ClientRestart, god mode or not)
+        -- and leaves no HUD in the viewport; that is the game, reported but not judged. Without a HUD there is no
+        -- canvas to count widgets in.
+        local lostIdle = (EV.count.lost or 0) - UIS.soakLost
+        if lostIdle == 0 then
+            local _, n = widgetOf("soak")
+            check(n == 1 and core.ui.text.isShown(UIS.soak), "SOAKONE match1 'soak' still shown, one widget (found %d)", n)
+        else
+            check(core.ui.text.isShown(UIS.soak) == false, "SOAKONE match1 the game took the HUD away %d time(s) while idle; 'soak' isShown=false", lostIdle)
+        end
+        local st = core.ui.hud.stats()
+        say("SOAKTICK ticks=%d poll avg=%.1f max=%d us, watchers avg=%.1f max=%d us; steady n=%d avg=%.1f max=%d us; events n=%d avg=%.1f max=%d us; findAll=%d",
+            st.ticks, st.pollAvg, st.pollMax, st.watchAvg, st.watchMax, st.steadyTicks, st.steadyAvg, st.steadyMax,
+            st.eventTicks, st.eventAvg, st.eventMax, st.findAllCalls)
+        say("%s SOAKEVENTS HUD lost while idle %d time(s); attached=%d shown=%d hidden=%d lost=%d", (EV.count.lost or 0) == UIS.soakLost and "OK" or "NOTE", (EV.count.lost or 0) - UIS.soakLost, EV.count.attached or 0, EV.count.shown or 0, EV.count.hidden or 0, EV.count.lost or 0)
     end)
 end
 
@@ -1593,35 +1682,41 @@ local function startManual()
         if not ok then warnOnce("event " .. tostring(info and info.event), err) end
     end)
     if not okW then warnOnce("watch", errW) end
-    local queued = false
-    LoopAsync(MANUAL_TICK_MS, function()
-        if not queued then
-            queued = true
-            local okE, errE = pcall(ExecuteInGameThread, function()
-                local ok, err = pcall(manualTick)
-                if not ok then warnOnce("tick", err) end
-                queued = false
-            end)
-            if not okE then queued = false; warnOnce("scheduling", errE) end
-        end
-        return false
+    -- A game-thread loop registered from the game thread (onReady runs there): never LoopAsync + ExecuteInGameThread,
+    -- which can lose callbacks in the pinned UE4SS (core's ui/hud.lua explains the race).
+    local okL, errL = pcall(LoopInGameThreadWithDelay, MANUAL_TICK_MS, function()
+        local ok, err = pcall(manualTick)
+        if not ok then warnOnce("tick", err) end
     end)
+    if not okL then warnOnce("scheduling", errL) end
+end
+
+-- The helpers' per-phase tick profiler (diagnostic, not core's public API): the same module instance core.ui uses,
+-- since both live in this Lua state.
+local function profile(on)
+    local ok, err = pcall(function() require(CORE:lower() .. ".ui.hud")._profile(on) end)
+    if not ok then say("WARN could not switch the UI tick profiler: %s", firstLine(err)) end
 end
 
 client.connect{
     mod = ME, need = NEED,
     onReady = function(api)
         core = api
-        if SCENARIO == "manual" then startManual() return end
+        if SCENARIO == "manual" then profile(true) startManual() return end
         if SCENARIO == "bad-input" then buildBadInput()
-        elseif SCENARIO == "ui" then
+        elseif SCENARIO == "ui" or SCENARIO == "soak" then
             core.log.debugEnabled = true -- the helpers' DEBUG lines (tick summaries, freed handles) are part of the check
-            buildUi()
+            profile(true)
+            if SCENARIO == "ui" then buildUi() else buildSoak() end
         else buildSkeleton() end
-        LoopAsync(250, function()
-            ExecuteInGameThread(tick)
-            return finished
+        -- The runner: a game-thread loop registered here on the game thread, cancelled once finished. Never
+        -- LoopAsync + ExecuteInGameThread (core's ui/hud.lua: the pinned UE4SS can lose such callbacks).
+        local runner
+        local okL, res = pcall(LoopInGameThreadWithDelay, 250, function()
+            tick()
+            if finished and runner then pcall(CancelDelayedAction, runner); runner = nil end
         end)
+        if okL then runner = res else say("END result=FAIL checks=0 failures=1 reason=runner (%s)", firstLine(res)) end
     end,
     onFail = function(msg)
         -- client.connect has already logged the one-line reason.
