@@ -12,7 +12,7 @@ local clockm = require(BASE .. ".clock")
 -- A failure here must not stop connect for mods that use no UI: core.ui is then missing and onReady is told why.
 local uiOk, uiErr = pcall(function()
     return { common = require(BASE .. ".ui.common"), hud = require(BASE .. ".ui.hud"),
-             text = require(BASE .. ".ui.text"), place = require(BASE .. ".ui.place") }
+             text = require(BASE .. ".ui.text"), place = require(BASE .. ".ui.place"), debug = require(BASE .. ".ui.debug") }
 end)
 
 local NAME, LOWER = V.name, V.name:lower()
@@ -126,6 +126,7 @@ function C.connect(opts)
                          remove = U.text.remove, isShown = U.text.isShown, stats = U.text.stats, tagOf = U.text.tagOf },
                 place = U.place.place,
                 elements = U.place.elements,
+                debug = { overlaps = U.debug.overlaps }, -- story 12: a diagnostic for testing a mod's UI
             }
             -- The UI helpers run in this mod's state with its logger; until now they refuse every call ("before connect").
             U.common.bind{ mod = mod, log = log, ref = refm.ref, deref = refm.deref, free = refm.free, micros = clockm.micros }

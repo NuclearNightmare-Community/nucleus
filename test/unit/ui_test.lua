@@ -74,6 +74,8 @@ local function newText(owner)
         return vec(10 * #self.text + 2 * self.pad, 20 * lines + 2 * self.pad)
     end
     function w:GetClass() return { GetFName = function() return { ToString = function() return TEXT_SHORT end } end } end
+    function w:GetRenderOpacity() return 1 end -- story 12's walk
+    function w:IsA() return false end
     return w
 end
 
@@ -492,6 +494,197 @@ H._summary()
 ok(countLogs("hud prof event ticks %(event:us%): lost:%d+ prepare:%d+ attached:%d+") == 1, "profiler: event ticks in the summary")
 H._profile(false)
 ok(C.prof == nil, "profiler: nothing left after a tick")
+
+-- ---------------------------------------------------------------- story 12: overlap diagnostic (ui/debug.lua)
+local D = require("nucleus.ui.debug")
+-- pure parts
+local function R(l, t, r, b) return { l = l, t = t, r = r, b = b } end
+ok(D.intersects(R(0, 0, 10, 10), R(5, 5, 15, 15)) and D.intersects(R(5, 5, 15, 15), R(0, 0, 10, 10)), "overlap: intersecting rectangles")
+ok(not D.intersects(R(0, 0, 10, 10), R(10, 0, 20, 10)) and not D.intersects(R(0, 0, 10, 10), R(0, 10, 10, 20)), "overlap: touching edges don't overlap")
+ok(D.intersects(R(0, 0, 100, 100), R(40, 40, 50, 50)), "overlap: containment overlaps")
+ok(D.hasArea(R(0, 0, 1, 1)) and not D.hasArea(R(5, 5, 5, 9)) and not D.hasArea(R(0, 0, 0, 0)), "overlap: area")
+ok(D.isFull(R(0, 0, 950, 950), 1000, 1000) and not D.isFull(R(0, 0, 1000, 500), 1000, 1000), "overlap: full-screen is 90% both ways")
+ok(D.rectStr(R(1.4, 2.6, 3, 4)) == "(1,3)-(3,4)", "overlap: rect string", D.rectStr(R(1.4, 2.6, 3, 4)))
+do
+    local order = {}
+    local v, capped, errs, first = D.walk({ 1 }, function(x, push)
+        order[#order + 1] = x
+        if x == 1 then push(3); push(2) end
+        if x == 3 then error("bad widget") end
+    end, 100)
+    ok(v == 3 and not capped and errs == 1 and tostring(first):find("bad widget", 1, true) and table.concat(order, ",") == "1,2,3", "walk: depth first, an error counted and passed over", table.concat(order, ","))
+    local v2, capped2 = D.walk({ 1 }, function(x, push) push(x + 1); push(x + 2) end, 50)
+    ok(v2 == 50 and capped2, "walk: capped", v2)
+    local s = D.sortHits({ { path = "b", rect = R(0, 0, 10, 10) }, { path = "a", rect = R(0, 0, 2, 2) }, { path = "c", rect = R(0, 0, 2, 2) } })
+    ok(s[1].path == "a" and s[2].path == "c" and s[3].path == "b", "sortHits: smallest first, then by path")
+end
+
+-- the walk on a fake HUD: on-screen rectangles come from core's ModActor CDO (<Core>_AbsTopLeft / _AbsBottomRight)
+local ABS = setmetatable({}, { __mode = "k" })
+local CDO = obj({}, "/Game/Mods/Nucleus/ModActor.Default__ModActor_C")
+local absFail = nil -- a widget whose rectangle read raises
+function CDO.Nucleus_AbsTopLeft(_, x) if x == absFail then error("geometry read failed") end local r = ABS[x] or R(0, 0, 0, 0) return vec(r.l, r.t) end
+function CDO.Nucleus_AbsBottomRight(_, x) local r = ABS[x] or R(0, 0, 0, 0) return vec(r.r, r.b) end
+for _, n in ipairs({ "Image", "TextBlock", "Border", "Button", "UserWidget", "PanelWidget", "WidgetSwitcher" }) do obj({ name = n }, "/Script/UMG." .. n) end
+local function gw(kind, rect, isa)
+    local x = { __class = kind, vis = 0, opacity = 1, isa = { [kind] = true } }
+    for _, k in ipairs(isa or {}) do x.isa[k] = true end
+    obj(x, "/Game/Test/W.W:WidgetTree." .. kind .. "_" .. nextAddr)
+    ABS[x] = rect
+    function x:GetVisibility() return self.vis end
+    function x:GetRenderOpacity() return self.opacity end
+    function x:GetClass() local k = self.__class return { GetFName = function() return { ToString = function() return k end } end } end
+    function x:IsA(c) return self.isa[c.name] == true end
+    if kind == "Image" then x.Brush, x.ColorAndOpacity = { DrawAs = 3 }, { A = 1 } end
+    if kind == "TextBlock" then x.txt = "t"; function x:GetText() local s = self return { ToString = function() return s.txt end } end end
+    x.children = {}
+    function x:GetChildrenCount() return #self.children end
+    function x:GetChildAt(i) return self.children[i + 1] end
+    return x
+end
+local TOPS = {}
+function WBL.GetAllWidgetsOfClass(_, world, out, cls, top) out.FoundWidgets = TOPS end
+
+local hudN = H._poll()
+local cv = hudN.OwningCanvas
+-- the HUD canvas as a panel the walk can read
+cv.isa = { PanelWidget = true, CanvasPanel = true }
+function cv:GetVisibility() return 0 end
+function cv:GetRenderOpacity() return 1 end
+function cv:GetClass() return { GetFName = function() return { ToString = function() return "CanvasPanel" end } end } end
+function cv:IsA(c) return self.isa[c.name] == true end
+ABS[cv] = R(0, 0, 1000, 600)
+local function put(x) x.parent = cv; cv.children[#cv.children + 1] = x return x end
+for _, ch in ipairs(cv.children) do ABS[ch] = R(0, 0, 0, 0) end -- earlier elements: not painted, never in the way
+
+TEXTCLASS.__alive = true; objects[TEXTCLASS.__path] = TEXTCLASS -- the pak is back (unloaded in "pak missing" above)
+C.log.debugEnabled = false
+local sched0, checks0, ovLogs0 = C.stats.overlapScheduled, C.stats.overlapChecks, countLogs("ui overlap")
+local ov = X.create{ id = "ov", text = "overlap", place = { corner = "top-right" } }
+local function widgetOfId(id) local el = C.els[id] return el and el.ref and deref(el.ref) end
+local ovW = widgetOfId("ov")
+ABS[ovW] = R(900, 16, 1000, 46)
+local imgHit = put(gw("Image", R(950, 20, 980, 40)))
+put(gw("Image", R(0, 0, 50, 50)))                                    -- elsewhere
+local hidden = put(gw("Image", R(950, 20, 980, 40))); hidden.vis = 1 -- collapsed: pruned
+local clear = put(gw("Image", R(950, 20, 980, 40))); clear.ColorAndOpacity.A = 0 -- draws nothing
+local faded = put(gw("Image", R(950, 20, 980, 40))); faded.opacity = 0
+put(gw("Image", R(0, 0, 1000, 600)))                                 -- a full-screen backdrop
+local panel = put(gw("Overlay", R(800, 0, 1000, 100), { "PanelWidget" }))
+local inner = gw("TextBlock", R(960, 10, 990, 30)); panel.children[1] = inner
+local emptyText = gw("TextBlock", R(960, 10, 990, 30)); emptyText.txt = ""; panel.children[2] = emptyText
+local hidPanel = put(gw("Overlay", R(800, 0, 1000, 100), { "PanelWidget" })); hidPanel.vis = 2
+hidPanel.children[1] = gw("Image", R(950, 20, 980, 40))
+local otherEl = put(newText(PC)); otherEl.tip = "nucleus:OtherMod:x"; ABS[otherEl] = R(880, 30, 960, 60)
+local popup = gw("PopupUI_C", R(0, 0, 1000, 600), { "UserWidget" })
+local popImg = gw("Image", R(990, 40, 1000, 50))
+popup.WidgetTree = obj({ RootWidget = popImg }, "/Game/Test/Popup.WidgetTree")
+TOPS[1] = popup
+local nearMiss = put(gw("Image", R(850, 16, 890, 40))) -- 10 px left of the element: context, not an overlap
+
+-- story 12 AC 4: with debug off nothing is scheduled and no check runs, through attach, re-place, hide and show
+P.place(ov, { corner = "top-right", gap = "tight" }); P.place(ov, { corner = "top-right" })
+X.setVisible(ov, false); X.setVisible(ov, true)
+hudN.inViewport = false; tick(); hudN.inViewport = true; tick(); tick(); tick(); tick(); tick()
+ovW = widgetOfId("ov"); ABS[ovW] = R(900, 16, 1000, 46)
+ok(C.stats.overlapScheduled == sched0 and C.stats.overlapChecks == checks0 and countLogs("ui overlap") == ovLogs0, "auto check: off with debug off (counters unchanged)",
+    (C.stats.overlapScheduled - sched0) .. " scheduled, " .. (C.stats.overlapChecks - checks0) .. " checks")
+ok(X.stats().overlapScheduled == sched0 and X.stats().overlapChecks == checks0, "stats: overlap counters")
+
+-- overlaps(handle): the drawn widgets under the element; the element's own subtree, hidden, clear and full-screen ones not
+local hits, info = D.overlaps(ov)
+local byPath = {}
+for _, hh in ipairs(hits or {}) do byPath[hh.path] = hh end
+ok(type(hits) == "table" and #hits == 4, "overlaps: four hits", hits and #hits or info)
+ok(byPath[C.pathOf(imgHit)] and byPath[C.pathOf(imgHit)].class == "Image" and near(byPath[C.pathOf(imgHit)].rect.l, 950), "overlaps: a game image, with class and rect")
+ok(byPath[C.pathOf(inner)] ~= nil and byPath[C.pathOf(emptyText)] == nil, "overlaps: text inside a panel; empty text draws nothing")
+ok(byPath[C.pathOf(otherEl)] and byPath[C.pathOf(otherEl)].element == "nucleus:OtherMod:x", "overlaps: another mod's Nucleus element counts, named by its tag")
+ok(byPath[C.pathOf(popImg)] ~= nil, "overlaps: a top-level widget's tree is walked")
+ok(byPath[C.pathOf(hidden)] == nil and byPath[C.pathOf(clear)] == nil and byPath[C.pathOf(faded)] == nil and byPath[C.pathOf(hidPanel.children[1])] == nil,
+    "overlaps: collapsed, clear, transparent and hidden-panel widgets don't count")
+ok(info and info.fullScreen == 1 and info.screen.w == 1000 and info.screen.h == 600 and not info.capped and info.errors == 0, "overlaps: info (full-screen skipped, screen size)")
+ok(hits and hits[1].path == C.pathOf(popImg), "overlaps: smallest first")
+ok(info and #info.nearby == 1 and info.nearby[1].path == C.pathOf(nearMiss), "overlaps: info.nearby lists the near miss only", info and #info.nearby)
+local fresh = D.overlaps(ov)
+ok(fresh ~= hits and fresh[1] ~= hits[1], "overlaps: fresh tables each call")
+for _, hh in ipairs(hits) do
+    local plain = true
+    for _, v in pairs(hh) do if type(v) == "userdata" or (type(v) == "table" and v.__alive ~= nil) then plain = false end end
+    ok(plain, "overlaps: entries hold no UObject (" .. hh.path .. ")")
+end
+-- the same check for a widget the caller placed itself (the skeleton scenario's hand-made widget)
+local sk = put(gw("Image", R(0, 500, 40, 540)))
+local skHits = D._check(hudN, sk)
+ok(type(skHits) == "table" and #skHits == 0, "overlaps: _check of a widget clear of everything", skHits and #skHits)
+cv.children[#cv.children] = nil; sk.parent = nil
+
+-- nil plus a reason when it can't check
+X.setVisible(ov, false)
+local n1, why1 = D.overlaps(ov)
+ok(n1 == nil and tostring(why1):find("hidden", 1, true), "overlaps: hidden element -> nil, reason", why1)
+X.setVisible(ov, true)
+hudN.vis = 2
+local n2, why2 = D.overlaps(ov)
+ok(n2 == nil and why2 == "the HUD is hidden", "overlaps: hidden HUD -> nil, reason", why2)
+hudN.vis = 4
+ABS[ovW] = R(0, 0, 0, 0)
+local n3, why3 = D.overlaps(ov)
+ok(n3 == nil and tostring(why3):find("not painted", 1, true), "overlaps: not painted yet -> nil, reason", why3)
+ABS[ovW] = R(900, 16, 1000, 46)
+
+-- AC 5: a widget that fails is counted and logged once; a check that fails returns nil and logs once; the element is untouched
+absFail = imgHit
+local h5, i5 = D.overlaps(ov)
+ok(type(h5) == "table" and #h5 == 3 and i5.errors == 1 and countLogs("^WARN ui overlap: 1 widget%(s%) could not be checked, first: .*geometry read failed") == 1, "robust: a failing widget is skipped and logged", i5 and i5.errors)
+D.overlaps(ov)
+ok(countLogs("could not be checked") == 1, "robust: logged once")
+absFail = ovW
+local h6, why6 = D.overlaps(ov)
+ok(h6 == nil and tostring(why6):find("the check failed: ", 1, true) and countLogs("^WARN ui overlap check failed: ") == 1, "robust: a failing check -> nil, reason, one WARN", why6)
+D.overlaps(ov)
+ok(countLogs("^WARN ui overlap check failed: ") == 1 and X.isShown(ov) == true and ovW.parent == cv, "robust: logged once; the element is untouched")
+absFail = nil
+
+-- bad input (AGENTS.md: every public entry point)
+raises(function() D.overlaps(nil) end, "nucleus.ui.debug.overlaps: expected an element handle, got nil", "overlaps: nil")
+raises(function() D.overlaps("ov") end, "nucleus.ui.debug.overlaps: expected an element handle, got 'ov'", "overlaps: string")
+raises(function() D.overlaps(42) end, "nucleus.ui.debug.overlaps: expected an element handle, got 42", "overlaps: number")
+raises(function() D.overlaps({ id = "ov" }) end, "nucleus.ui.debug.overlaps: not an element handle", "overlaps: forged handle")
+raises(function() D.overlaps(ov, 1) end, "nucleus.ui.debug.overlaps: expected 1 argument (handle), got 2", "overlaps: extra argument")
+offThread = true
+raises(function() D.overlaps(ov) end, "nucleus.ui.debug.overlaps called off the game thread", "overlaps: off the game thread")
+offThread = false
+C.bound = false
+raises(function() D.overlaps(ov) end, "nucleus.ui: debug.overlaps called before connect", "overlaps: before connect")
+C.bound = true
+local gone = X.create{ id = "gone" }; X.remove(gone)
+raises(function() D.overlaps(gone) end, "handle 'gone' was removed", "overlaps: removed handle")
+
+-- automatic check with debug on: about 1 s (two ticks) after an attach or re-place, one WARN per element and widget
+C.log.debugEnabled = true
+local nWarn = countLogs("^WARN ui overlap 'ov': ")
+P.place(ov, { corner = "top-right", gap = "tight" })
+ovW = widgetOfId("ov"); ABS[ovW] = R(900, 16, 1000, 46)
+ok(C.stats.overlapScheduled > sched0, "auto check: scheduled on a re-place")
+tick()
+ok(countLogs("^WARN ui overlap 'ov': ") == nWarn, "auto check: not before its delay")
+for _ = 1, 10 do tick() end -- the corner's other elements are checked first (one check per tick, creation order)
+ok(countLogs("^WARN ui overlap 'ov': ") == nWarn + 4, "auto check: one WARN per overlapping widget", countLogs("^WARN ui overlap 'ov': ") - nWarn)
+ok(countLogs("^WARN ui overlap 'ov': .*OtherMod") == 0 and countLogs("^WARN ui overlap 'ov': " .. C.pathOf(otherEl):gsub("%p", "%%%0") .. " %(WBP_NucleusText_C%) %(880,30%)%-%(960,60%)$") == 1,
+    "auto check: names the widget, its class and rect")
+ok(countLogs("^DEBUG ui overlap 'ov' checked %(place%): 4 overlap%(s%), 4 new;") == 1, "auto check: one DEBUG summary", logs[#logs])
+P.place(ov, { corner = "top-right" }); for _ = 1, 10 do tick() end
+ok(countLogs("^WARN ui overlap 'ov': ") == nWarn + 4, "auto check: once per pair (a re-place logs nothing new)")
+local late2 = put(gw("Image", R(905, 20, 915, 30)))
+hudN.vis = 2; tick(); hudN.vis = 4; for _ = 1, 12 do tick() end
+ok(countLogs("^WARN ui overlap 'ov': ") == nWarn + 5 and countLogs("^WARN ui overlap 'ov': " .. C.pathOf(late2):gsub("%p", "%%%0")) == 1, "auto check: HUD shown again checks again; only the new pair is logged")
+-- not painted: retried, then one DEBUG line
+ABS[ovW] = R(0, 0, 0, 0)
+X.setVisible(ov, false); X.setVisible(ov, true)
+for _ = 1, 24 do tick() end
+ok(countLogs("^DEBUG ui overlap 'ov' not checked %(re%-stack%): not painted yet") == 1, "auto check: not painted -> retried, then one DEBUG line")
+X.remove(ov)
+C.log.debugEnabled = true
 
 H.unwatch(token); H.unwatch(throws)
 ok(asyncUsed == 0, "poller: never LoopAsync or ExecuteInGameThread", asyncUsed)
