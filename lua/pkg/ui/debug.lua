@@ -96,6 +96,11 @@ local function readTag(w)
     local ok, t = pcall(function() return w.ToolTipText:ToString() end)
     return ok and type(t) == "string" and t or nil
 end
+-- Panels and buttons (stories 14-15) carry their tag in the Blueprint variable CoreTag (a tooltip would show on hover).
+local function readCoreTag(w)
+    local ok, t = pcall(function() return w.CoreTag:ToString() end)
+    return ok and type(t) == "string" and t or nil
+end
 
 -- Top-level viewport widgets other than the HUD, pushed as roots. Returns how many and the method.
 local function topLevel(world, uwClass, hudAddr, add)
@@ -167,7 +172,7 @@ function D._check(hud, w, journal)
         local vis = tonumber(x:GetVisibility())
         if vis == 1 or vis == 2 or x:GetRenderOpacity() <= 0 then return end -- not drawn, nor anything inside
         local clsName = x:GetClass():GetFName():ToString()
-        local tag = clsName == C.TEXT_SHORT and readTag(x) or nil
+        local tag = (clsName == C.TEXT_SHORT and readTag(x)) or ((clsName == C.PANEL_SHORT or clsName == C.BUTTON_SHORT) and readCoreTag(x)) or nil
         local element = tag and tag:sub(1, #TAG_PREFIX) == TAG_PREFIX and tag or nil
         local kind = element and "element" or nil
         if not kind then
@@ -186,7 +191,7 @@ function D._check(hud, w, journal)
                 end
             end
         end
-        if element then return end -- another Nucleus element is one unit: its Border and TextBlock are its own
+        if element then return end -- another Nucleus element is one unit (a panel with everything in it, too)
         if UW and x:IsA(UW) then
             local tree = x.WidgetTree
             if C.valid(tree) then push(tree.RootWidget) end
@@ -205,6 +210,7 @@ end
 -- The check for an element, or nil and why not.
 local function checkElement(el)
     if el.removed then return nil, "the element was removed" end
+    if el.panel then return nil, "the element is inside panel '" .. el.panel.id .. "' (check the panel)" end
     if not el.visible then return nil, "the element is hidden (setVisible false)" end
     if el.nearAbsent then return nil, "the element is collapsed (its near target is not drawn)" end
     local w = el.ref and C.deref(el.ref)

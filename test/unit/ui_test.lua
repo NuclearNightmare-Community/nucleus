@@ -79,6 +79,60 @@ local function newText(owner)
     return w
 end
 
+-- Story 14: box panels (VerticalBox / HorizontalBox) and the panel widget WBP_NucleusPanel_C.
+local BOX_ADDS = 0
+local function newBoxSlot()
+    local s = { pad = { Left = 0, Top = 0, Right = 0, Bottom = 0 } }
+    function s:SetPadding(m) self.pad = { Left = m.Left, Top = m.Top, Right = m.Right, Bottom = m.Bottom } end
+    return s
+end
+local function newBox(path, horiz)
+    local b = { children = {}, horiz = horiz }
+    obj(b, path)
+    function b:GetChildrenCount() return #self.children end
+    function b:GetChildAt(i) return self.children[i + 1] end
+    function b:AddChild(w) BOX_ADDS = BOX_ADDS + 1; w.parent = self; w.Slot = newBoxSlot(); table.insert(self.children, w); return w.Slot end
+    return b
+end
+local PANEL_SHORT = "WBP_NucleusPanel_C"
+local function newPanelW()
+    local w = { __class = PANEL_SHORT, bg = { 0, 0, 0, 0 }, pad = 0, vis = 0, tag = "" }
+    obj(w, "/Engine/Transient.GameEngine_1:GameInstance_1." .. PANEL_SHORT .. "_" .. nextAddr)
+    w.VBox = newBox(w.__path .. ".WidgetTree.VBox", false)
+    w.HBox = newBox(w.__path .. ".WidgetTree.HBox", true)
+    function w:SetBackground(r, g, b, a) self.bg = { r, g, b, a } end
+    function w:SetBackgroundPadding(p) self.pad = p end
+    function w:SetTag(t) self.tag = t end
+    w.CoreTag = setmetatable({}, { __index = function(_, k) if k == "ToString" then return function() return w.tag end end end })
+    function w:SetVisibility(v) self.vis = v end
+    function w:GetVisibility() return self.vis end
+    function w:RemoveFromParent()
+        local p = self.parent
+        if p then for i, c in ipairs(p.children) do if c == self then table.remove(p.children, i) break end end end
+        self.parent = nil
+    end
+    function w:GetParent() PARENT_CALLS = PARENT_CALLS + 1; return self.parent end
+    function w:ForceLayoutPrepass() end
+    function w:GetDesiredSize()
+        if self.vis == 1 then return vec(0, 0) end
+        local W, Hh = 0, 0
+        for _, box in ipairs({ self.VBox, self.HBox }) do
+            for _, c in ipairs(box.children) do
+                if c.vis ~= 1 then
+                    local d = c:GetDesiredSize()
+                    if box.horiz then W = W + d.X + c.Slot.pad.Left; Hh = math.max(Hh, d.Y)
+                    else Hh = Hh + d.Y + c.Slot.pad.Top; W = math.max(W, d.X) end
+                end
+            end
+        end
+        return vec(W + 2 * self.pad, Hh + 2 * self.pad)
+    end
+    function w:GetClass() return { GetFName = function() return { ToString = function() return PANEL_SHORT end } end } end
+    function w:GetRenderOpacity() return 1 end
+    function w:IsA() return false end
+    return w
+end
+
 local function newCanvas(path)
     local c = { children = {} }
     obj(c, path)
@@ -130,8 +184,13 @@ function FindAllOf(cls)
     return out
 end
 local GS = obj({ GetPlayerController = function() return PC end }, "/Script/Engine.Default__GameplayStatics")
-local WBL = obj({ Create = function(_, world, cls, owner) return newText(owner) end }, "/Script/UMG.Default__WidgetBlueprintLibrary")
+local PANELCLASS
+local WBL = obj({ Create = function(_, world, cls, owner)
+    if cls == PANELCLASS then return newPanelW() end
+    return newText(owner)
+end }, "/Script/UMG.Default__WidgetBlueprintLibrary")
 local TEXTCLASS = obj({}, "/Game/Mods/Nucleus/WBP_NucleusText.WBP_NucleusText_C")
+PANELCLASS = obj({}, "/Game/Mods/Nucleus/WBP_NucleusPanel.WBP_NucleusPanel_C")
 obj({ GetAsset = function(_, a) return objects[a.PackageName .. "." .. a.AssetName] or { IsValid = function() return false end } end }, "/Script/AssetRegistry.Default__AssetRegistryHelpers")
 local INVALID = { IsValid = function() return false end }
 function StaticFindObject(path) return objects[path] or INVALID end
@@ -159,6 +218,7 @@ local H = require("nucleus.ui.hud")
 local J = require("nucleus.ui.journal")
 local P = require("nucleus.ui.place")
 local X = require("nucleus.ui.text")
+local PN = require("nucleus.ui.panel")
 
 local logs = {}
 local function logger()
@@ -196,6 +256,8 @@ raises(function() H.watch(function() end) end, "nucleus.ui: hud.watch called bef
 raises(function() P.elements() end, "nucleus.ui: elements called before connect", "before connect: elements")
 raises(function() J.watch(function() end) end, "nucleus.ui: journal.watch called before connect", "before connect: journal.watch")
 raises(function() J.isOpen() end, "nucleus.ui: journal.isOpen called before connect", "before connect: journal.isOpen")
+raises(function() PN.create{ id = "p" } end, "nucleus.ui: panel.create called before connect", "before connect: panel.create")
+raises(function() PN.move({}, {}, 1) end, "nucleus.ui: panel.move called before connect", "before connect: panel.move")
 
 C.bind{ mod = "TestMod", log = logger(), ref = ref, deref = deref, free = free, micros = micros }
 
@@ -208,6 +270,10 @@ raises(function() J.watch(function() end) end, "nucleus.ui.journal.watch called 
 raises(function() J.unwatch(1) end, "nucleus.ui.journal.unwatch called off the game thread", "off thread: journal.unwatch")
 raises(function() J.isOpen() end, "nucleus.ui.journal.isOpen called off the game thread", "off thread: journal.isOpen")
 raises(function() J.find() end, "nucleus.ui.journal.find called off the game thread", "off thread: journal.find")
+raises(function() PN.create{ id = "p" } end, "nucleus.ui.panel.create called off the game thread", "off thread: panel.create")
+raises(function() PN.setOrder({}, {}) end, "nucleus.ui.panel.setOrder called off the game thread", "off thread: panel.setOrder")
+raises(function() PN.move({}, {}, 1) end, "nucleus.ui.panel.move called off the game thread", "off thread: panel.move")
+raises(function() PN.order({}) end, "nucleus.ui.panel.order called off the game thread", "off thread: panel.order")
 offThread = false
 
 -- ---------------------------------------------------------------- validation (pure)
@@ -778,7 +844,8 @@ local wjb, wjc = widgetOfId("jb"), widgetOfId("jc")
 ok(wjb.Slot.anchors.Minimum.Y == 1 and wjb.Slot.position.Y == -16 and wjc.Slot.position.Y == -(16 + 20 + 16), "journal: bottom-right stack, per host", wjc.Slot.position.Y)
 ok(J.stats().attachOpens == 1 and J.stats().attachElements == 3 and J.stats().attachLast > 0, "journal: attach timed per open")
 tick()
-ok(countLogs("^DEBUG ui journal attach n=3 in %d+ us: 'ja' created") == 1, "journal: one DEBUG attach line on the next tick")
+ok(countLogs("^DEBUG ui journal attach n=3 in %d+ us %(canvas %d+; 'ja' %d+ %(create %d+%); .*; place %d+%): 'ja' created") == 1, "journal: one DEBUG attach line on the next tick, with its steps")
+ok(J.stats().attachSteps and #J.stats().attachSteps.items == 3 and J.stats().attachSteps.items[1].id == "ja", "journal: per-step timing in stats")
 -- a late watcher hears opened on the next tick
 local lateJ = {}
 local jl = J.watch(function(_, info) lateJ[#lateJ + 1] = info.event end)
@@ -865,6 +932,222 @@ ok(#jev == before and tagsIn(canvasOfJ(j7)) == "ja,jb,jc", "journal: unwatched -
 j7.inViewport = false; tick()
 X.remove(ja); X.remove(jb); X.remove(jc)
 ok(J.stats().closes >= 6 and J.stats().findAllCalls == 1, "journal: counters; one seed FindAllOf", J.stats().findAllCalls)
+
+-- ---------------------------------------------------------------- story 14: panels (ui/panel.lua)
+local function panelTests() -- a function: the main chunk is at Lua's 200-locals limit
+local hudP = H._poll()
+local cvP = hudP.OwningCanvas
+local function boxIds(box)
+    local t = {}
+    for _, ch in ipairs(box.children) do t[#t + 1] = ((ch.tip and ch.tip ~= "") and ch.tip or ch.tag or ""):match("[^:]+$") end
+    return table.concat(t, ",")
+end
+local function pads(box, side)
+    local t = {}
+    for _, ch in ipairs(box.children) do if ch.vis ~= 1 then t[#t + 1] = tostring(ch.Slot.pad[side]) end end
+    return table.concat(t, ",")
+end
+
+-- bad input (AC 5)
+local PNC = "nucleus.ui.panel.create: "
+raises(function() PN.create() end, PNC .. "expected a table", "panel: create()")
+raises(function() PN.create{ id = "bp", lay = "x" } end, PNC .. "unknown key 'lay' (valid: gap, id, layout, place, style)", "panel: unknown key")
+raises(function() PN.create{ id = "bp", layout = "grid" } end, PNC .. "unknown layout 'grid' (valid: vertical, horizontal)", "panel: layout grid")
+raises(function() PN.create{ id = "bp", layout = 1 } end, PNC .. "unknown layout 1", "panel: layout 1")
+raises(function() PN.create{ id = "bp", gap = 3 } end, PNC .. "unknown gap 3 (valid: tight, normal, loose)", "panel: gap 3")
+raises(function() PN.create{ id = "bp", place = "top-left" } end, PNC .. "place must be a table or nil, got 'top-left'", "panel: place string")
+raises(function() PN.create{ id = "bp", style = { background = "purple" } } end, "nucleus.ui.panel: unknown background 'purple'", "panel: style prefix")
+ok(C.els.bp == nil, "panel: nothing made by a refused create")
+
+-- AC 1: a vertical panel with three texts, in order, one dim box
+local pv = PN.create{ id = "pv", place = { corner = "top-left" } }
+raises(function() PN.create{ id = "pv9", place = { panel = pv } } end, PNC .. "a panel can't go inside a panel (one level only)", "panel: panel in a panel (create)")
+local pv1 = X.create{ id = "pv1", text = "one", place = { panel = pv } }
+local pv2 = X.create{ id = "pv2", text = "two two", place = { panel = pv } }
+local pv3 = X.create{ id = "pv3", text = "three", place = { panel = pv } }
+local wpv = widgetOfId("pv")
+ok(wpv and wpv.parent == cvP and wpv.tag == "nucleus:TestMod:pv", "panel: one widget in the HUD canvas, tagged (CoreTag)")
+ok(boxIds(wpv.VBox) == "pv1,pv2,pv3" and #wpv.HBox.children == 0, "panel: children in its VBox, in order", boxIds(wpv.VBox))
+ok(pads(wpv.VBox, "Top") == "0,8,8", "panel: gap tight before every child but the first", pads(wpv.VBox, "Top"))
+ok(near(wpv.bg[4], 0.35) and wpv.pad == 8, "panel: default style dim, normal padding")
+ok(wpv.Slot.anchors.Minimum.X == 0 and wpv.Slot.position.X == 16 and wpv.Slot.position.Y == 16, "panel: placed like any element (top-left)")
+ok(PN.isShown(pv) and X.isShown(pv2), "panel: isShown for the panel and a child")
+ok(wpv:GetDesiredSize().Y == 8 + 20 + 8 + 20 + 8 + 20 + 8, "panel: one box around all three", wpv:GetDesiredSize().Y)
+-- AC 2: hide the middle child: its gap goes; hide the panel: all hidden; show again
+X.setVisible(pv2, false)
+ok(widgetOfId("pv2").vis == 1 and pads(wpv.VBox, "Top") == "0,8" and X.isShown(pv2) == false, "panel: hiding the middle child closes the gap", pads(wpv.VBox, "Top"))
+X.setVisible(pv1, false)
+ok(pads(wpv.VBox, "Top") == "0", "panel: the first visible child has no gap", pads(wpv.VBox, "Top"))
+X.setVisible(pv1, true); X.setVisible(pv2, true)
+ok(pads(wpv.VBox, "Top") == "0,8,8", "panel: gaps back", pads(wpv.VBox, "Top"))
+PN.setVisible(pv, false)
+ok(wpv.vis == 1 and not PN.isShown(pv) and not X.isShown(pv1) and not X.isShown(pv3), "panel: hiding the panel hides its children")
+PN.setVisible(pv, true)
+ok(X.isShown(pv1) and X.isShown(pv3), "panel: showing it shows them again")
+raises(function() PN.setVisible(pv, "yes") end, "nucleus.ui.panel.setVisible: visible must be a boolean, got string", "panel: setVisible('yes')")
+
+-- bad place intents with panels (AC 5)
+local PLC = "nucleus.ui.place: "
+raises(function() X.create{ id = "bx", place = { panel = 5 } } end, PLC .. "panel must be a panel handle, got 5", "panel: non-handle 5")
+raises(function() X.create{ id = "bx", place = { panel = "pv" } } end, PLC .. "panel must be a panel handle, got 'pv'", "panel: non-handle string")
+raises(function() X.create{ id = "bx", place = { panel = {} } } end, PLC .. "panel is not a panel handle", "panel: forged table")
+raises(function() X.create{ id = "bx", place = { panel = pv1 } } end, PLC .. "panel is a text element ('pv1'), not a panel", "panel: a text handle as panel")
+raises(function() X.create{ id = "bx", place = { panel = pv, corner = "top-left" } } end, PLC .. "corner is not allowed with panel", "panel: panel with corner")
+raises(function() P.place(pv, { panel = pv }) end, PLC .. "a panel can't go inside a panel (one level only)", "panel: place a panel in a panel")
+raises(function() X.set(pv, "x") end, "nucleus.ui.text.set: not a text element handle ('pv' is a panel)", "panel: text.set on a panel")
+raises(function() PN.order(pv1) end, "nucleus.ui.panel.order: not a panel handle ('pv1' is a text element)", "panel: order on a text")
+raises(function() PN.order(nil) end, "nucleus.ui.panel.order: expected a panel handle, got nil", "panel: order(nil)")
+raises(function() PN.order({}) end, "nucleus.ui.panel.order: not a panel handle (use the handle that panel.create returned)", "panel: order(forged)")
+raises(function() X.create{ id = "pv", text = "x" } end, "nucleus.ui.text.create: id 'pv' is already a panel of this mod", "panel: id taken by another kind")
+ok(C.els.bx == nil, "panel: nothing made by refused creates")
+
+-- AC 6: reorder. move third to 1; setOrder reversed; order(); the same widgets; no-op makes no call
+local w1, w2, w3 = widgetOfId("pv1"), widgetOfId("pv2"), widgetOfId("pv3")
+local created0 = C.stats.attachCreated
+PN.move(pv, pv3, 1)
+ok(boxIds(wpv.VBox) == "pv3,pv1,pv2" and pads(wpv.VBox, "Top") == "0,8,8", "reorder: move(third, 1) puts it first", boxIds(wpv.VBox))
+local o = PN.order(pv)
+ok(#o == 3 and rawequal(o[1], pv3) and rawequal(o[2], pv1) and rawequal(o[3], pv2), "reorder: order() returns the new order")
+PN.setOrder(pv, { pv2, pv1, pv3 })
+ok(boxIds(wpv.VBox) == "pv2,pv1,pv3", "reorder: setOrder reverses", boxIds(wpv.VBox))
+ok(widgetOfId("pv1") == w1 and widgetOfId("pv2") == w2 and widgetOfId("pv3") == w3 and C.stats.attachCreated == created0, "reorder: the same three widgets, none created")
+local c0 = C.stats.uobjectCalls
+PN.setOrder(pv, { pv2, pv1, pv3 }); PN.move(pv, pv1, 2)
+ok(C.stats.uobjectCalls == c0, "reorder: an unchanged order makes no UObject call")
+-- bad reorders leave the order unchanged
+local other = PN.create{ id = "po", place = { corner = "bottom-left" }, layout = "horizontal", gap = "normal" }
+local po1 = X.create{ id = "po1", text = "a", place = { panel = other } }
+local gone = X.create{ id = "gone", text = "g", place = { panel = pv } }
+X.remove(gone)
+local SO, MV = "nucleus.ui.panel.setOrder: ", "nucleus.ui.panel.move: "
+raises(function() PN.setOrder(pv, { pv2, pv1 }) end, SO .. "order has 2 handle(s) but panel 'pv' has 3 child(ren)", "setOrder: a child missing")
+raises(function() PN.setOrder(pv, { pv2, pv1, pv1 }) end, SO .. "order[3] ('pv1') appears twice", "setOrder: a duplicate")
+raises(function() PN.setOrder(pv, { pv2, pv1, po1 }) end, SO .. "order[3] ('po1') is not a child of panel 'pv'", "setOrder: another panel's child")
+raises(function() PN.setOrder(pv, { pv2, pv1, gone }) end, SO .. "order[3]: handle 'gone' was removed", "setOrder: a removed child")
+raises(function() PN.setOrder(pv, { pv2, pv1, 5 }) end, SO .. "order[3] is not a child handle, got 5", "setOrder: a non-handle")
+raises(function() PN.setOrder(pv, { pv2, pv1, {} }) end, SO .. "order[3] is not an element handle", "setOrder: a forged handle")
+raises(function() PN.setOrder(pv, "pv1,pv2,pv3") end, SO .. "order must be a table of the panel's child handles, got 'pv1,pv2,pv3'", "setOrder: a non-table")
+raises(function() PN.setOrder(pv, { pv2, pv1, pv3, x = 1 }) end, SO .. "order must be a list (keys 1 to n), got key 'x'", "setOrder: a non-list key")
+raises(function() PN.move(pv, pv1, 0) end, MV .. "index 0 is out of range (1 to 3)", "move: index 0")
+raises(function() PN.move(pv, pv1, 4) end, MV .. "index 4 is out of range (1 to 3)", "move: count + 1")
+raises(function() PN.move(pv, pv1, 1.5) end, MV .. "index must be an integer from 1 to 3, got 1.5", "move: 1.5")
+raises(function() PN.move(pv, pv1, "1") end, MV .. "index must be an integer from 1 to 3, got '1'", "move: '1'")
+raises(function() PN.move(pv, po1, 1) end, MV .. "'po1' is not a child of panel 'pv'", "move: another panel's child")
+raises(function() PN.move(pv, gone, 1) end, "handle 'gone' was removed", "move: a removed child")
+raises(function() PN.move(pv, pv1, 1, 2) end, MV .. "expected 3 arguments (handle, child, index), got 4", "move: extra argument")
+ok(boxIds(wpv.VBox) == "pv2,pv1,pv3" and PN.order(pv)[1] == pv2, "reorder: refused calls left the order unchanged", boxIds(wpv.VBox))
+
+-- AC 4: a horizontal panel lays its children out left to right
+local po2 = X.create{ id = "po2", text = "bb", place = { panel = other } }
+local po3 = X.create{ id = "po3", text = "ccc", place = { panel = other } }
+local wpo = widgetOfId("po")
+ok(boxIds(wpo.HBox) == "po1,po2,po3" and #wpo.VBox.children == 0 and pads(wpo.HBox, "Left") == "0,16,16", "horizontal: HBox, left to right, normal gap", pads(wpo.HBox, "Left"))
+ok(wpo:GetDesiredSize().X == 10 + 16 + 20 + 16 + 30 + 2 * 8, "horizontal: widths add up", wpo:GetDesiredSize().X)
+
+-- a hidden child keeps its position through a reorder; the 33rd child is refused
+X.setVisible(pv1, false)
+PN.move(pv, pv3, 1)
+ok(boxIds(wpv.VBox) == "pv3,pv2,pv1" and widgetOfId("pv1").vis == 1, "reorder: a hidden child moves with the order", boxIds(wpv.VBox))
+X.setVisible(pv1, true)
+PN.setOrder(pv, { pv2, pv1, pv3 })
+local many = {}
+for i = 1, 29 do many[i] = X.create{ id = "m" .. i, text = "m", place = { panel = other } } end
+ok(#PN.order(other) == 32, "limit: 32 children fit", #PN.order(other))
+raises(function() X.create{ id = "m30", text = "m", place = { panel = other } } end, PLC .. "panel 'po' already has 32 children (at most 32)", "limit: a 33rd child")
+raises(function() P.place(pv1, { panel = other }) end, PLC .. "panel 'po' already has 32 children (at most 32)", "limit: a 33rd child by place")
+ok(C.els.m30 == nil and pv1 and PN.order(pv)[2] == pv1, "limit: nothing changed")
+for _, m in ipairs(many) do X.remove(m) end
+ok(#PN.order(other) == 3 and #wpo.HBox.children == 3, "remove: children removed from the box", #wpo.HBox.children)
+
+-- a child's text grows: the panel grows; same id again; move between panels and out to a host
+X.set(pv1, "a much longer text")
+ok(wpv:GetDesiredSize().X == 10 * #"a much longer text" + 16, "child: set grows the panel", wpv:GetDesiredSize().X)
+local again = X.create{ id = "pv1", text = "one", place = { panel = pv } }
+ok(rawequal(again, pv1) and boxIds(wpv.VBox) == "pv2,pv1,pv3", "child: create with the same id keeps its position")
+P.place(pv2, { panel = other })
+ok(boxIds(wpv.VBox) == "pv1,pv3" and boxIds(wpo.HBox) == "po1,po2,po3,pv2" and pads(wpv.VBox, "Top") == "0,8", "place: from one panel to another, at the end", boxIds(wpo.HBox))
+P.place(pv2, { absolute = { anchor = "center", x = 5, y = 32 } })
+local wpv2 = widgetOfId("pv2")
+ok(boxIds(wpo.HBox) == "po1,po2,po3" and wpv2.parent == cvP and wpv2.Slot.position.Y == 32 and wpv2.Slot.anchors.Minimum.X == 0.5, "place: out of a panel onto the HUD", tostring(wpv2 and wpv2.Slot.position.Y))
+P.place(pv2, { panel = pv })
+PN.move(pv, pv2, 1)
+ok(boxIds(wpv.VBox) == "pv2,pv1,pv3" and widgetOfId("pv2").parent == wpv.VBox, "place: back into the panel, then moved first", boxIds(wpv.VBox))
+local pdup = PN.create{ id = "pv", place = { corner = "top-left" }, gap = "loose" }
+ok(rawequal(pdup, pv) and pads(wpv.VBox, "Top") == "0,32,32", "panel: the same id with a new gap re-gaps the children", pads(wpv.VBox, "Top"))
+PN.create{ id = "pv", place = { corner = "top-left" }, layout = "horizontal" }
+ok(#wpv.VBox.children == 0 and boxIds(wpv.HBox) == "pv2,pv1,pv3" and pads(wpv.HBox, "Left") == "0,8,8", "panel: a layout change moves the same widgets to the other box", boxIds(wpv.HBox))
+PN.create{ id = "pv", place = { corner = "top-left" } }
+ok(boxIds(wpv.VBox) == "pv2,pv1,pv3" and widgetOfId("pv1") == w1, "panel: and back", boxIds(wpv.VBox))
+PN.setStyle(pv, { background = "dark", padding = "loose" })
+ok(near(wpv.bg[4], 0.7) and wpv.pad == 12, "panel: setStyle")
+c0 = C.stats.uobjectCalls
+PN.setStyle(pv, { background = "dark", padding = "loose" })
+ok(C.stats.uobjectCalls == c0, "panel: the same style again makes no UObject call")
+
+-- AC 3: RemoveAllWidgets and re-add (the same HUD back): reused, same order, one widget each
+hudP.inViewport = false; tick(); hudP.inViewport = true; tick(); tick()
+local nP = 0
+for _, ch in ipairs(cvP.children) do if ch.tag == "nucleus:TestMod:pv" then nP = nP + 1 end end
+ok(nP == 1 and widgetOfId("pv") == wpv and boxIds(wpv.VBox) == "pv2,pv1,pv3" and widgetOfId("pv1") == w1, "rebuild: panel and children reused, order kept", boxIds(wpv.VBox))
+-- a child's widget gone (another mod removed it): the HUD tick re-attaches it in its place
+w3:RemoveFromParent(); kill(w3)
+for _ = 1, 3 do tick() end
+ok(boxIds(wpv.VBox) == "pv2,pv1,pv3" and widgetOfId("pv3") ~= w3 and widgetOfId("pv3").parent == wpv.VBox, "re-attach: a lost child comes back in its place", boxIds(wpv.VBox))
+-- a duplicate and an orphan in the box are removed on the next attach
+local dupT = newText(PC); wpv.VBox:AddChild(dupT); dupT.tip = "nucleus:TestMod:pv1"
+local orphT = newText(PC); wpv.VBox:AddChild(orphT); orphT.tip = "nucleus:TestMod:nobody"
+hudP.inViewport = false; tick(); hudP.inViewport = true; tick(); tick()
+ok(dupT.parent == nil and orphT.parent == nil and boxIds(wpv.VBox) == "pv2,pv1,pv3", "rebuild: duplicate and orphan removed from the box", boxIds(wpv.VBox))
+-- map change: a new HUD; new widgets in the same order
+for _, ch in ipairs(cvP.children) do kill(ch) end
+kill(cvP); kill(hudP)
+tick()
+local hudQ = newHud(3)
+for _, nfy in ipairs(notify) do if nfy.cls:find("InventoryUI", 1, true) then nfy.fn(hudQ) end end
+tick(); tick()
+local wq = widgetOfId("pv")
+ok(wq and wq ~= wpv and wq.parent == hudQ.OwningCanvas and boxIds(wq.VBox) == "pv2,pv1,pv3" and pads(wq.VBox, "Top") == "0,8,8", "map change: a new panel, children in the same order", wq and boxIds(wq.VBox))
+ok(near(wq.bg[4], 0.7) and wq.pad == 12, "map change: style kept")
+
+-- remove: the panel and its children go; their handles raise
+local freedP = freed
+PN.remove(pv)
+ok(wq.parent == nil and C.els.pv1 == nil and C.els.pv == nil and freed >= freedP + 4, "remove: the panel and its children")
+raises(function() X.set(pv1, "x") end, "nucleus.ui.text: handle 'pv1' was removed", "remove: a child's handle raises")
+raises(function() PN.order(pv) end, "nucleus.ui.panel: handle 'pv' was removed", "remove: the panel's handle raises")
+raises(function() X.create{ id = "bx", place = { panel = pv } } end, "nucleus.ui.panel: handle 'pv' was removed", "remove: a removed panel in an intent")
+PN.remove(pv)
+ok(true, "remove: idempotent")
+
+-- the Journal: a panel with two texts; per open new widgets in order; a reorder while open and on the next open
+local jp = PN.create{ id = "jp", place = { host = "journal", corner = "bottom-right" } }
+local jq1 = X.create{ id = "jq1", text = "first", place = { panel = jp } }
+local jq2 = X.create{ id = "jq2", text = "second", place = { panel = jp } }
+ok(not PN.isShown(jp) and C.els.jq1.ref == nil, "journal panel: pending while closed")
+local j8 = openNew(8); tick()
+local wjp = widgetOfId("jp")
+ok(wjp and wjp.parent == canvasOfJ(j8) and boxIds(wjp.VBox) == "jq1,jq2" and X.isShown(jq2), "journal panel: on the map page with its children", wjp and boxIds(wjp.VBox))
+local st = J.stats().attachSteps
+local names = {}
+for _, it in ipairs(st.items) do names[#names + 1] = it.id .. (it.panel and ("@" .. it.panel) or "") end
+ok(table.concat(names, ",") == "jq1@jp,jq2@jp,jp" and st.canvas >= 0 and st.place >= 0 and J.stats().attachElements == 3, "journal panel: steps per element, children within their panel", table.concat(names, ","))
+tick()
+ok(countLogs("^DEBUG ui journal attach n=3 in %d+ us %(canvas %d+; 'jq1' %d+ %(create %d+, in 'jp'%); 'jq2' %d+ %(create %d+, in 'jp'%); 'jp' %d+ %(create %d+, own %-?%d+%); place %d+%)") == 1, "journal panel: the DEBUG line names every step")
+PN.move(jp, jq2, 1)
+ok(boxIds(wjp.VBox) == "jq2,jq1", "journal panel: a reorder applies while open")
+j8.inViewport = false; tick()
+local j9 = openNew(9); tick()
+ok(boxIds(widgetOfId("jp").VBox) == "jq2,jq1" and widgetOfId("jp") ~= wjp, "journal panel: and on the next open", boxIds(widgetOfId("jp").VBox))
+j9.inViewport = false; tick()
+PN.setOrder(jp, { jq1, jq2 })
+local j10 = openNew(10); tick()
+ok(boxIds(widgetOfId("jp").VBox) == "jq1,jq2", "journal panel: a reorder while closed shows on the next open")
+j10.inViewport = false; tick()
+PN.remove(jp)
+ok(C.els.jq1 == nil, "journal panel: removed")
+PN.remove(other)
+end
+panelTests()
 
 H.unwatch(token); H.unwatch(throws)
 ok(asyncUsed == 0, "poller: never LoopAsync or ExecuteInGameThread", asyncUsed)

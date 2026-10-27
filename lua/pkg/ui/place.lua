@@ -6,6 +6,8 @@
 --     align = "center" | "start" | "end", gap = <gap>, offset = { x, y } }
 --   { host = "hud" | "journal", absolute = { anchor = <corner> | "center", x = <number>, y = <number> } }
 --
+--   { panel = <panel handle> }        (story 14) inside a panel: the panel arranges it; no other key goes with it
+--
 -- host "journal" (story 13) is the Journal's map page (journal.lua); it has no named elements yet, so near is HUD only.
 --
 -- All numbers are canvas units (screen pixels / the game's DPI scale). Defaults: host "hud", gap "normal",
@@ -48,8 +50,8 @@ local KEYS = {
     absolute = { host = true, absolute = true },
 }
 
-local ALL_KEYS = { host = true, corner = true, near = true, absolute = true, gap = true, side = true, align = true, offset = true }
-local ALL_KEY_NAMES = "absolute, align, corner, gap, host, near, offset, side"
+local ALL_KEYS = { host = true, corner = true, near = true, absolute = true, gap = true, side = true, align = true, offset = true, panel = true }
+local ALL_KEY_NAMES = "absolute, align, corner, gap, host, near, offset, panel, side"
 
 P.DEFAULT = { host = "hud", corner = "top-right", gap = "normal", gapUnits = 16, offset = { x = 0, y = 0 } }
 
@@ -72,11 +74,29 @@ local function sortedKeys(t)
     return table.concat(ks, ", ")
 end
 
+-- Story 14: the panel element an intent names, or a clean error.
+local function panelOf(ph)
+    if type(ph) ~= "table" then bad("panel must be a panel handle, got %s", C.describe(ph)) end
+    local rid = C.removedHandle[ph]
+    if rid then C.fail("%s.%s: handle '%s' was removed", C.UI, C.removedKind[ph] or "panel", rid) end
+    local pel = C.handleOf[ph]
+    if not pel then bad("panel is not a panel handle (use the handle that panel.create returned)") end
+    if pel.kind ~= "panel" then bad("panel is %s ('%s'), not a panel", C.ARTICLE[pel.kind], pel.id) end
+    return pel
+end
+
 -- Validates an intent and returns a normalized copy (plain values only). Raises nucleus.ui.place: <problem>.
+-- A panel intent comes back as { panelEl = <the panel element> } (the caller checks the panel's limits).
 function P.validate(intent)
     if type(intent) ~= "table" then bad("intent must be a table, got %s", C.describe(intent)) end
     for k in pairs(intent) do
         if type(k) ~= "string" or not ALL_KEYS[k] then bad("unknown key %s in an intent (valid keys: %s)", C.describe(k), ALL_KEY_NAMES) end
+    end
+    if intent.panel ~= nil then
+        for k in pairs(intent) do
+            if k ~= "panel" then bad("%s is not allowed with panel (the panel arranges its children; valid keys: panel)", k) end
+        end
+        return { panelEl = panelOf(intent.panel) }
     end
     local kinds = {}
     if intent.corner ~= nil then kinds[#kinds + 1] = "corner" end
@@ -399,5 +419,5 @@ end
 -- element registry and attach).
 P.place = nil
 
-P._GAP, P._CORNERS = GAP, CORNERS
+P._GAP, P._CORNERS, P._GAP_NAMES = GAP, CORNERS, GAP_NAMES
 return P

@@ -7,7 +7,11 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/BorderSlot.h"
+#include "Components/HorizontalBox.h"
+#include "Components/Overlay.h"
+#include "Components/OverlaySlot.h"
 #include "Components/TextBlock.h"
+#include "Components/VerticalBox.h"
 #include "Components/Widget.h"
 #include "EdGraphSchema_K2.h"
 #include "Engine/Blueprint.h"
@@ -18,6 +22,7 @@
 #include "K2Node_FunctionResult.h"
 #include "K2Node_MakeStruct.h"
 #include "K2Node_VariableGet.h"
+#include "K2Node_VariableSet.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "Kismet/KismetStringLibrary.h"
 #include "Kismet/KismetTextLibrary.h"
@@ -76,6 +81,16 @@ namespace
 			FGraphNodeCreator<UK2Node_CallFunction> C(*G);
 			UK2Node_CallFunction* N = C.CreateNode(false);
 			N->SetFromFunction(F);
+			Place(N);
+			C.Finalize();
+			return N;
+		}
+
+		UK2Node_VariableSet* Set(FName Var)
+		{
+			FGraphNodeCreator<UK2Node_VariableSet> C(*G);
+			UK2Node_VariableSet* N = C.CreateNode(false);
+			N->VariableReference.SetSelfMember(Var);
 			Place(N);
 			C.Finalize();
 			return N;
@@ -332,6 +347,122 @@ namespace
 		return WBP;
 	}
 
+	/** Fails loudly when a function name would clash with one UUserWidget already has (shadowing it in game). */
+	void CheckNames(std::initializer_list<const TCHAR*> Names)
+	{
+		for (const TCHAR* Fn : Names)
+		{
+			checkf(!UUserWidget::StaticClass()->FindFunctionByName(Fn), TEXT("UUserWidget already has a function %s"), Fn);
+		}
+	}
+
+	/** The panel's and the button's SetBackground(R, G, B, A) and SetBackgroundPadding(Padding), as on the text widget. */
+	FFunc AddSetBackground(UBlueprint* BP)
+	{
+		return AddFunction(BP, TEXT("SetBackground"), {{TEXT("R"), RealT()}, {TEXT("G"), RealT()}, {TEXT("B"), RealT()}, {TEXT("A"), RealT()}}, {});
+	}
+	void FillBackground(UWidgetBlueprint* WBP, const FFunc& SetBg, const FFunc& SetPad)
+	{
+		{
+			FGraph G(WBP, SetBg.G);
+			UK2Node_VariableGet* GetBg = G.Get(TEXT("Background"));
+			UK2Node_CallFunction* Make = G.Call(UKismetMathLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, MakeColor));
+			G.Link(SetBg.Entry, TEXT("R"), Make, TEXT("R"));
+			G.Link(SetBg.Entry, TEXT("G"), Make, TEXT("G"));
+			G.Link(SetBg.Entry, TEXT("B"), Make, TEXT("B"));
+			G.Link(SetBg.Entry, TEXT("A"), Make, TEXT("A"));
+			UK2Node_CallFunction* Set = G.Call(UBorder::StaticClass(), GET_FUNCTION_NAME_CHECKED(UBorder, SetBrushColor));
+			G.Link(GetBg, TEXT("Background"), Set, PN_Self);
+			G.Link(Make, PN_Ret, Set, TEXT("InBrushColor"));
+			G.Chain({SetBg.Entry, Set});
+		}
+		{
+			FGraph G(WBP, SetPad.G);
+			UK2Node_VariableGet* GetBg = G.Get(TEXT("Background"));
+			UK2Node_MakeStruct* Margin = G.MakeStruct(FMargin::StaticStruct());
+			for (const FName Side : {GET_MEMBER_NAME_CHECKED(FMargin, Left), GET_MEMBER_NAME_CHECKED(FMargin, Top),
+			                         GET_MEMBER_NAME_CHECKED(FMargin, Right), GET_MEMBER_NAME_CHECKED(FMargin, Bottom)})
+			{
+				G.Link(SetPad.Entry, TEXT("Padding"), Margin, Side);
+			}
+			UK2Node_CallFunction* Set = G.Call(UBorder::StaticClass(), GET_FUNCTION_NAME_CHECKED(UBorder, SetPadding));
+			G.Link(GetBg, TEXT("Background"), Set, PN_Self);
+			G.Link(G.OnlyOutput(Margin), G.Pin(Set, TEXT("InPadding")));
+			G.Chain({SetPad.Entry, Set});
+		}
+	}
+
+	/**
+	 * The tag of a panel or a button (stories 14-15): a String variable CoreTag, set by SetTag(NewTag). Not ToolTipText as
+	 * on the text widget: a tooltip on a hit-testable widget (a button, or a panel holding one) would show on hover.
+	 */
+	FFunc AddTag(UBlueprint* BP)
+	{
+		FBlueprintEditorUtils::AddMemberVariable(BP, TEXT("CoreTag"), StrT(), TEXT(""));
+		return AddFunction(BP, TEXT("SetTag"), {{TEXT("NewTag"), StrT()}}, {});
+	}
+	void FillTag(UBlueprint* BP, const FFunc& SetTag)
+	{
+		FGraph G(BP, SetTag.G);
+		UK2Node_VariableSet* Set = G.Set(TEXT("CoreTag"));
+		G.Link(SetTag.Entry, TEXT("NewTag"), Set, TEXT("CoreTag"));
+		G.Chain({SetTag.Entry, Set});
+	}
+
+	/**
+	 * WBP_<Core>Panel (story 14): Border "Background" -> Overlay "Layers" -> [VerticalBox "VBox", HorizontalBox "HBox"].
+	 * Lua puts a vertical panel's children into VBox and a horizontal one's into HBox (the other stays empty: zero size),
+	 * sets the gap between them as box slot padding, and reorders them by taking them out and adding them back (box
+	 * panels only append). Every container is self-hit-test-invisible: a panel never takes a click itself, while buttons
+	 * inside it stay clickable. Functions:
+	 *   SetBackground(R, G, B, A), SetBackgroundPadding(Padding)   as on the text widget
+	 *   SetTag(NewTag: String)                                     CoreTag = NewTag
+	 */
+	UWidgetBlueprint* BuildPanel(const FString& Dir, const FString& Core)
+	{
+		UWidgetBlueprint* WBP = CastChecked<UWidgetBlueprint>(NewBlueprint(Dir / FString::Printf(TEXT("WBP_%sPanel"), *Core),
+			UUserWidget::StaticClass(), UWidgetBlueprint::StaticClass(), UWidgetBlueprintGeneratedClass::StaticClass()));
+		CheckNames({TEXT("SetBackground"), TEXT("SetBackgroundPadding"), TEXT("SetTag")});
+
+		UWidgetTree* T = WBP->WidgetTree;
+		UBorder* Background = T->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Background"));
+		Background->SetBrushColor(FLinearColor(0.f, 0.f, 0.f, 0.f));
+		Background->SetPadding(FMargin(0.f));
+		Background->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		Background->bIsVariable = true;
+		T->RootWidget = Background;
+		UOverlay* Layers = T->ConstructWidget<UOverlay>(UOverlay::StaticClass(), TEXT("Layers"));
+		Layers->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		UBorderSlot* LayersSlot = CastChecked<UBorderSlot>(Background->AddChild(Layers));
+		LayersSlot->SetPadding(FMargin(0.f));
+		LayersSlot->SetHorizontalAlignment(HAlign_Fill);
+		LayersSlot->SetVerticalAlignment(VAlign_Fill);
+		UVerticalBox* VBox = T->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("VBox"));
+		UHorizontalBox* HBox = T->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("HBox"));
+		for (UPanelWidget* Box : {static_cast<UPanelWidget*>(VBox), static_cast<UPanelWidget*>(HBox)})
+		{
+			Box->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+			Box->bIsVariable = true;
+			UOverlaySlot* BoxSlot = CastChecked<UOverlaySlot>(Layers->AddChild(Box));
+			BoxSlot->SetHorizontalAlignment(HAlign_Fill);
+			BoxSlot->SetVerticalAlignment(VAlign_Fill);
+		}
+		WBP->OnVariableAdded(TEXT("Background"));
+		WBP->OnVariableAdded(TEXT("Layers")); // every widget in the tree needs its GUID, variable or not
+		WBP->OnVariableAdded(TEXT("VBox"));
+		WBP->OnVariableAdded(TEXT("HBox"));
+
+		// The functions need the compiled widget variables, so compile first.
+		FFunc SetBg = AddSetBackground(WBP);
+		FFunc SetPad = AddFunction(WBP, TEXT("SetBackgroundPadding"), {{TEXT("Padding"), RealT()}}, {});
+		FFunc SetTag = AddTag(WBP);
+		if (!Compile(WBP)) return nullptr;
+		FillBackground(WBP, SetBg, SetPad);
+		FillTag(WBP, SetTag);
+		if (!Compile(WBP) || !Save(WBP)) return nullptr;
+		return WBP;
+	}
+
 	/** <Core>_Call(Request) -> ReturnValue: "bp-default:" + Request. Core's Lua RegisterHooks it and replaces the result. */
 	void AddChannel(UBlueprint* BP, const FString& Core)
 	{
@@ -425,6 +556,7 @@ int32 UCoreGenCommandlet::Main(const FString& Params)
 	}
 	const FString Dir = TEXT("/Game/Mods/") + Core;
 	if (!BuildText(Dir, Core)) return 1;
+	if (!BuildPanel(Dir, Core)) return 1;
 	if (!BuildActor(Dir, Core)) return 1;
 	UE_LOG(LogCoreGen, Display, TEXT("CoreGen: all assets for %s generated."), *Core);
 	return 0;
