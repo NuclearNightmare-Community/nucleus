@@ -14,7 +14,7 @@ local uiOk, uiErr = pcall(function()
     return { common = require(BASE .. ".ui.common"), hud = require(BASE .. ".ui.hud"),
              journal = require(BASE .. ".ui.journal"),
              text = require(BASE .. ".ui.text"), place = require(BASE .. ".ui.place"), debug = require(BASE .. ".ui.debug"),
-             panel = require(BASE .. ".ui.panel") }
+             panel = require(BASE .. ".ui.panel"), button = require(BASE .. ".ui.button") }
 end)
 
 local NAME, LOWER = V.name, V.name:lower()
@@ -131,6 +131,9 @@ function C.connect(opts)
                 -- story 14 (core 0.3.0): panels, with reordering
                 panel = { create = U.panel.create, setStyle = U.panel.setStyle, setVisible = U.panel.setVisible, remove = U.panel.remove,
                           isShown = U.panel.isShown, order = U.panel.order, setOrder = U.panel.setOrder, move = U.panel.move },
+                -- story 15 (core 0.3.0): buttons with click callbacks (on hosts with a cursor: the Journal)
+                button = { create = U.button.create, setLabel = U.button.setLabel, setEnabled = U.button.setEnabled,
+                           setVisible = U.button.setVisible, remove = U.button.remove, isShown = U.button.isShown, stats = U.button.stats },
                 place = U.place.place,
                 elements = U.place.elements,
                 debug = { overlaps = U.debug.overlaps }, -- story 12: a diagnostic for testing a mod's UI
@@ -145,6 +148,10 @@ function C.connect(opts)
                     if type(prev) == "function" then return prev(...) end
                 end
             end)
+            -- Story 15: the button class is loaded before onReady, so the first button.create registers this state's
+            -- click hook at once (RegisterHook needs the function to exist).
+            local okP, errP = pcall(U.button._prepare)
+            if not okP then log.warn("%s's button class could not be loaded before onReady: %s", NAME, tostring(errP)) end
         else
             log.error("%s's UI helpers failed to load (%s); core.ui is not available.", NAME, tostring(uiErr))
         end

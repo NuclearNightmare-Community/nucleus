@@ -133,6 +133,35 @@ local function newPanelW()
     return w
 end
 
+-- Story 15: the button widget WBP_NucleusButton_C (globals: the main chunk is at Lua's 200-locals limit).
+BUTTON_SHORT = "WBP_NucleusButton_C"
+function newButtonW()
+    local w = { __class = BUTTON_SHORT, label = "", vis = 0, tag = "", enabled = true, opacity = 1, enabledCalls = 0, clicks = 0 }
+    obj(w, "/Engine/Transient.GameEngine_1:GameInstance_1." .. BUTTON_SHORT .. "_" .. nextAddr)
+    function w:SetLabel(t) self.label = t end
+    function w:SetEnabledState(e) self.enabledCalls = self.enabledCalls + 1; self.enabled = e end
+    function w:SetRenderOpacity(o) self.opacity = o end
+    function w:SetColors(...) self.colors = { ... } end
+    function w:SetTag(t) self.tag = t end
+    w.CoreTag = setmetatable({}, { __index = function(_, k) if k == "ToString" then return function() return w.tag end end end })
+    function w:SetVisibility(v) self.vis = v end
+    function w:GetVisibility() return self.vis end
+    function w:RemoveFromParent()
+        local p = self.parent
+        if p then for i, c in ipairs(p.children) do if c == self then table.remove(p.children, i) break end end end
+        self.parent = nil
+    end
+    function w:GetParent() PARENT_CALLS = PARENT_CALLS + 1; return self.parent end
+    function w:ForceLayoutPrepass() end
+    function w:GetDesiredSize() if self.vis == 1 then return vec(0, 0) end return vec(10 * #self.label + 8, 28) end
+    function w:GetClass() return { GetFName = function() return { ToString = function() return BUTTON_SHORT end } end } end
+    function w:GetRenderOpacity() return self.opacity end
+    function w:IsA() return false end
+    return w
+end
+HOOKS = {}
+function RegisterHook(path, fn) HOOKS[#HOOKS + 1] = { path = path, fn = fn } return #HOOKS, #HOOKS end
+
 local function newCanvas(path)
     local c = { children = {} }
     obj(c, path)
@@ -187,10 +216,12 @@ local GS = obj({ GetPlayerController = function() return PC end }, "/Script/Engi
 local PANELCLASS
 local WBL = obj({ Create = function(_, world, cls, owner)
     if cls == PANELCLASS then return newPanelW() end
+    if cls == BUTTONCLASS then return newButtonW() end
     return newText(owner)
 end }, "/Script/UMG.Default__WidgetBlueprintLibrary")
 local TEXTCLASS = obj({}, "/Game/Mods/Nucleus/WBP_NucleusText.WBP_NucleusText_C")
 PANELCLASS = obj({}, "/Game/Mods/Nucleus/WBP_NucleusPanel.WBP_NucleusPanel_C")
+BUTTONCLASS = obj({}, "/Game/Mods/Nucleus/WBP_NucleusButton.WBP_NucleusButton_C")
 obj({ GetAsset = function(_, a) return objects[a.PackageName .. "." .. a.AssetName] or { IsValid = function() return false end } end }, "/Script/AssetRegistry.Default__AssetRegistryHelpers")
 local INVALID = { IsValid = function() return false end }
 function StaticFindObject(path) return objects[path] or INVALID end
@@ -258,6 +289,7 @@ raises(function() J.watch(function() end) end, "nucleus.ui: journal.watch called
 raises(function() J.isOpen() end, "nucleus.ui: journal.isOpen called before connect", "before connect: journal.isOpen")
 raises(function() PN.create{ id = "p" } end, "nucleus.ui: panel.create called before connect", "before connect: panel.create")
 raises(function() PN.move({}, {}, 1) end, "nucleus.ui: panel.move called before connect", "before connect: panel.move")
+raises(function() require("nucleus.ui.button").create{ id = "b" } end, "nucleus.ui: button.create called before connect", "before connect: button.create")
 
 C.bind{ mod = "TestMod", log = logger(), ref = ref, deref = deref, free = free, micros = micros }
 
@@ -274,6 +306,9 @@ raises(function() PN.create{ id = "p" } end, "nucleus.ui.panel.create called off
 raises(function() PN.setOrder({}, {}) end, "nucleus.ui.panel.setOrder called off the game thread", "off thread: panel.setOrder")
 raises(function() PN.move({}, {}, 1) end, "nucleus.ui.panel.move called off the game thread", "off thread: panel.move")
 raises(function() PN.order({}) end, "nucleus.ui.panel.order called off the game thread", "off thread: panel.order")
+for _, fn in ipairs({ "create", "setLabel", "setEnabled", "setVisible", "remove", "isShown" }) do
+    raises(function() require("nucleus.ui.button")[fn]({}, true) end, "nucleus.ui.button." .. fn .. " called off the game thread", "off thread: button." .. fn)
+end
 offThread = false
 
 -- ---------------------------------------------------------------- validation (pure)
@@ -1148,6 +1183,140 @@ ok(C.els.jq1 == nil, "journal panel: removed")
 PN.remove(other)
 end
 panelTests()
+
+-- ---------------------------------------------------------------- story 15: buttons (ui/button.lua)
+local function buttonTests()
+local BN = require("nucleus.ui.button")
+local function clickW(w) for _, hk in ipairs(HOOKS) do hk.fn({ get = function() return w end }) end end
+local hits = {}
+local function counter(name) return function(h) hits[name] = (hits[name] or 0) + 1; hits[name .. ".h"] = h end end
+local BC, PLC = "nucleus.ui.button.create: ", "nucleus.ui.place: "
+local jplace = { host = "journal", corner = "top-left" }
+
+-- bad input (AC 7)
+raises(function() BN.create() end, BC .. "expected a table", "button: create()")
+raises(function() BN.create{ id = "bb", onClick = counter("x"), place = jplace, colour = 1 } end, BC .. "unknown key 'colour' (valid: enabled, id, label, onClick, place, style)", "button: unknown key")
+raises(function() BN.create{ id = "bb", label = "x", place = jplace } end, BC .. "onClick must be a function, got nil", "button: onClick missing")
+raises(function() BN.create{ id = "bb", label = "x", place = jplace, onClick = "f" } end, BC .. "onClick must be a function, got 'f'", "button: onClick a string")
+raises(function() BN.create{ id = "bb", label = {}, place = jplace, onClick = counter("x") } end, BC .. "label must be a string, a number or nil, got table", "button: label a table")
+raises(function() BN.create{ id = "bb", label = string.rep("x", 65), place = jplace, onClick = counter("x") } end, BC .. "label is 65 characters, at most 64", "button: 65-character label")
+raises(function() BN.create{ id = "bb", label = "x", place = { host = "hud", corner = "top-left" }, onClick = counter("x") } end, BC .. "buttons need a host with a cursor (journal); see input mode, story 16", "button: host hud")
+raises(function() BN.create{ id = "bb", label = "x", onClick = counter("x") } end, BC .. "buttons need a host with a cursor (journal)", "button: default place is the HUD")
+raises(function() BN.create{ id = "bb", label = "x", place = jplace, onClick = counter("x"), enabled = "yes" } end, BC .. "enabled must be a boolean or nil, got 'yes'", "button: enabled 'yes'")
+raises(function() BN.create{ id = "bb", label = "x", place = jplace, onClick = counter("x"), style = { background = "pink" } } end, "nucleus.ui.button: unknown background 'pink'", "button: style prefix")
+local hudPanel = PN.create{ id = "bhp", place = { corner = "top-left" } }
+raises(function() BN.create{ id = "bb", label = "x", place = { panel = hudPanel }, onClick = counter("x") } end, BC .. "buttons need a host with a cursor (journal)", "button: into a HUD panel")
+PN.remove(hudPanel)
+ok(C.els.bb == nil and #HOOKS == 0, "button: nothing made, no hook, by refused creates")
+
+-- a panel with two buttons and a text on the Journal (AC 1), created while closed
+local bp = PN.create{ id = "bp", place = { host = "journal", corner = "bottom-right" } }
+local b1 = BN.create{ id = "b1", label = "One", place = { panel = bp }, onClick = counter("b1") }
+local b2 = BN.create{ id = "b2", label = 22, place = { panel = bp }, onClick = function(h) hits.b2 = (hits.b2 or 0) + 1; error("b2 throws on purpose") end }
+local bt = X.create{ id = "bt", text = "text", place = { panel = bp } }
+ok(#HOOKS == 1 and HOOKS[1].path == "/Game/Mods/Nucleus/WBP_NucleusButton.WBP_NucleusButton_C:Nucleus_OnClicked", "button: one click hook per Lua state, by full path", HOOKS[1] and HOOKS[1].path)
+raises(function() P.place(bp, { host = "hud", corner = "top-left" }) end, PLC .. "panel 'bp' holds buttons, which need a host with a cursor (journal); see input mode, story 16", "button: a panel holding buttons can't go to the HUD")
+raises(function() P.place(b1, { host = "hud", corner = "top-left" }) end, PLC .. "buttons need a host with a cursor (journal)", "button: place on the HUD")
+ok(not BN.isShown(b1) and C.els.b1.ref == nil, "button: pending while the Journal is closed")
+local jb = openNew(20); tick()
+local wbp = widgetOfId("bp")
+local wb1, wb2 = widgetOfId("b1"), widgetOfId("b2")
+ok(wbp and wbp.parent == canvasOfJ(jb), "button: the panel on the map page")
+ok(wb1 and wb1.parent == wbp.VBox and wb2.parent == wbp.VBox and widgetOfId("bt").parent == wbp.VBox, "button: both buttons and the text in the panel's box")
+ok(wb1.tag == "nucleus:TestMod:b1" and wb1.label == "One" and wb2.label == "22", "button: tag in CoreTag, labels (a number is text)")
+ok(wb1.colors and near(wb1.colors[4], 0.85) and near(wb1.colors[8], 0.9) and near(wb1.colors[12], 0.95) and wb1.colors[13] == 4, "button: theme face, hover, pressed and tight padding", wb1.colors and table.concat(wb1.colors, ","))
+ok(wb1.enabledCalls == 0 and wb1.opacity == 1, "button: an enabled new button makes no enabled-state call")
+ok(BN.isShown(b1) and BN.isShown(b2), "button: isShown on the open map")
+
+-- a click runs onClick once with its handle; a repeat within 250 ms counts once; the next one later counts
+clickW(wb1)
+ok(hits.b1 == 1 and rawequal(hits["b1.h"], b1) and wb1.clicks == 0, "click: onClick(handle) runs once")
+clock = clock + 100000
+clickW(wb1)
+ok(hits.b1 == 1 and BN.stats().debounced == 1, "click: a repeat within 250 ms is dropped")
+clock = clock + 300000
+clickW(wb1)
+ok(hits.b1 == 2 and BN.stats().clicks == 2, "click: the next click later counts")
+-- a throwing onClick: one WARN per button, the hook keeps working (AC 3)
+clock = clock + 300000; clickW(wb2)
+clock = clock + 300000; clickW(wb2)
+ok(hits.b2 == 2 and countLogs("^WARN button 'b2' onClick: .*b2 throws on purpose") == 1 and BN.stats().throws == 2, "click: a throwing onClick logs one WARN; the next click still runs it")
+clock = clock + 300000; clickW(wb1)
+ok(hits.b1 == 3, "click: other buttons unaffected by a throwing one")
+-- disabled (AC 4): no call, drawn dim; enabled again: clicks again
+BN.setEnabled(b1, false)
+ok(wb1.enabled == false and near(wb1.opacity, 0.45), "disabled: SetEnabledState(false), drawn at the theme's opacity")
+clock = clock + 300000; clickW(wb1)
+ok(hits.b1 == 3 and BN.stats().dropped >= 1, "disabled: a click runs nothing")
+local c0 = C.stats.uobjectCalls
+BN.setEnabled(b1, false)
+ok(C.stats.uobjectCalls == c0, "disabled: the same state again makes no UObject call")
+BN.setEnabled(b1, true)
+ok(wb1.enabled == true and wb1.opacity == 1, "enabled again: opaque")
+clock = clock + 300000; clickW(wb1)
+ok(hits.b1 == 4, "enabled again: clicks run")
+-- hidden button, hidden panel: dropped
+BN.setVisible(b1, false)
+clock = clock + 300000; clickW(wb1)
+BN.setVisible(b1, true)
+PN.setVisible(bp, false)
+clock = clock + 300000; clickW(wb1)
+PN.setVisible(bp, true)
+ok(hits.b1 == 4, "hidden: clicks on a hidden button or in a hidden panel are dropped")
+-- another mod's button and a forged tag: ignored in silence (AC 2)
+local other = newButtonW(); other.tag = "nucleus:OtherMod:b1"
+local logs0 = #logs
+clock = clock + 300000; clickW(other)
+local junk = newButtonW(); junk.tag = "something else"
+clickW(junk)
+ok(hits.b1 == 4 and #logs == logs0 and BN.stats().ignored >= 2, "dispatch: another mod's button is ignored in silence")
+-- a hook context that fails: logged once, nothing escapes
+for _, hk in ipairs(HOOKS) do hk.fn({ get = function() error("bad context") end }) end
+ok(countLogs("^WARN button click handling failed: .*bad context") == 1, "dispatch: a failing context is caught and logged once")
+-- labels: set, no-op, validation
+BN.setLabel(b1, "Uno")
+ok(wb1.label == "Uno", "setLabel: applied")
+c0 = C.stats.uobjectCalls
+BN.setLabel(b1, "Uno")
+ok(C.stats.uobjectCalls == c0, "setLabel: the same label makes no UObject call")
+raises(function() BN.setLabel(b1, {}) end, "nucleus.ui.button.setLabel: label must be a string, a number or nil, got table", "setLabel: a table")
+raises(function() BN.setLabel(b1, string.rep("é", 65)) end, "nucleus.ui.button.setLabel: label is 65 characters, at most 64", "setLabel: 65 UTF-8 characters")
+BN.setLabel(b1, string.rep("é", 64))
+ok(wb1.label == string.rep("é", 64), "setLabel: 64 UTF-8 characters fit")
+BN.setLabel(b1, "One")
+raises(function() BN.setEnabled(b1, "yes") end, "nucleus.ui.button.setEnabled: enabled must be a boolean, got 'yes'", "setEnabled: 'yes'")
+raises(function() BN.setEnabled(b1) end, "nucleus.ui.button.setEnabled: enabled must be a boolean, got nil", "setEnabled: nil")
+raises(function() BN.setVisible(b1, 1) end, "nucleus.ui.button.setVisible: visible must be a boolean, got number", "setVisible: 1")
+raises(function() BN.setLabel({ id = "b1" }, "x") end, "nucleus.ui.button.setLabel: not a button handle (use the handle that button.create returned)", "button: forged handle")
+raises(function() BN.setLabel(nil, "x") end, "nucleus.ui.button.setLabel: expected a button handle, got nil", "button: nil handle")
+raises(function() BN.setEnabled(bt, true) end, "nucleus.ui.button.setEnabled: not a button handle ('bt' is a text element)", "button: a text handle")
+raises(function() X.set(b1, "x") end, "nucleus.ui.text.set: not a text element handle ('b1' is a button)", "button: text.set on a button")
+-- same id again: same handle, new callback, no second hook
+local hookN = #HOOKS
+local b1again = BN.create{ id = "b1", label = "One", place = { panel = bp }, onClick = counter("b1new") }
+clock = clock + 300000; clickW(wb1)
+ok(rawequal(b1again, b1) and hits.b1new == 1 and hits.b1 == 4 and #HOOKS == hookN, "button: create with the same id swaps the callback; still one hook")
+-- the next open: new widgets; an old widget of b1 is ignored; order and state kept
+jb.inViewport = false; tick()
+BN.setEnabled(b2, false)
+local jb2 = openNew(21); tick()
+local wb1n, wb2n = widgetOfId("b1"), widgetOfId("b2")
+ok(wb1n ~= wb1 and wb2n.enabled == false and near(wb2n.opacity, 0.45), "next open: new widgets, the disabled state applied")
+clock = clock + 300000; clickW(wb1)
+ok(hits.b1new == 1 and BN.stats().ignored >= 3, "next open: a click on the old Journal's widget is ignored")
+clock = clock + 300000; clickW(wb1n)
+ok(hits.b1new == 2, "next open: the new widget clicks")
+-- remove: its handle raises; its widget is ignored
+BN.remove(b2)
+BN.remove(b2)
+raises(function() BN.setLabel(b2, "x") end, "nucleus.ui.button: handle 'b2' was removed", "remove: a removed handle raises")
+clock = clock + 300000; clickW(wb2n)
+ok(hits.b2 == 2, "remove: its widget no longer runs anything")
+jb2.inViewport = false; tick()
+PN.remove(bp)
+ok(C.els.b1 == nil and C.els.bt == nil and #HOOKS == 1, "remove: the panel with its buttons; the hook stays registered")
+end
+buttonTests()
 
 H.unwatch(token); H.unwatch(throws)
 ok(asyncUsed == 0, "poller: never LoopAsync or ExecuteInGameThread", asyncUsed)

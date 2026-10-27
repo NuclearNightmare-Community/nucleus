@@ -8,7 +8,10 @@
   scenario's map key) to its Scripts/request.txt for
   touchdown; this script posts the key to the game window's message queue (PostMessage WM_KEYDOWN/WM_KEYUP; no
   foreground change and no global input, so it works behind a dialog and never types into another program), then
-  writes <seq> to done.txt.
+  writes <seq> to done.txt. "<seq> click <x> <y>" (story 15: a button on the Journal) is a real mouse click at that
+  desktop point, as mods/bp-spike/run.ps1 did: it brings the game window to the front and clicks only when it is in
+  front (never into another program), so it takes the mouse for a moment. "<seq> shot <label>" is served only in the
+  VM (a screenshot); on the host it is acknowledged and skipped.
   Keeps the log as <workspace>/dumps/<copy>/<name lowercase>/<scenario>.log (ignored by git) and runs check.ps1.
   Steam must be running. Don't type into the game while it runs.
   -Target vm runs the scenario in the Hyper-V VM NNB instead (tools/vm/vm-sp.ps1, README "Tests in the VM"): the
@@ -48,7 +51,7 @@ if ($Target -eq 'vm') {
     Assert-NNBSpScenario -Scenario $Scenario -HostOnly 'soak'
     $kept = Join-Path $outDir "$Scenario.vm.log"
     Remove-Item $kept -ErrorAction SilentlyContinue
-    $run = Invoke-NNBSpRun -Instance $inst -TestMod $testName -Mods $name, $testName -Paks "$name.pak" `
+    $run = Invoke-NNBSpRun -Instance $inst -TestMod $testName -Mods $name, $testName, "${name}SkelPeer" -Paks "$name.pak" `
         -EndPattern "\[$testName\] END result=" -TimeoutSec (Get-NNBSpTimeout $hostTimeout $TimeoutSec) -LogOut $kept -Prepare {
             param($stage)
             & (Join-Path $here 'deploy.ps1') -Instance $stage -Test -Scenario $Scenario -Staged
@@ -60,7 +63,15 @@ if ($Target -eq 'vm') {
 
 Add-Type -Namespace CoreRun -Name Win -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool PostMessage(System.IntPtr h, uint msg, System.IntPtr w, System.IntPtr l);
+[DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr h);
+[DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow();
+[DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, System.UIntPtr extra);
+[DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+[DllImport("user32.dll")] public static extern void mouse_event(uint flags, int dx, int dy, uint data, System.UIntPtr extra);
+[DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(System.IntPtr v);
 '@
+# Slate's absolute coordinates (the test's click points) are physical desktop pixels: see the same pixels.
+[void][CoreRun.Win]::SetProcessDpiAwarenessContext([IntPtr](-4))
 
 # Only the game this script started: the Shipping exe under this instance. Never the real install (the player may
 # start it while a run is going), never another copy.
@@ -72,8 +83,36 @@ function Stop-Game {
     $deadline = (Get-Date).AddSeconds(30)
     while ((Get-OurGame) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
 }
+# A real mouse click on the game only: the game window is brought to the front and clicked only when it is in front.
+function Invoke-Click([int] $x, [int] $y) {
+    $p = Get-OurGame
+    $h = if ($p) { $p.MainWindowHandle } else { [IntPtr]::Zero }
+    if ($h -eq [IntPtr]::Zero) { Write-Host '  click skipped: no game window'; return }
+    if ([CoreRun.Win]::GetForegroundWindow() -ne $h) {
+        [CoreRun.Win]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero); [CoreRun.Win]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero) # an Alt tap lifts the foreground lock
+        [void][CoreRun.Win]::SetForegroundWindow($h)
+        Start-Sleep -Milliseconds 300
+    }
+    if ([CoreRun.Win]::GetForegroundWindow() -ne $h) { Write-Host '  click skipped: the game window is not in front'; return }
+    [void][CoreRun.Win]::SetCursorPos($x, $y)
+    Start-Sleep -Milliseconds 150
+    [CoreRun.Win]::mouse_event(0x0001, 1, 0, 0, [UIntPtr]::Zero); [CoreRun.Win]::mouse_event(0x0001, -1, 0, 0, [UIntPtr]::Zero) # hover
+    Start-Sleep -Milliseconds 150
+    if ([CoreRun.Win]::GetForegroundWindow() -ne $h) { Write-Host '  click skipped: the game window lost the front'; return }
+    [CoreRun.Win]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 80
+    [CoreRun.Win]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+    Write-Host "  clicked at ($x, $y)"
+}
+
 function Invoke-Request([string] $cmd) {
-    # 'key ENTER' (touchdown) and 'key <A-Z>' (the journal scenario's map key); anything else is ignored.
+    # 'key ENTER' (touchdown), 'key <A-Z>' (the journal scenario's map key), 'click <x> <y>' (story 15), 'shot <label>'
+    # (VM only); anything else is ignored.
+    if ($cmd -cmatch '^click (\d{1,5}) (\d{1,5})$') {
+        $x = [int]$Matches[1]; $y = [int]$Matches[2]
+        if ($x -le 16383 -and $y -le 16383) { Invoke-Click $x $y } else { Write-Host "  click skipped: ($x, $y) out of range" }
+        return
+    }
+    if ($cmd -cmatch '^shot [A-Za-z0-9._-]{1,40}$') { Write-Host "  $cmd skipped (screenshots only in the VM)"; return }
     $vk, $scan, $label = $null, $null, $null
     if ($cmd -ceq 'key ENTER') { $vk, $scan, $label = 0x0D, 0x1C, 'ENTER' }
     elseif ($cmd -cmatch '^key ([A-Z])$') {

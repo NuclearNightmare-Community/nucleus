@@ -178,6 +178,11 @@ function X.resolveStyle(style, kind)
         C.fail("%s: unknown padding %s (valid: %s)", pre, C.describe(pad), table.concat(theme.paddingNames, ", "))
     end
     col.pad = theme.padding[pad]
+    if kind == "button" then
+        local h, q = theme.buttonHover, theme.buttonPressed
+        col.hover = { r = h.r, g = h.g, b = h.b, a = h.a }
+        col.pressed = { r = q.r, g = q.g, b = q.b, a = q.a }
+    end
     return col
 end
 
