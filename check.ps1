@@ -88,7 +88,11 @@ foreach ($p in 'menu1', 'match1', 'menu2', 'match2') {
     # The menu's HUD is hidden (nothing of InventoryUI_C is drawn there); every match must put the widget in the
     # canvas's top-right corner.
     $skeleton += if ($p -like 'match*') { "\[$T\] OK CORNER $p widget is in the canvas's top-right corner" } else { "\[$T\] OK (CORNER|HIDDENHUD) $p " }
-    if ($p -like 'match*') { $skeleton += "\[$T\] REFCOST $p n=200 " }
+    if ($p -like 'match*') {
+        $skeleton += "\[$T\] REFCOST $p n=200 "
+        # Story 12 AC 6: the top-right widget overlaps no drawn game widget (a FAIL line names the widget).
+        $skeleton += "\[$T\] OK OVERLAP $p none: "
+    }
     if ($p -ne 'menu1') {
         $skeleton += "\[$T\] OK DEREF $p previous widget from \w+ -> nil"
         $skeleton += "\[$T\] OK PATH $p previous widget path resolves=false"
@@ -131,12 +135,14 @@ foreach ($p in 'menu1', 'match1') {
                     'ui-place-abs-anchor', 'ui-place-abs-9000', 'ui-place-abs-offset', 'ui-place-abs-ok', 'ui-remove-ok', 'ui-remove-again',
                     'ui-removed-set', 'ui-removed-isshown', 'ui-removed-setvis', 'ui-removed-place', 'ui-recreate', 'ui-stats', 'ui-hud-stats',
                     'off-ui-create', 'off-ui-set', 'off-ui-setstyle', 'off-ui-setvis', 'off-ui-remove', 'off-ui-isshown', 'off-ui-place',
-                    'off-ui-elements', 'off-ui-find', 'off-ui-watch', 'off-ui-unwatch', 'off-ui-isvisible', 'off-ui-after') {
+                    'off-ui-elements', 'off-ui-find', 'off-ui-watch', 'off-ui-unwatch', 'off-ui-isvisible', 'off-ui-after',
+                    'ui-overlaps-two', 'ui-overlaps-hidden', 'ui-overlaps-h-table', 'ui-overlaps-h-nil', 'ui-overlaps-h-num',
+                    'ui-overlaps-h-str', 'ui-overlaps-h-forged', 'ui-removed-overlaps', 'off-ui-overlaps') {
         $badInput += "\[$T\] OK CASE $p\.$id "
     }
 }
-foreach ($id in 'pre-create', 'pre-watch', 'pre-find', 'pre-elements') { $badInput += "\[$T\] OK CASE $id " }
-$badInput += "\[$T\] OK CASES before-connect recorded=4"
+foreach ($id in 'pre-create', 'pre-watch', 'pre-find', 'pre-elements', 'pre-overlaps') { $badInput += "\[$T\] OK CASE $id " }
+$badInput += "\[$T\] OK CASES before-connect recorded=5"
 # UI helpers in game (stories 7-10): what run.ps1 -Scenario ui proves unattended. END result=PASS already means every
 # check the test made passed; these name the ones the stories' acceptance criteria rest on, plus core's own lines.
 $ui = $started + @(
@@ -153,7 +159,12 @@ $ui = $started + @(
     "\[$T\] EVENT \d+ attached reason=HUD back in the viewport"
     "#1|\[$T\] WARN hud watcher \d+: "
     "#1|\[$T\] WARN text 'long': text is longer than 256 characters"
-    "!\[$T\] WARN (?!hud watcher \d+: |text 'long': |$slowWarnOk)"
+    # Story 12: with debug on, the automatic overlap check WARNs per overlapping widget (a diagnostic, allowed here); a
+    # check or a widget that fails ("ui overlap check failed", "ui overlap: ... could not be checked") is not.
+    "!\[$T\] WARN (?!hud watcher \d+: |text 'long': |ui overlap '|$slowWarnOk)"
+    "\[$T\] OK UIOVERLAP match1 'xcross' \(near the crosshair, offset x=-24\) reports the crosshair "
+    "\[$T\] WARN ui overlap 'xcross': \S+[.:]Crosshair \(Image\) "
+    "\[$T\] OK UIOVERLAP match1 automatic checks were scheduled"
     "!\[$T\] ERROR"
     "\[$T\] DEBUG hud tick n=\d+ "
     "\[$T\] DEBUG ui (widget\(s\) gone with the HUD; freed handle\(s\) .*'pre' |'pre': new widget .*; freed the handle)"
@@ -211,7 +222,7 @@ $soak = $started + @(
     "\[$T\] SOAKTICK ticks=\d+ .*findAll=1$"
     "\[$T\] OK SOAKONE "
     "\[$T\] DEBUG ui attach 'soak' created "
-    "!\[$T\] WARN (?!hud slow tick .*(; HUD event: |steady state, a Lua GC step ran inside it))"
+    "!\[$T\] WARN (?!ui overlap '|hud slow tick .*(; HUD event: |steady state, a Lua GC step ran inside it))"
     "!\[$T\] ERROR"
     "!\[$T\] WARN hud slow tick .*steady state\)"
     "?!\[$T\] WARN hud slow tick .*steady state, a Lua GC step"

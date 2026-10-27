@@ -7,18 +7,20 @@
 --            menu -> SmallMap?listen -> menu -> SmallMap?listen with OpenLevel. In each world it re-finds the live
 --            HUD, shows one text widget anchored to the top-right corner of InventoryUI_C.OwningCanvas, re-finds it by
 --            weak handle, checks its layout, and checks that the previous world's widget handle derefs to nil. In
---            each match it also times <Core>_Ref.
+--            each match it also times <Core>_Ref, and makes the hard overlap check (story 12 AC 6): core's overlap walk
+--            (ui/debug.lua) must find no drawn widget under the top-right widget.
 -- bad-input: menu -> SmallMap?listen; calls every public native, the channel and every core.ui function with bad
 --            values (bad-input cases below), on and off the game thread and before connect, and checks each answer
 --            against the contract.
 -- ui:        the UI helpers (stories 7-10) unattended: menu -> match -> (RemoveAllWidgets and re-add) -> menu -> match,
 --            with elements created before the first match, same id twice, set and its no-op, long text, remove, style,
 --            setVisible, all four corners and gaps, offset, absolute, a three-element stack, near the crosshair with
---            HideCrosshair, a late and a throwing watcher, and handles freed across map changes (buildUi below).
+--            HideCrosshair, an element moved onto the crosshair reporting it (story 12 AC 2), a late and a throwing
+--            watcher, and handles freed across map changes (buildUi below).
 -- manual:    for hand testing. Never travels, requests keys, runs timed checks or logs FAIL. Keeps a
 --            "<Core> manual: <n>" element in the top-right corner of the HUD through core.ui.text (core re-attaches it
---            whenever the HUD is rebuilt, replaced or put back in the viewport; n counts attaches), and logs an
---            experimental report of the drawn widgets its on-screen rectangle overlaps.
+--            whenever the HUD is rebuilt, replaced or put back in the viewport; n counts attaches), and logs reports
+--            (core.ui.debug.overlaps) of the drawn widgets its on-screen rectangle overlaps.
 -- Keys it can't press itself (Enter for touchdown) go to run.ps1 through request.txt / done.txt next to this file.
 -- Never keeps a UObject across steps: only paths, addresses (as integers, never dereferenced) and weak handles.
 local scriptDir = debug.getinfo(1, "S").source:gsub("^@", ""):match("^(.*)[/\\]")
@@ -76,6 +78,7 @@ if SCENARIO == "bad-input" then
     try("pre-watch", "ui.hud.watch(fn) [before connect]", "hud", "watch", function() end)
     try("pre-find", "ui.hud.find() [before connect]", "hud", "find")
     try("pre-elements", "ui.elements() [before connect]", "place", "elements")
+    try("pre-overlaps", "ui.debug.overlaps({}) [before connect]", "debug", "overlaps", {})
 end
 
 local REQ, DONE = scriptDir .. "\\request.txt", scriptDir .. "\\done.txt"
@@ -239,6 +242,53 @@ local function checkCorner(phase, w, hud)
         phase, left, top, right, bottom, cw - right, top, cw, ch, tostring(slotOk), tostring(measured), tostring(inside), tostring(w:IsVisible()))
 end
 
+-- Story 12 AC 6, the hard overlap check: the top-right widget must overlap no drawn game widget. The check is core's
+-- (ui/debug.lua, the engine behind core.ui.debug.overlaps), run on this hand-made widget; it waits until Slate has
+-- painted the widget (geometry is zero before). One FAIL line per overlapping widget, naming it.
+local function rectStr(r) return string.format("(%.0f,%.0f)-(%.0f,%.0f)", r.l, r.t, r.r, r.b) end
+local function shortList(list, n)
+    local out = {}
+    for i = 1, math.min(#list, n) do
+        local h = list[i]
+        out[#out + 1] = string.format("%s (%s) %s", h.path:match("[^%.:]+$") or h.path, h.class, rectStr(h.rect))
+    end
+    return #out > 0 and table.concat(out, "; ") or "none"
+end
+local function line1(e) return (tostring(e):match("^[^\n]*")) end
+local function overlapCheck(phase)
+    step(phase .. ": overlap wait", function()
+        S.ov = nil
+        if not S.prev then return end
+        local okD, Dm = pcall(require, CORE:lower() .. ".ui.debug")
+        if not okD then S.ov = { why = "core's ui.debug did not load: " .. line1(Dm) } return end
+        return function()
+            local w, hud = core.deref(S.prev.handle), found(S.hudPath)
+            if not (w and hud) then S.ov = { why = "the widget or the HUD is gone" } return true end
+            local ok, hits, info = pcall(Dm._check, hud, w)
+            if not ok then S.ov = { why = "the check raised: " .. line1(hits) } return true end
+            if hits == nil and tostring(info):find("not painted", 1, true) then S.ov = { why = info } return false end
+            S.ov = hits and { hits = hits, info = info } or { why = info }
+            return true
+        end, 10, phase .. " overlap check (widget painted)"
+    end)
+    step(phase .. ": overlap", function()
+        local ov = S.ov or { why = "no result" }
+        if not ov.hits then check(false, "OVERLAP %s could not check the top-right widget: %s", phase, tostring(ov.why)) return end
+        local i = ov.info
+        say("OVERLAP %s ours=%s screen=(%.0fx%.0f) checked=%d drawn=%d topRightQuarter=%d fullScreenSkipped=%d roots=%d via %s errors=%d capped=%s",
+            phase, rectStr(i.rect), i.screen.w, i.screen.h, i.checked, i.drawn, i.quadrant, i.fullScreen, i.roots, tostring(i.via), i.errors, tostring(i.capped))
+        say("OVERLAP %s nearby (within 64 px, not overlapping): %s", phase, shortList(i.nearby, 10))
+        for n, h in ipairs(ov.hits) do
+            check(false, "OVERLAP %s the top-right widget overlaps %s (%s) %s%s", phase, h.path, h.class, rectStr(h.rect), h.element and (" element " .. h.element) or "")
+            if n >= 20 then break end
+        end
+        if #ov.hits == 0 then
+            check(i.checked > 0 and not i.capped, "OVERLAP %s none: the top-right widget overlaps no drawn widget (checked %d widgets, %d drawn, screen %.0fx%.0f%s)",
+                phase, i.checked, i.drawn, i.screen.w, i.screen.h, i.capped and ", CAPPED" or "")
+        end
+    end)
+end
+
 local function showWidget(phase)
     step(phase .. ": show widget", function() return createWidget(phase) end)
     step(phase .. ": refind and check", function()
@@ -260,6 +310,7 @@ local function showWidget(phase)
         end
         S.prev, S.cur = S.cur, nil
     end)
+    if phase:find("match", 1, true) then overlapCheck(phase) end
 end
 
 -- Cost of <Core>_Ref (a GUObjectArray scan) on a live object in this world.
@@ -629,12 +680,17 @@ local function uiCases(phase)
     case(P .. "setvis-1", "ui.text.setVisible(h, 1)", f(T.setVisible, h, 1), E.err(UI .. ".text.setVisible: visible must be a boolean, got number"))
     case(P .. "setvis-ok", "ui.text.setVisible(h, false) [control]", f(T.setVisible, h, false), E.none)
     case(P .. "isshown-ok", "ui.text.isShown(h) [control: hidden]", f(T.isShown, h), E.ret("false", function(r) return r[1] == false end))
+    -- story 12: debug.overlaps
+    case(P .. "overlaps-two", "ui.debug.overlaps(h, 1)", f(U.debug.overlaps, h, 1), E.err(UI .. ".debug.overlaps: expected 1 argument (handle), got 2"))
+    case(P .. "overlaps-hidden", "ui.debug.overlaps(h) [control: hidden element]", f(U.debug.overlaps, h),
+        E.ret("nil and a reason naming it hidden", function(r) return r[1] == nil and type(r[2]) == "string" and r[2]:find("hidden", 1, true) ~= nil end))
 
     -- Handles that aren't ours, for every function that takes one.
     local forged = { id = "bi" }
     local fns = {
         { "set", "text.set", T.set, "x" }, { "setstyle", "text.setStyle", T.setStyle, nil }, { "setvis", "text.setVisible", T.setVisible, true },
         { "remove", "text.remove", T.remove, nil }, { "isshown", "text.isShown", T.isShown, nil }, { "place", "place", U.place, { corner = "top-left" } },
+        { "overlaps", "debug.overlaps", U.debug.overlaps, nil },
     }
     for _, d in ipairs(fns) do
         local key, name, fn, arg = d[1], d[2], d[3], d[4]
@@ -692,6 +748,7 @@ local function uiCases(phase)
     case(P .. "removed-setvis", "ui.text.setVisible(<removed>, true)", f(T.setVisible, h, true), E.err(RM))
     case(P .. "removed-setstyle", "ui.text.setStyle(<removed>, nil)", f(T.setStyle, h, nil), E.err(RM))
     case(P .. "removed-place", "ui.place(<removed>, { corner = 'top-left' })", f(U.place, h, { corner = "top-left" }), E.err(RM))
+    case(P .. "removed-overlaps", "ui.debug.overlaps(<removed>)", f(U.debug.overlaps, h), E.err(RM))
     case(P .. "recreate", "ui.text.create{ id = 'bi' } after remove [control: a fresh element]", function()
         local h2 = T.create{ id = "bi", place = { absolute = { anchor = "center", x = 0, y = 260 } } }
         local fresh = not rawequal(h2, h)
@@ -722,17 +779,18 @@ uiOffThreadCases = function(P, h)
     off("watch", "hud.watch", U.hud.watch, function() end)
     off("unwatch", "hud.unwatch", U.hud.unwatch, 1)
     off("isvisible", "hud.isVisible", U.hud.isVisible)
+    off("overlaps", "debug.overlaps", U.debug.overlaps, h)
 end
 
 local function preConnectCases()
     step("before-connect cases", function()
         local UI = CORE:lower() .. ".ui"
-        local want = { create = "text.create", watch = "hud.watch", find = "hud.find", elements = "elements" }
+        local want = { create = "text.create", watch = "hud.watch", find = "hud.find", elements = "elements", overlaps = "debug.overlaps" }
         for _, r in ipairs(PRE_CONNECT) do
             case(r.id, r.desc, function() if not r.ok then error(r.err, 0) end return "no error" end,
                 E.err(UI .. ": " .. tostring(want[r.fn]) .. " called before connect"))
         end
-        check(#PRE_CONNECT == 4, "CASES before-connect recorded=%d (expected 4)", #PRE_CONNECT)
+        check(#PRE_CONNECT == 5, "CASES before-connect recorded=%d (expected 5)", #PRE_CONNECT)
     end)
 end
 
@@ -1207,6 +1265,40 @@ local function buildUi()
         T().remove(UIS.near)
     end)
 
+    -- Story 12 AC 2: an element moved onto the crosshair reports it, through core.ui.debug.overlaps and (debug is on
+    -- here) the automatic check's WARN about 1 s after the attach.
+    step("match1: onto the crosshair", function()
+        uiCreate("xcross", { text = "on the crosshair", place = { near = "crosshair", side = "right", gap = "normal", offset = { x = -24 } } })
+        local okP, n = pcall(function() return core.ui.text.stats().overlapScheduled end)
+        UIS.xSched = okP and n or -1
+        return afterMs(1500), 3, "layout and the automatic check"
+    end)
+    step("match1: overlap wait", function()
+        local deadline = os.clock() + 5
+        return function()
+            local hits, info = core.ui.debug.overlaps(UIS.xcross)
+            UIS.xHits, UIS.xWhy = hits, info
+            return hits ~= nil or not tostring(info):find("not painted", 1, true) or os.clock() > deadline
+        end, 8, "xcross painted"
+    end)
+    step("match1: overlap check", function()
+        local hud = core.ui.hud.find()
+        local cross = hud and hud.Crosshair
+        local cpath = valid(cross) and pathOf(cross) or "?"
+        local hits = UIS.xHits
+        if not check(hits ~= nil, "UIOVERLAP match1 'xcross' could be checked (%s)", tostring(UIS.xWhy)) then return end
+        local found_, names = false, {}
+        for i, h in ipairs(hits) do
+            if h.path == cpath or h.path:sub(1, #cpath + 1) == cpath .. "." then found_ = true end
+            if i <= 6 then names[#names + 1] = (h.path:match("[^%.:]+$") or h.path) .. " (" .. h.class .. ")" end
+        end
+        check(found_, "UIOVERLAP match1 'xcross' (near the crosshair, offset x=-24) reports the crosshair %s: %d hit(s): %s",
+            cpath:match("[^%.:]+$") or cpath, #hits, table.concat(names, ", "))
+        local sched = core.ui.text.stats().overlapScheduled
+        check(UIS.xSched > 0 and sched >= UIS.xSched, "UIOVERLAP match1 automatic checks were scheduled with debug on (%s, now %s)", tostring(UIS.xSched), tostring(sched))
+        T().remove(UIS.xcross)
+    end)
+
     -- A late watcher (story 7 AC 4).
     step("match1: late watcher", function()
         UIS.late = {}
@@ -1423,19 +1515,14 @@ end
 -- created once with core.ui.text.create; core re-attaches it after every HUD rebuild and logs "DEBUG ui attach 'manual'
 -- created|reused ...". A core.ui.hud watcher logs every HUD event; on attached, n counts the attaches and an ATTACH
 -- line reports the HUD, its visibility, the element's widget (found by its tag) and its rectangle. Overlap reports
--- follow about 1 s and 4 s after an attach or the HUD showing, from a 500 ms game-thread loop. The helpers' DEBUG lines
--- (tick summaries once a minute) are on. Nothing here travels, presses keys, waits with a deadline or logs FAIL: what
+-- (core.ui.debug.overlaps, story 12) follow about 1 s and 4 s after an attach or the HUD showing, from a 500 ms
+-- game-thread loop; with debug on, core's own automatic check also logs "WARN ui overlap 'manual': ..." once per
+-- overlapping widget. The helpers' DEBUG lines (tick summaries once a minute) are on. Nothing here travels, presses keys, waits with a deadline or logs FAIL: what
 -- the player does is only reported. Every error is caught and logged once per context as "WARN manual <context>: ...".
 local MANUAL_TICK_MS = 500
-local OVERLAP_CAP = 2000      -- widgets visited per overlap check
-local OVERLAP_LINES = 40      -- overlapping widgets logged per check
-local NEAR_LINES = 10         -- other drawn widgets in the screen's top-right quarter logged per check
+local OVERLAP_LINES = 40      -- overlapping widgets logged per report
 local REPORT_TICKS = { { 2, "+1s" }, { 8, "+4s" } } -- overlap reports after an attach (or the HUD showing)
 local VIS = { [0] = "Visible", [1] = "Collapsed", [2] = "Hidden", [3] = "HitTestInvisible", [4] = "SelfHitTestInvisible" }
--- Widget classes that draw something themselves; containers (CanvasPanel, Overlay, SizeBox, ...) draw nothing.
-local DRAWN = { "Image", "TextBlock", "RichTextBlock", "ProgressBar", "Border", "Button", "CheckBox", "EditableText",
-    "EditableTextBox", "MultiLineEditableText", "MultiLineEditableTextBox", "Slider", "SpinBox", "Throbber",
-    "CircularThrobber", "ComboBoxString", "ComboBoxKey" }
 local MANUAL_PREFIX = CORE .. " manual: "
 
 local M = { count = 0, tick = 0, warned = {}, reports = {} }
@@ -1516,147 +1603,27 @@ local function onHudEvent(hud, info)
     end
 end
 
--- ---- experimental overlap report
-local function absRect(cdo, w)
-    local tl = cdo[CORE .. "_AbsTopLeft"](cdo, w)
-    local br = cdo[CORE .. "_AbsBottomRight"](cdo, w)
-    return { l = tl.X, t = tl.Y, r = br.X, b = br.Y }
-end
+-- ---- overlap report: core.ui.debug.overlaps (story 12; the prototype that lived here moved into core's ui/debug.lua)
 local function rectStr(r) return string.format("(%.0f,%.0f)-(%.0f,%.0f)", r.l, r.t, r.r, r.b) end
-local function hasArea(r) return r.r > r.l and r.b > r.t end
-local function intersects(a, b) return math.min(a.r, b.r) > math.max(a.l, b.l) and math.min(a.b, b.b) > math.max(a.t, b.t) end
-
-local function drawsSomething(w, kind)
-    local ok, yes = pcall(function()
-        if kind == "Border" then return tonumber(w.Background.DrawAs) ~= 0 and w.BrushColor.A > 0 end
-        if kind == "Image" then return tonumber(w.Brush.DrawAs) ~= 0 and w.ColorAndOpacity.A > 0 end
-        if kind == "TextBlock" then return w:GetText():ToString() ~= "" end
-        return true
-    end)
-    return not ok or yes -- when in doubt, report it
-end
-
--- Top-level viewport widgets other than the HUD: WidgetBlueprintLibrary.GetAllWidgetsOfClass (TopLevelOnly) when
--- UE4SS hands its out array back, otherwise every UserWidget FindAllOf returns that is in the viewport.
--- Returns the count and the method used.
-local function topLevelWidgets(world, uwClass, push)
-    local n = 0
-    local function take(x)
-        if type(x) ~= "userdata" then return end
-        -- Array elements may come back wrapped (a RemoteUnrealParam with get()) instead of as the UObject itself.
-        if x.IsValid == nil and x.get ~= nil then x = x:get() end
-        if valid(x) and pathOf(x) ~= M.hudPath then n = n + 1; push(x) end
-    end
-    local ok, err = pcall(function()
-        local out = {}
-        WBL():GetAllWidgetsOfClass(world, out, uwClass, true)
-        local arr = out.FoundWidgets
-        if arr == nil and out[1] ~= nil then arr = out end
-        if arr == nil then
-            local keys = {}
-            for k, v in pairs(out) do keys[#keys + 1] = tostring(k) .. "=" .. type(v) if #keys >= 8 then break end end
-            error("no FoundWidgets in the out table (keys: " .. (#keys > 0 and table.concat(keys, ", ") or "none") .. ")")
-        end
-        if type(arr) == "table" then
-            for _, x in ipairs(arr) do take(x) end
-        else
-            arr:ForEach(function(_, e) take(e:get()) end)
-        end
-    end)
-    if ok then return n, "GetAllWidgetsOfClass" end
-    warnOnce("overlap GetAllWidgetsOfClass", err)
-    n = 0
-    for _, x in ipairs(FindAllOf("UserWidget") or {}) do
-        if valid(x) and x:IsInViewport() then take(x) end
-    end
-    return n, "FindAllOf(UserWidget) in viewport"
-end
-
 local function overlapReport(label)
-    local hud = found(M.hudPath)
-    if not hud then say("OVERLAP skipped (%s): the HUD is gone", label) return end
-    local _, shown = hudVis(hud)
-    if not shown then say("OVERLAP skipped (%s): the HUD is hidden", label) return end
-    local ours = manualWidget(hud)
-    if not ours then say("OVERLAP skipped (%s): our widget is not in the HUD canvas", label) return end
-    local cdo = found(ACTOR_CDO)
-    if not cdo then warnOnce("overlap", "core's ModActor class default object not found: " .. ACTOR_CDO) return end
-    local mine = absRect(cdo, ours)
-    if not hasArea(mine) then say("OVERLAP skipped (%s): our widget has no on-screen geometry yet %s", label, rectStr(mine)) return end
-    local screen = absRect(cdo, hud.OwningCanvas)
-    local sw, sh = screen.r - screen.l, screen.b - screen.t
-
-    local classes = {}
-    for _, n in ipairs(DRAWN) do
-        local c = found("/Script/UMG." .. n)
-        if c then classes[#classes + 1] = { name = n, cls = c } end
-    end
-    local UW, PANEL, SWITCH = found("/Script/UMG.UserWidget"), found("/Script/UMG.PanelWidget"), found("/Script/UMG.WidgetSwitcher")
-
-    local stack = { hud.OwningCanvas }
-    local function push(x) stack[#stack + 1] = x end
-    local okT, tops, via = pcall(topLevelWidgets, hud:GetWorld(), UW, push)
-    if not okT then warnOnce("overlap top-level widgets", tops); tops, via = "?", "failed" end
-
-    -- drawn: drawn widgets with an on-screen rectangle; quadrant: those of them in the screen's top-right quarter.
-    local seen, visited, hits, full, errors, drawn, quadrant, near = {}, 0, {}, 0, 0, 0, 0, {}
-    local topRight = { l = screen.l + sw / 2, t = screen.t, r = screen.r, b = screen.t + sh / 2 }
-    local function visit(x)
-        if not valid(x) then return end
-        local p = pathOf(x)
-        if seen[p] or p == M.widgetPath then return end -- our widget and everything inside it are skipped
-        seen[p] = true
-        local vis = tonumber(x:GetVisibility())
-        if vis == 1 or vis == 2 or x:GetRenderOpacity() <= 0 then return end -- not drawn, nor anything inside
-        local kind
-        for _, c in ipairs(classes) do if x:IsA(c.cls) then kind = c.name break end end
-        if kind and drawsSomething(x, kind) then
-            local r = absRect(cdo, x)
-            if hasArea(r) then
-                drawn = drawn + 1
-                if intersects(r, topRight) then quadrant = quadrant + 1 end
-            end
-            local isFull = r.r - r.l >= 0.9 * sw and r.b - r.t >= 0.9 * sh
-            local entry = { path = p, cls = x:GetClass():GetFName():ToString(), rect = r, vis = VIS[vis] or tostring(vis) }
-            if hasArea(r) and intersects(r, mine) then
-                if isFull then full = full + 1 else hits[#hits + 1] = entry end
-            elseif hasArea(r) and not isFull and intersects(r, topRight) then
-                near[#near + 1] = entry
-            end
-        end
-        if UW and x:IsA(UW) then
-            local tree = x.WidgetTree
-            if valid(tree) then push(tree.RootWidget) end
-        elseif SWITCH and x:IsA(SWITCH) then
-            push(x:GetActiveWidget())
-        elseif PANEL and x:IsA(PANEL) then
-            for i = x:GetChildrenCount() - 1, 0, -1 do push(x:GetChildAt(i)) end
-        end
-    end
-    while #stack > 0 and visited < OVERLAP_CAP do
-        local x = table.remove(stack)
-        visited = visited + 1
-        local ok, err = pcall(visit, x)
-        if not ok then errors = errors + 1; warnOnce("overlap visit", err) end
-    end
-
-    say("OVERLAP check (%s) ours=%s screen=(%.0fx%.0f) roots=HUD canvas + %s top-level widget(s) via %s", label, rectStr(mine), sw, sh, tostring(tops), tostring(via))
+    local hits, info = core.ui.debug.overlaps(M.handle)
+    if not hits then say("OVERLAP skipped (%s): %s", label, tostring(info)) return end
+    say("OVERLAP check (%s) ours=%s screen=(%.0fx%.0f) roots=%d via %s", label, rectStr(info.rect), info.screen.w, info.screen.h, info.roots, tostring(info.via))
     for i = 1, math.min(#hits, OVERLAP_LINES) do
         local h = hits[i]
-        say("OVERLAP %s class=%s rect=%s visibility=%s", h.path, h.cls, rectStr(h.rect), h.vis)
+        say("OVERLAP %s class=%s rect=%s%s", h.path, h.class, rectStr(h.rect), h.element and (" element=" .. h.element) or "")
     end
-    -- Context, not overlaps: the other drawn widgets in the screen's top-right quarter (short names).
-    for i = 1, math.min(#near, NEAR_LINES) do
-        local h = near[i]
-        say("OVERLAP near %s class=%s rect=%s visibility=%s", h.path:match("[^%.:]+$") or h.path, h.cls, rectStr(h.rect), h.vis)
+    -- Context, not overlaps: drawn widgets within 64 px of the element (short names).
+    for _, h in ipairs(info.nearby) do
+        say("OVERLAP near %s class=%s rect=%s", h.path:match("[^%.:]+$") or h.path, h.class, rectStr(h.rect))
     end
-    local extra = string.format(", %d drawn on screen, %d of them in the top-right quarter%s%s%s%s", drawn, quadrant,
-        full > 0 and (", " .. full .. " full-screen skipped") or "",
-        errors > 0 and (", " .. errors .. " error(s)") or "",
-        #stack > 0 and (", capped at " .. OVERLAP_CAP) or "",
+    local extra = string.format(", %d drawn on screen, %d of them in the top-right quarter%s%s%s%s", info.drawn, info.quadrant,
+        info.fullScreen > 0 and (", " .. info.fullScreen .. " full-screen skipped") or "",
+        info.errors > 0 and (", " .. info.errors .. " error(s)") or "",
+        info.capped and ", capped" or "",
         #hits > OVERLAP_LINES and (", only " .. OVERLAP_LINES .. " listed") or "")
-    if #hits == 0 then say("OVERLAP none (checked %d widgets%s; %s)", visited, extra, label)
-    else say("OVERLAP found %d (checked %d widgets%s; %s)", #hits, visited, extra, label) end
+    if #hits == 0 then say("OVERLAP none (checked %d widgets%s; %s)", info.checked, extra, label)
+    else say("OVERLAP found %d (checked %d widgets%s; %s)", #hits, info.checked, extra, label) end
 end
 
 local function manualTick()

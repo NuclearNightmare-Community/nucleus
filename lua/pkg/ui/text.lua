@@ -15,6 +15,7 @@ local C = require(BASE .. ".ui.common")
 local H = require(BASE .. ".ui.hud")
 local P = require(BASE .. ".ui.place")
 local theme = require(BASE .. ".ui.theme")
+local D = require(BASE .. ".ui.debug")
 
 local X = {}
 local MAX_ID = 64
@@ -299,6 +300,7 @@ local function attachOne(el, hud, canvas, byId, reason, report)
     end
     C.pa("attach.ref", t)
     el.attached, el.slotKey, el.appliedVis, el.retryAt = true, nil, nil, nil
+    if C.debugOn() then D.schedule(el, "attach") end -- story 12: overlap check about 1 s later (debug only)
     -- DEBUG only: a log line costs 0.3-0.8 ms on the game thread, and a successful attach is routine. Failures keep
     -- their INFO/WARN lines (onHud, warnOnce).
     if report then
@@ -346,6 +348,14 @@ local function sizeMatters(el)
     return false
 end
 
+-- Story 12 (debug only): an element's re-place also moves the rest of its corner stack; check them all.
+local function checkCorner(corner, why)
+    if not C.debugOn() then return end
+    for _, e in ipairs(C.order) do
+        if not e.removed and e.place.corner == corner then D.schedule(e, why) end
+    end
+end
+
 -- Re-places what one element's change can move: its corner's stack, or the element alone.
 local function replace(el)
     local hud = H._poll()
@@ -356,14 +366,17 @@ local function replace(el)
     local w = live(el)
     if el.place.corner then
         pcall(P.restack, el.place.corner, live, true)
+        checkCorner(el.place.corner, "re-stack")
     elseif w then
         local ok, err = pcall(P.apply, el, w, hud, live, true)
         if not ok then C.warnOnce("place:" .. el.id, "place '%s' failed: %s", el.id, tostring(err):match("^[^\n]*")) end
+        if C.debugOn() then D.schedule(el, "re-place") end
     end
 end
 
 local function restackCorner(corner)
     if not corner then return end
+    checkCorner(corner, "re-stack")
     local hud = H._poll()
     local canvas = hud and canvasOf(hud)
     if canvas then pcall(P.restack, corner, liveIn(canvas), true) end
@@ -436,6 +449,7 @@ local function onHud(hud, info)
         if #freed > 0 then C.log.debug("ui widget(s) gone with the HUD; freed handle(s) %s", table.concat(freed, ", ")) end
     elseif info.event == "shown" then
         P.settle() -- children of a HUD that was hidden may only now be measured: re-check stack heights
+        if C.debugOn() then for _, el in ipairs(C.order) do D.schedule(el, "HUD shown") end end
     end
     -- hidden: nothing to do; the elements share the HUD's visibility.
 end
@@ -624,7 +638,8 @@ function X.setVisible(h, visible)
     if w then
         local ok, err = pcall(P.applyVisibility, el, w)
         if not ok then C.warnOnce("vis:" .. el.id, "text '%s': SetVisibility failed: %s", el.id, tostring(err):match("^[^\n]*")) end
-        if el.place.corner then restackCorner(el.place.corner) end -- a hidden element takes no space
+        if el.place.corner then restackCorner(el.place.corner) -- a hidden element takes no space
+        elseif visible and C.debugOn() then D.schedule(el, "shown") end
     end
 end
 
@@ -670,8 +685,12 @@ P.place = function(h, intent)
         local hud = H._poll()
         local canvas = hud and canvasOf(hud)
         if canvas then
-            if oldCorner and oldCorner ~= pl.corner then pcall(P.restack, oldCorner, liveIn(canvas), true) end
+            if oldCorner and oldCorner ~= pl.corner then
+                pcall(P.restack, oldCorner, liveIn(canvas), true)
+                checkCorner(oldCorner, "re-stack")
+            end
             placeAll(hud, canvas, true)
+            if pl.corner then checkCorner(pl.corner, "place") elseif C.debugOn() then D.schedule(el, "place") end
         end
     elseif not el.attached then
         attachNow(el, "place")
@@ -682,7 +701,8 @@ function X.stats()
     local n = 0
     for _ in pairs(C.els) do n = n + 1 end
     return { elements = n, uobjectCalls = C.stats.uobjectCalls, attachCreated = C.stats.attachCreated,
-        attachReused = C.stats.attachReused, handlesFreed = C.stats.handlesFreed, findAllCalls = C.stats.findAllCalls }
+        attachReused = C.stats.attachReused, handlesFreed = C.stats.handlesFreed, findAllCalls = C.stats.findAllCalls,
+        overlapScheduled = C.stats.overlapScheduled, overlapChecks = C.stats.overlapChecks }
 end
 
 -- The tag a widget of this mod's element carries (for tests and diagnostics).

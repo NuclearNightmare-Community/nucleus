@@ -27,7 +27,9 @@ C.log = nil      -- the dependent's logger (log.new(mod)), shared with core.log
 C.ref, C.deref, C.free, C.micros = nil, nil, nil, nil
 
 -- Counters for tests and diagnostics (stats() in hud and text return copies).
-C.stats = { uobjectCalls = 0, findAllCalls = 0, attachCreated = 0, attachReused = 0, handlesFreed = 0 }
+-- overlapScheduled, overlapChecks: story 12's automatic checks scheduled (debug only) and overlap checks run.
+C.stats = { uobjectCalls = 0, findAllCalls = 0, attachCreated = 0, attachReused = 0, handlesFreed = 0,
+    overlapScheduled = 0, overlapChecks = 0 }
 
 function C.bind(api)
     C.mod = tostring(api.mod)
