@@ -22,7 +22,7 @@
 param(
     [string] $Instance,
     [string] $Log,
-    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'soak', 'manual')]
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'soak', 'manual')]
     [string] $Scenario = 'skeleton',
     [ValidateSet('host', 'vm')] [string] $Target = 'host'
 )
@@ -137,12 +137,19 @@ foreach ($p in 'menu1', 'match1') {
                     'off-ui-create', 'off-ui-set', 'off-ui-setstyle', 'off-ui-setvis', 'off-ui-remove', 'off-ui-isshown', 'off-ui-place',
                     'off-ui-elements', 'off-ui-find', 'off-ui-watch', 'off-ui-unwatch', 'off-ui-isvisible', 'off-ui-after',
                     'ui-overlaps-two', 'ui-overlaps-hidden', 'ui-overlaps-h-table', 'ui-overlaps-h-nil', 'ui-overlaps-h-num',
-                    'ui-overlaps-h-str', 'ui-overlaps-h-forged', 'ui-removed-overlaps', 'off-ui-overlaps') {
+                    'ui-overlaps-h-str', 'ui-overlaps-h-forged', 'ui-removed-overlaps', 'off-ui-overlaps',
+                    # story 13: the journal watcher and the journal host
+                    'ui-journal-watch-nil', 'ui-journal-watch-1', 'ui-journal-watch-str', 'ui-journal-watch-table', 'ui-journal-watch-two',
+                    'ui-journal-unwatch-forged', 'ui-journal-unwatch-hudtoken', 'ui-journal-unwatch-str', 'ui-journal-unwatch-float',
+                    'ui-journal-unwatch-nil', 'ui-journal-unwatch-table', 'ui-journal-unwatch-two', 'ui-journal-isopen-arg',
+                    'ui-journal-isopen-ok', 'ui-journal-find-arg', 'ui-journal-find-ok', 'ui-journal-watch-ok', 'ui-journal-stats',
+                    'ui-create-journal-near', 'ui-place-host', 'ui-place-host-num', 'ui-place-host-journal-near', 'ui-place-host-journal-ok',
+                    'ui-isshown-journal', 'off-ui-journal-watch', 'off-ui-journal-unwatch', 'off-ui-journal-isopen', 'off-ui-journal-find') {
         $badInput += "\[$T\] OK CASE $p\.$id "
     }
 }
-foreach ($id in 'pre-create', 'pre-watch', 'pre-find', 'pre-elements', 'pre-overlaps') { $badInput += "\[$T\] OK CASE $id " }
-$badInput += "\[$T\] OK CASES before-connect recorded=5"
+foreach ($id in 'pre-create', 'pre-watch', 'pre-find', 'pre-elements', 'pre-overlaps', 'pre-journal-watch', 'pre-journal-isopen') { $badInput += "\[$T\] OK CASE $id " }
+$badInput += "\[$T\] OK CASES before-connect recorded=7"
 # UI helpers in game (stories 7-10): what run.ps1 -Scenario ui proves unattended. END result=PASS already means every
 # check the test made passed; these name the ones the stories' acceptance criteria rest on, plus core's own lines.
 $ui = $started + @(
@@ -210,6 +217,43 @@ $ui = $started + @(
     "\[$T\] OK UIEVENTS "
     "\[$T\] OK UICLEAN match2 "
 )
+# Story 13 unattended (run.ps1 -Scenario journal): the Journal's map page as a host, opened and closed with the real
+# map key twelve times (ten in a row, after a revive, after a map change). END result=PASS already means every check
+# passed; these name what the acceptance criteria rest on. Timing (AC 4 and 6) is judged on the host; soft in the VM.
+$soft = if ($Target -eq 'vm') { '?' } else { '' }
+$journal = $started + @(
+    "\[$T\] SCENARIO journal "
+    "\[$T\] END result=PASS"
+    "\[$T\] OK MAPKEY IA_Map is bound to the letter [A-Z] in IMC_Default"
+    "\[$T\] JTREE open1 journal="
+    "\[$T\] JTREE open1 MapWidget="
+    "#12|\[$T\] OK JKEY \S+ the real [A-Z] key press opened the map"
+    "#12|\[$T\] OK JKEY \S+ the real [A-Z] key press closed the map"
+    "#12|\[$T\] OK JNEW \S+ open \d+ is a new Journal_C instance"
+    "#12|\[$T\] OK JONE \S+ one widget per element in the map canvas \(jt=1 jp1=1 jp2=1 jp3=1\)"
+    "#12|\[$T\] OK JCORNER "
+    "#12|\[$T\] OK JCLOSED "
+    "\[$T\] OK JEVENTS 10 opens: opened=10 closed=10 lost=0"
+    "\[$T\] OK JONE revive-open "
+    "\[$T\] OK JONE match2-open "
+    "\[$T\] OK JGC opens "
+    "\[$T\] OK JGC end "
+    "\[$T\] OK JEVENTS all: opened=12 closed=12 lost=0"
+    "\[$T\] OK JNEWALL 12 opens, 12 distinct"
+    "\[$T\] OK JKEYALL 12 of 12 opens by the real"
+    "\[$T\] OK JTRACK "
+    "#1|\[$T\] WARN journal watcher \d+: "
+    "\[$T\] DEBUG ui journal attach n=4 in \d+ us: 'jt' created "
+    "\[$T\] DEBUG ui journal closed: freed 4 widget handle\(s\)"
+    "!\[$T\] ui journal attach left "
+    "!\[$T\] WARN (?!journal watcher \d+: |$slowWarnOk)"
+    "!\[$T\] ERROR"
+    "\[$T\] DEBUG hud tick n=\d+ "
+    "\[$T\] JTICK ticks=\d+ "
+    "$soft\[$T\] OK JCOSTS "
+    "$hard\[$T\] WARN hud slow tick .*steady state\)"
+    "?!\[$T\] WARN hud slow tick .*steady state, a Lua GC step"
+)
 # Story 7 AC 7 unattended: 10 minutes idle in one match with one element and one watcher. The one-minute DEBUG lines
 # are judged against story 7's targets below the pattern checks (every event-free window after "SOAK idle": poll
 # average under 100 us, steady maximum under 500 us leaving out ticks a Lua collector step landed in; those are
@@ -246,6 +290,7 @@ $manual = @(
 $expect = @{
     'skeleton'  = $skeleton
     'ui'        = $ui
+    'journal'   = $journal
     'soak'      = $soak
     'manual'    = $manual
     'bad-input' = $badInput

@@ -12,6 +12,7 @@ local clockm = require(BASE .. ".clock")
 -- A failure here must not stop connect for mods that use no UI: core.ui is then missing and onReady is told why.
 local uiOk, uiErr = pcall(function()
     return { common = require(BASE .. ".ui.common"), hud = require(BASE .. ".ui.hud"),
+             journal = require(BASE .. ".ui.journal"),
              text = require(BASE .. ".ui.text"), place = require(BASE .. ".ui.place"), debug = require(BASE .. ".ui.debug") }
 end)
 
@@ -122,6 +123,8 @@ function C.connect(opts)
             local U = uiErr
             api.ui = {
                 hud = { find = U.hud.find, watch = U.hud.watch, unwatch = U.hud.unwatch, isVisible = U.hud.isVisible, stats = U.hud.stats },
+                -- story 13 (core 0.3.0, unreleased): the Journal's map page as a host
+                journal = { find = U.journal.find, watch = U.journal.watch, unwatch = U.journal.unwatch, isOpen = U.journal.isOpen, stats = U.journal.stats },
                 text = { create = U.text.create, set = U.text.set, setStyle = U.text.setStyle, setVisible = U.text.setVisible,
                          remove = U.text.remove, isShown = U.text.isShown, stats = U.text.stats, tagOf = U.text.tagOf },
                 place = U.place.place,

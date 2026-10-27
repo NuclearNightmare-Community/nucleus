@@ -117,7 +117,13 @@ end
 local notify = {}
 function NotifyOnNewObject(cls, fn) notify[#notify + 1] = { cls = cls, fn = fn } end
 local findAllCount = 0
+local JOURNALS = {}
 function FindAllOf(cls)
+    if cls == "Journal_C" then
+        local out = {}
+        for _, j in ipairs(JOURNALS) do if j.__alive then out[#out + 1] = j end end
+        return out
+    end
     findAllCount = findAllCount + 1
     local out = {}
     for _, h in ipairs(HUDS) do if h.__alive then out[#out + 1] = h end end
@@ -150,6 +156,7 @@ end
 local C = require("nucleus.ui.common")
 C.valid = function(o) return type(o) == "table" and o.__alive == true end
 local H = require("nucleus.ui.hud")
+local J = require("nucleus.ui.journal")
 local P = require("nucleus.ui.place")
 local X = require("nucleus.ui.text")
 
@@ -187,6 +194,8 @@ local function near(a, b) return math.abs(a - b) < 1e-6 end
 raises(function() X.create{ id = "a" } end, "nucleus.ui: text.create called before connect", "before connect: create")
 raises(function() H.watch(function() end) end, "nucleus.ui: hud.watch called before connect", "before connect: watch")
 raises(function() P.elements() end, "nucleus.ui: elements called before connect", "before connect: elements")
+raises(function() J.watch(function() end) end, "nucleus.ui: journal.watch called before connect", "before connect: journal.watch")
+raises(function() J.isOpen() end, "nucleus.ui: journal.isOpen called before connect", "before connect: journal.isOpen")
 
 C.bind{ mod = "TestMod", log = logger(), ref = ref, deref = deref, free = free, micros = micros }
 
@@ -195,6 +204,10 @@ offThread = true
 raises(function() X.create{ id = "a" } end, "nucleus.ui.text.create called off the game thread", "off thread: create")
 raises(function() H.find() end, "nucleus.ui.hud.find called off the game thread", "off thread: find")
 raises(function() P.place({}, {}) end, "nucleus.ui.place called off the game thread", "off thread: place")
+raises(function() J.watch(function() end) end, "nucleus.ui.journal.watch called off the game thread", "off thread: journal.watch")
+raises(function() J.unwatch(1) end, "nucleus.ui.journal.unwatch called off the game thread", "off thread: journal.unwatch")
+raises(function() J.isOpen() end, "nucleus.ui.journal.isOpen called off the game thread", "off thread: journal.isOpen")
+raises(function() J.find() end, "nucleus.ui.journal.find called off the game thread", "off thread: journal.find")
 offThread = false
 
 -- ---------------------------------------------------------------- validation (pure)
@@ -227,7 +240,9 @@ local bad = {
     { { near = "mic" }, "unknown near element 'mic' (valid: crosshair)" },
     { { near = "crosshair", side = "up" }, "unknown side 'up'" },
     { { near = "crosshair", align = "middle" }, "unknown align 'middle'" },
-    { { host = "journal", corner = "top-left" }, "unknown host 'journal' (valid: hud)" },
+    { { host = "Journal", corner = "top-left" }, "unknown host 'Journal' (valid: hud, journal)" },
+    { { host = 5, corner = "top-left" }, "unknown host 5 (valid: hud, journal)" },
+    { { host = "journal", near = "crosshair" }, "near is not available on host 'journal' (it has no named elements yet; use corner or absolute)" },
 }
 for i, b in ipairs(bad) do raises(function() P.validate(b[1]) end, PL .. b[2], "validate bad " .. i) end
 ok(pcall(P.validate, { corner = "top-left", offset = { x = 4096, y = -4096 } }), "validate: offset at the bound")
@@ -420,7 +435,7 @@ tick()
 ok(events[#events] == "lost:HUD gone from the viewport", "map change: lost")
 ok(countLogs("widget%(s%) gone with the HUD; freed handle%(s%) 'a' %d+, 'c' %d+") == 1, "map change: dead widgets' handles freed (debug)")
 local hud2 = newHud(2)
-for _, nfy in ipairs(notify) do nfy.fn(hud2) end -- the creation callback learns the new path
+for _, nfy in ipairs(notify) do if nfy.cls:find("InventoryUI", 1, true) then nfy.fn(hud2) end end -- the creation callback learns the new path
 tick(); tick()
 ok(findAllCount == 1, "map change: no second FindAllOf", findAllCount)
 ok(events[#events] == "attached:HUD appeared", "map change: attached the new HUD", events[#events])
@@ -685,6 +700,171 @@ for _ = 1, 24 do tick() end
 ok(countLogs("^DEBUG ui overlap 'ov' not checked %(re%-stack%): not painted yet") == 1, "auto check: not painted -> retried, then one DEBUG line")
 X.remove(ov)
 C.log.debugEnabled = true
+
+
+-- ---------------------------------------------------------------- story 13: the Journal's map page as a host
+-- Fake Journal_C: MapWidget (its WidgetTree.RootWidget a CanvasPanel), WidgetSwitcher_0 showing MapWidget.
+local CANVASCLASS = objects["/Script/UMG.CanvasPanel"] or obj({ name = "CanvasPanel" }, "/Script/UMG.CanvasPanel")
+local VP_CALLS = 0
+local function newJournal(n)
+    local path = "/Engine/Transient.GameEngine_1:GameInstance_1.Journal_C_" .. n
+    local j = { __class = "Journal_C", inViewport = false }
+    obj(j, path)
+    local root = newCanvas(path .. ".WidgetTree_1.CanvasPanel_22")
+    function root:IsA(c) return c and c.name == "CanvasPanel" end
+    local map = obj({ WidgetTree = { RootWidget = root } }, path .. ".WidgetTree_1.MapWidget")
+    j.MapWidget = map
+    local other = obj({}, path .. ".WidgetTree_1.Other")
+    j.WidgetSwitcher_0 = obj({ active = map }, path .. ".WidgetTree_1.WidgetSwitcher_0")
+    function j.WidgetSwitcher_0:GetActiveWidget() return self.active end
+    j.otherPage = other
+    function j:IsInViewport() VP_CALLS = VP_CALLS + 1; return self.inViewport end
+    function j:GetOwningPlayer() return PC end
+    function j:GetWorld() return WORLD end
+    JOURNALS[#JOURNALS + 1] = j
+    return j
+end
+-- The game's open: a new Journal (the creation callback fires), then AddToViewport.
+local function created(j) for _, nfy in ipairs(notify) do if nfy.cls:find("Journal_C", 1, true) then nfy.fn(j) end end end
+local function openNew(n) local j = newJournal(n); created(j); j.inViewport = true; return j end
+local function tagsIn(cv)
+    local t = {}
+    for _, ch in ipairs(cv.children) do if type(ch.tip) == "string" and ch.tip:find("^nucleus:TestMod:") then t[#t + 1] = ch.tip:match("[^:]+$") end end
+    table.sort(t)
+    return table.concat(t, ",")
+end
+local function canvasOfJ(j) return j.MapWidget.WidgetTree.RootWidget end
+
+-- validation and bad input
+v = P.validate({ host = "journal", corner = "bottom-right", gap = "tight" })
+ok(v.host == "journal" and v.corner == "bottom-right" and v.gapUnits == 8, "journal: intent validates")
+ok(P.validate({ host = "journal", absolute = { anchor = "center", x = 1, y = 2 } }).host == "journal", "journal: absolute intent")
+raises(function() J.watch(nil) end, "nucleus.ui.journal.watch: fn must be a function, got nil", "journal: watch(nil)")
+raises(function() J.watch("x") end, "nucleus.ui.journal.watch: fn must be a function, got 'x'", "journal: watch('x')")
+raises(function() J.watch(function() end, 1) end, "nucleus.ui.journal.watch: expected 1 argument (fn), got 2", "journal: watch extra")
+raises(function() J.unwatch("x") end, "nucleus.ui.journal.unwatch: token must be an integer, got 'x'", "journal: unwatch('x')")
+raises(function() J.unwatch(1.5) end, "nucleus.ui.journal.unwatch: token must be an integer, got 1.5", "journal: unwatch(1.5)")
+raises(function() J.unwatch({}) end, "nucleus.ui.journal.unwatch: token must be an integer, got table", "journal: unwatch({})")
+raises(function() J.unwatch(1 << 40) end, "nucleus.ui.journal.unwatch: unknown token 1099511627776 (not one journal.watch returned)", "journal: forged token")
+raises(function() J.unwatch(token) end, "unknown token", "journal: a hud token is not a journal token")
+raises(function() J.unwatch(1, 2) end, "nucleus.ui.journal.unwatch: expected 1 argument (token), got 2", "journal: unwatch extra")
+raises(function() J.isOpen(1) end, "nucleus.ui.journal.isOpen: expected 0 arguments, got 1", "journal: isOpen(1)")
+raises(function() J.find(true) end, "nucleus.ui.journal.find: expected 0 arguments, got 1", "journal: find(true)")
+ok(J.isOpen() == false and J.find() == nil, "journal: closed before any open")
+
+-- elements before any open: pending, not shown, no widget anywhere
+local jev = {}
+local jt = J.watch(function(j, info) jev[#jev + 1] = info.event .. ":" .. tostring(info.page) .. ":" .. tostring(j ~= nil) end)
+local jthrow = J.watch(function() error("journal boom") end)
+local ja = X.create{ id = "ja", text = "on the map", place = { host = "journal", corner = "top-right" } }
+local jb = X.create{ id = "jb", text = "b1", place = { host = "journal", corner = "bottom-right" } }
+local jc = X.create{ id = "jc", text = "b22", place = { host = "journal", corner = "bottom-right" } }
+ok(X.isShown(ja) == false and C.els.ja.ref == nil, "journal: pending while closed")
+local hudNow = H._poll()
+ok(not tagsIn(hudNow.OwningCanvas):find("ja", 1, true), "journal: never put on the HUD", tagsIn(hudNow.OwningCanvas))
+
+-- open 1: opened on the first tick that sees it; three widgets in the map page's canvas, placed
+local j1 = openNew(1)
+local freedJ = freed
+tick()
+ok(jev[1] == "opened:map:true", "journal: opened on the first tick, map page", jev[1])
+ok(countLogs("WARN journal watcher %d+: .*journal boom") == 1, "journal: a throwing watcher is logged once")
+local cv1 = canvasOfJ(j1)
+ok(tagsIn(cv1) == "ja,jb,jc", "journal: one widget per element in the map canvas", tagsIn(cv1))
+ok(J.isOpen() == true and J.find() == j1 and X.isShown(ja) == true, "journal: isOpen, find, isShown")
+local wja = widgetOfId("ja")
+ok(wja.parent == cv1 and wja.Slot.anchors.Minimum.X == 1 and wja.Slot.position.X == -16 and wja.Slot.position.Y == 16, "journal: top-right of the map canvas")
+local wjb, wjc = widgetOfId("jb"), widgetOfId("jc")
+ok(wjb.Slot.anchors.Minimum.Y == 1 and wjb.Slot.position.Y == -16 and wjc.Slot.position.Y == -(16 + 20 + 16), "journal: bottom-right stack, per host", wjc.Slot.position.Y)
+ok(J.stats().attachOpens == 1 and J.stats().attachElements == 3 and J.stats().attachLast > 0, "journal: attach timed per open")
+tick()
+ok(countLogs("^DEBUG ui journal attach n=3 in %d+ us: 'ja' created") == 1, "journal: one DEBUG attach line on the next tick")
+-- a late watcher hears opened on the next tick
+local lateJ = {}
+local jl = J.watch(function(_, info) lateJ[#lateJ + 1] = info.event end)
+tick()
+ok(lateJ[1] == "opened", "journal: late watcher gets opened")
+J.unwatch(jl); J.unwatch(jl)
+-- another page of the Journal: not shown
+j1.WidgetSwitcher_0.active = j1.otherPage
+ok(X.isShown(ja) == false, "journal: another page -> isShown false")
+j1.WidgetSwitcher_0.active = j1.MapWidget
+
+-- close 1: closed; handles freed, widgets untouched
+j1.inViewport = false
+tick()
+ok(jev[#jev] == "closed:nil:false" and X.isShown(ja) == false and J.isOpen() == false, "journal: closed", jev[#jev])
+ok(freed == freedJ + 0 + 3 or freed >= freedJ + 3, "journal: handles freed on close", freed - freedJ)
+ok(C.els.ja.ref == nil and wja.parent == cv1 and #cv1.children == 3, "journal: no handle kept, the old Journal's widgets untouched")
+tick() -- the closed line goes out on a HUD tick
+ok(countLogs("^DEBUG ui journal closed: freed 3 widget handle%(s%)") == 1, "journal: closed line")
+
+-- opens 2..4 (each a new Journal): one widget each per open, opened/closed once each
+for n = 2, 4 do
+    local jn = openNew(n)
+    tick()
+    ok(tagsIn(canvasOfJ(jn)) == "ja,jb,jc" and X.isShown(ja), "journal: open " .. n .. " has one widget per element", tagsIn(canvasOfJ(jn)))
+    jn.inViewport = false
+    tick()
+end
+local nOpened, nClosed = 0, 0
+for _, e in ipairs(jev) do if e:find("^opened") then nOpened = nOpened + 1 elseif e:find("^closed") then nClosed = nClosed + 1 end end
+ok(nOpened == 4 and nClosed == 4, "journal: opened and closed once per open and close", nOpened .. "/" .. nClosed)
+ok(J.stats().tracked <= 1 and J.stats().lastClosed ~= nil, "journal: only the last closed Journal stays tracked", J.stats().tracked)
+
+-- cost while closed: the last closed Journal is read every 4th tick only
+VP_CALLS = 0
+for _ = 1, 8 do tick() end
+ok(VP_CALLS == 2, "journal: closed -> IsInViewport every 4 ticks", VP_CALLS)
+
+-- the same Journal shown again (never seen on V8.1.2): reopened, its widgets reused, no duplicate
+local j4 = JOURNALS[4]
+j4.inViewport = true
+for _ = 1, 4 do tick() end
+ok(jev[#jev]:find("^opened") and tagsIn(canvasOfJ(j4)) == "ja,jb,jc", "journal: same Journal again -> reused, no duplicate", tagsIn(canvasOfJ(j4)))
+j4.inViewport = false; tick()
+
+-- lost: destroyed while open (a map change)
+local j5 = openNew(5)
+tick()
+for _, ch in ipairs(canvasOfJ(j5).children) do kill(ch) end
+kill(j5)
+tick()
+ok(jev[#jev] == "lost:nil:false" and X.isShown(ja) == false, "journal: lost", jev[#jev])
+
+-- a hidden element stays hidden on the next open; text set while closed shows on the next open
+X.setVisible(jb, false)
+X.set(ja, "changed")
+local j6 = openNew(6)
+tick()
+ok(widgetOfId("ja").text == "changed" and widgetOfId("jb").vis == 1 and widgetOfId("jc").Slot.position.Y == -16, "journal: state kept across opens (text, hidden closes the gap)")
+X.setVisible(jb, true)
+ok(widgetOfId("jc").Slot.position.Y == -(16 + 20 + 16), "journal: setVisible while open re-stacks the journal corner")
+
+-- place: hud -> journal moves the widget off the HUD; journal -> hud brings it back
+local mv = X.create{ id = "mv", text = "move me" }
+ok(tagsIn(hudNow.OwningCanvas):find("mv", 1, true) ~= nil, "place: on the HUD first")
+P.place(mv, { host = "journal", corner = "top-left" })
+ok(not tagsIn(hudNow.OwningCanvas):find("mv", 1, true) and tagsIn(canvasOfJ(j6)):find("mv", 1, true), "place: hud -> journal while open", tagsIn(canvasOfJ(j6)))
+P.place(mv, { host = "hud", corner = "top-left" })
+ok(tagsIn(hudNow.OwningCanvas):find("mv", 1, true) and not tagsIn(canvasOfJ(j6)):find("mv", 1, true), "place: journal -> hud")
+raises(function() P.place(mv, { host = "journal", near = "crosshair" }) end, "near is not available on host 'journal'", "place: near on the journal")
+X.remove(mv)
+-- overlaps on a journal element walks the Journal; on a closed one, a reason
+local okOv, why = D.overlaps(ja)
+ok(okOv == nil or type(okOv) == "table", "overlaps: journal element checked or explained", why)
+j6.inViewport = false; tick()
+local n7, why7 = D.overlaps(ja)
+ok(n7 == nil and tostring(why7):find("not attached", 1, true), "overlaps: closed Journal -> nil, reason", why7)
+
+-- unwatch: the dependent's watchers go; the poller keeps running for core's own journal elements
+J.unwatch(jt); J.unwatch(jthrow)
+local before = #jev
+local j7 = openNew(7); tick()
+ok(#jev == before and tagsIn(canvasOfJ(j7)) == "ja,jb,jc", "journal: unwatched -> no events; elements still attach")
+j7.inViewport = false; tick()
+X.remove(ja); X.remove(jb); X.remove(jc)
+ok(J.stats().closes >= 6 and J.stats().findAllCalls == 1, "journal: counters; one seed FindAllOf", J.stats().findAllCalls)
 
 H.unwatch(token); H.unwatch(throws)
 ok(asyncUsed == 0, "poller: never LoopAsync or ExecuteInGameThread", asyncUsed)

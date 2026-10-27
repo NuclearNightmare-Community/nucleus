@@ -13,6 +13,10 @@ C.TEXT_SHORT = "WBP_" .. C.NAME .. "Text_C"
 C.TEXT_CLASS = C.TEXT_PKG .. "." .. C.TEXT_SHORT
 C.HUD_CLASS = "/Game/Graphics/Inventory/InventoryUI.InventoryUI_C"
 C.HUD_SHORT = "InventoryUI_C"
+C.JOURNAL_PKG = "/Game/Graphics/Journal/Journal"
+C.JOURNAL_SHORT = "Journal_C"
+C.JOURNAL_CLASS = C.JOURNAL_PKG .. "." .. C.JOURNAL_SHORT
+C.HOST_NAMES = "hud, journal"    -- the hosts an intent can name (place.lua)
 
 -- ESlateVisibility
 C.VIS = { Visible = 0, Collapsed = 1, Hidden = 2, HitTestInvisible = 3, SelfHitTestInvisible = 4 }

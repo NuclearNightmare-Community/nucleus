@@ -1,10 +1,12 @@
 -- UI-3 (story 9): placement by intent. Exposed as core.ui.place(handle, intent) and core.ui.elements().
 --
---   { host = "hud", corner = "top-left" | "top-right" | "bottom-left" | "bottom-right",
+--   { host = "hud" | "journal", corner = "top-left" | "top-right" | "bottom-left" | "bottom-right",
 --     gap = "tight" | "normal" | "loose", offset = { x = <number>, y = <number> } }
 --   { host = "hud", near = "crosshair", side = "right" | "left" | "above" | "below",
 --     align = "center" | "start" | "end", gap = <gap>, offset = { x, y } }
---   { host = "hud", absolute = { anchor = <corner> | "center", x = <number>, y = <number> } }
+--   { host = "hud" | "journal", absolute = { anchor = <corner> | "center", x = <number>, y = <number> } }
+--
+-- host "journal" (story 13) is the Journal's map page (journal.lua); it has no named elements yet, so near is HUD only.
 --
 -- All numbers are canvas units (screen pixels / the game's DPI scale). Defaults: host "hud", gap "normal",
 -- side "right", align "center", absolute anchor "top-left". Elements of one mod in the same corner stack in creation
@@ -89,9 +91,12 @@ function P.validate(intent)
     end
     local host = intent.host
     if host == nil then host = "hud" end
-    if host ~= "hud" then bad("unknown host %s (valid: hud)", C.describe(host)) end
+    if host ~= "hud" and host ~= "journal" then bad("unknown host %s (valid: %s)", C.describe(host), C.HOST_NAMES) end
+    if kind == "near" and host ~= "hud" then
+        bad("near is not available on host '%s' (it has no named elements yet; use corner or absolute)", host)
+    end
 
-    local out = { host = "hud" }
+    local out = { host = host }
     if kind ~= "absolute" then
         local gap = intent.gap
         if gap == nil then gap = "normal" end
@@ -260,11 +265,11 @@ local function heightOf(w, prepass)
     return tonumber(ds.Y) or 0
 end
 
--- Re-stacks one corner of this mod. live(el) -> widget or nil (text.lua: live in the current HUD canvas).
-function P.restack(corner, live, prepass)
+-- Re-stacks one corner of this mod on one host. live(el) -> widget or nil (text.lua: live in that host's canvas).
+function P.restack(host, corner, live, prepass)
     local items, ws, els = {}, {}, {}
     for _, el in ipairs(C.order) do
-        if not el.removed and el.place.corner == corner then
+        if not el.removed and el.place.corner == corner and el.place.host == host then
             local w = live(el)
             if w then
                 P.applyVisibility(el, w)
@@ -286,16 +291,17 @@ function P.restack(corner, live, prepass)
     end
     local out = P.stack(corner, items)
     for i, s in ipairs(out) do setSlot(els[i], ws[i], s, s.ax, s.ay) end
-    P.settle(corner) -- Slate may measure later than this: re-check the heights for a few ticks
+    P.settle(host, corner) -- Slate may measure later than this: re-check the heights for a few ticks
 end
 
--- Places an element whose widget is live now. Corner elements re-stack their whole corner.
-function P.apply(el, w, hud, live, prepass)
+-- Places an element whose widget is live now. Corner elements re-stack their whole corner (on their host).
+-- hostObj is the live HUD or Journal (near elements read the HUD's named elements from it).
+function P.apply(el, w, hostObj, live, prepass)
     if el.place.corner then
         el.nearAbsent = false
-        P.restack(el.place.corner, live, prepass)
+        P.restack(el.place.host, el.place.corner, live, prepass)
     else
-        placeSingle(el, w, hud)
+        placeSingle(el, w, hostObj)
     end
 end
 
@@ -307,13 +313,15 @@ end
 --   which re-stack on their own; nothing else changes an element's height.
 local NEAR_RECT_TICKS = 4
 local SETTLE_TICKS = 4
-local settle = {}                -- corner -> ticks left to re-measure
+local settle = { hud = {}, journal = {} } -- host -> corner -> ticks left to re-measure
 local tickNo = 0
 
--- Marks one corner, or every corner (nil), for re-measuring on the next SETTLE_TICKS ticks.
-function P.settle(corner)
-    if corner then settle[corner] = SETTLE_TICKS return end
-    for c in pairs(CORNERS) do settle[c] = SETTLE_TICKS end
+-- Marks one corner of a host, or every corner (corner nil), for re-measuring on the next SETTLE_TICKS ticks.
+function P.settle(host, corner)
+    local s = settle[host]
+    if not s then return end
+    if corner then s[corner] = SETTLE_TICKS return end
+    for c in pairs(CORNERS) do s[c] = SETTLE_TICKS end
 end
 
 local function nearDrawn(hud, name)
@@ -327,29 +335,31 @@ local function nearDrawn(hud, name)
     return true
 end
 
-function P.tick(hud, live)
-    tickNo = tickNo + 1
+-- One host's per-tick work: host is "hud" or "journal", hostObj the live HUD or Journal.
+function P.tick(host, hostObj, live)
+    if host == "hud" then tickNo = tickNo + 1 end
+    local hs = settle[host]
     local stacks = nil -- corner -> list of { el, w } (visible, live), only for corners still settling; made on demand
     for _, el in ipairs(C.order) do
-        if not el.removed then
+        if not el.removed and el.place.host == host then
             local pl = el.place
             if pl.near then
                 local w = live(el)
                 if w then
                     local t = C.pt()
-                    local okD, drawn = pcall(nearDrawn, hud, pl.near)
+                    local okD, drawn = pcall(nearDrawn, hostObj, pl.near)
                     drawn = okD and drawn
                     C.pa("place.nearCheck", t)
                     local wasAbsent = el.nearAbsent == true
                     if drawn == wasAbsent or (drawn and tickNo % NEAR_RECT_TICKS == 0) then
                         t = C.pt()
-                        local okR, r = pcall(nearTarget, hud, pl.near)
+                        local okR, r = pcall(nearTarget, hostObj, pl.near)
                         local key = okR and r and not r.stretched and string.format("%g,%g,%g,%g,%g,%g", r.l, r.t, r.r, r.b, r.ax, r.ay) or nil
-                        if (key == nil) ~= wasAbsent or key ~= el.nearRect then placeSingle(el, w, hud) end
+                        if (key == nil) ~= wasAbsent or key ~= el.nearRect then placeSingle(el, w, hostObj) end
                         C.pa("place.nearRect", t)
                     end
                 end
-            elseif pl.corner and el.visible and (settle[pl.corner] or 0) > 0 then
+            elseif pl.corner and el.visible and (hs[pl.corner] or 0) > 0 then
                 local w = live(el)
                 if w then
                     stacks = stacks or {}
@@ -360,7 +370,7 @@ function P.tick(hud, live)
             end
         end
     end
-    for corner, n in pairs(settle) do settle[corner] = n > 1 and n - 1 or nil end
+    for corner, n in pairs(hs) do hs[corner] = n > 1 and n - 1 or nil end
     -- Only a corner holding two or more elements can be pushed around by a height change.
     if not stacks then return end
     for corner, list in pairs(stacks) do
@@ -369,7 +379,7 @@ function P.tick(hud, live)
             for i = 1, #list - 1 do
                 if heightOf(list[i].w, false) ~= list[i].el.stackHeight then dirty = true end
             end
-            if dirty then P.restack(corner, live, false) end
+            if dirty then P.restack(host, corner, live, false) end
         end
     end
 end

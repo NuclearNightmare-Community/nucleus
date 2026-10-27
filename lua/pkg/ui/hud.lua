@@ -253,6 +253,8 @@ local T = newTiming()            -- the current one-minute window
 T.windowStart, T.lastSlowWarn = nil, nil
 local TOT = newTiming()          -- since the poller first started
 local tickers = {}               -- internal per-tick callbacks (text.lua): fn(hud, path)
+local hosts = {}                 -- other hosts polled by this loop (journal.lua): { poll, dispatch, reset }
+local keeps, nextKeep = {}, 0    -- keep-alive holders (journal.lua): the loop runs while one is held
 local preparers = {}             -- internal (text.lua): fn() on the tick that first sees a new HUD, a tick before attached
 
 local function deliver(w, hud, info)
@@ -407,6 +409,10 @@ local function tick()
     local heap0 = collectgarbage("count")
     local t0 = C.micros()
     local hud, path, vis = poll()
+    for i = 1, #hosts do -- other hosts' polls count as poll time
+        local okP, errP = pcall(hosts[i].poll)
+        if not okP then C.warnOnce("host poll", "ui host poll failed: %s (further failures not logged)", tostring(errP):match("^[^\n]*")) end
+    end
     local t1 = C.micros()
     local info = decide(hud, path, vis)
     local event = info and info.event
@@ -438,6 +444,11 @@ local function tick()
             local ok, err = pcall(f, hud, path)
             if not ok then C.warnOnce("hud ticker", "hud tick work failed: %s (further failures not logged)", tostring(err):match("^[^\n]*")) end
         end
+    end
+    for i = 1, #hosts do
+        local okD, ev = pcall(hosts[i].dispatch)
+        if not okD then C.warnOnce("host dispatch", "ui host dispatch failed: %s (further failures not logged)", tostring(ev):match("^[^\n]*"))
+        elseif ev then event = event or ev end
     end
     local t2 = C.micros()
     C.prof = nil
@@ -480,6 +491,7 @@ local function stopPoller()
     S.running = false
     S.gen = S.gen + 1
     S.path, S.visible, S.cand = nil, nil, nil
+    for i = 1, #hosts do pcall(hosts[i].reset) end
     if S.loop then pcall(CancelDelayedAction, S.loop) end
     S.loop = nil
 end
@@ -510,7 +522,7 @@ function H.unwatch(token, ...)
     end
     -- Removal takes effect after the event being dispatched (dispatch compacts); outside a dispatch, now.
     compact()
-    if not any then stopPoller() end
+    if not any and next(keeps) == nil then stopPoller() end
 end
 
 function H.stats()
@@ -528,6 +540,23 @@ function H._watch(fn) return addWatcher(fn, true) end
 function H._ticker(fn) tickers[#tickers + 1] = fn end
 function H._prepare(fn) preparers[#preparers + 1] = fn end
 function H._poll() seed() return poll() end
+-- Another host polled by this loop (journal.lua, story 13): poll() each tick right after the HUD's poll (timed as
+-- poll), dispatch() after the HUD's watchers (timed as watchers; returns an event name for the timing lines, or nil),
+-- reset() when the loop stops.
+function H._host(h) hosts[#hosts + 1] = h end
+-- Keeps the loop running without a HUD watcher (journal.lua); returns a token for _release.
+function H._keep()
+    nextKeep = nextKeep + 1
+    keeps[nextKeep] = true
+    startPoller()
+    return nextKeep
+end
+function H._release(k)
+    keeps[k] = nil
+    local any = false
+    for _, w in ipairs(watchers) do if not w.dead then any = true break end end
+    if not any and next(keeps) == nil then stopPoller() end
+end
 
 -- Diagnostic (not semver API): the per-phase tick profiler. Off by default; costs two clock reads per probe when on.
 function H._profile(on) C.profOn = on == true end
