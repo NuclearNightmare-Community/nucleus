@@ -1286,7 +1286,7 @@ local function buildUi()
         local cross = hud and hud.Crosshair
         local cpath = valid(cross) and pathOf(cross) or "?"
         local hits = UIS.xHits
-        if not check(hits ~= nil, "UIOVERLAP match1 'xcross' could be checked (%s)", tostring(UIS.xWhy)) then return end
+        if not check(hits ~= nil, "UIOVERLAP match1 'xcross' could be checked (%s)", hits and "yes" or tostring(UIS.xWhy)) then return end
         local found_, names = false, {}
         for i, h in ipairs(hits) do
             if h.path == cpath or h.path:sub(1, #cpath + 1) == cpath .. "." then found_ = true end
