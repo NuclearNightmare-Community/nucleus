@@ -10,17 +10,26 @@
   writes <seq> to done.txt.
   Keeps the log as <workspace>/dumps/<copy>/<name lowercase>/<scenario>.log (ignored by git) and runs check.ps1.
   Steam must be running. Don't type into the game while it runs.
+  -Target vm runs the scenario in the Hyper-V VM NNB instead (tools/vm/vm-sp.ps1, README "Tests in the VM"): the
+  host's build/package and the test dependent go into the VM's copy of the same build (staged through
+  deploy.ps1 -Staged), the VM's game is launched, Enter is pressed there with tools/vm/vm-key.ps1, and the VM copy is
+  put back as it was afterwards. It never builds and never touches the host's game copy or a host game, so it can run
+  while someone plays on the host. The log is kept as <scenario>.vm.log and judged with check.ps1 -Target vm. soak
+  (timing) is host-only.
 .EXAMPLE
   ./run.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Scenario skeleton
+  ./run.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Scenario bad-input -Target vm
 #>
 param(
     [Parameter(Mandatory)] [string] $Instance,
     [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'soak')]
     [string] $Scenario = 'skeleton',
-    [int] $TimeoutSec = 0  # 0: 420 s, 900 s for ui (it travels four times and waits for layout), 1000 s for soak (10 min idle)
+    [int] $TimeoutSec = 0, # 0: 420 s, 900 s for ui (it travels four times and waits for layout), 1000 s for soak (10 min idle); x1.5 in the VM
+    [ValidateSet('host', 'vm')] [string] $Target = 'host'
 )
 $ErrorActionPreference = 'Stop'
-if ($TimeoutSec -le 0) { $TimeoutSec = switch ($Scenario) { 'ui' { 900 } 'soak' { 1000 } default { 420 } } }
+$hostTimeout = switch ($Scenario) { 'ui' { 900 } 'soak' { 1000 } default { 420 } }
+if ($TimeoutSec -le 0 -and $Target -eq 'host') { $TimeoutSec = $hostTimeout }
 $here     = $PSScriptRoot
 $name     = (Get-Content (Join-Path $here 'mod.json') -Raw | ConvertFrom-Json).name
 $testName = "${name}SkelTest"
@@ -31,6 +40,22 @@ $scripts  = Join-Path $inst "NuclearNightmare\Binaries\Win64\ue4ss\Mods\$testNam
 $outDir   = Join-Path $root "dumps\$(Split-Path $inst -Leaf)\$($name.ToLowerInvariant())"
 $exeName  = 'NuclearNightmare-Win64-Shipping'
 New-Item -ItemType Directory -Force $outDir | Out-Null
+
+if ($Target -eq 'vm') {
+    . (Join-Path $root 'tools\vm\vm-sp.ps1')
+    # Timing scenarios judge tick costs: valid only on the host, with the VM's game closed.
+    Assert-NNBSpScenario -Scenario $Scenario -HostOnly 'soak'
+    $kept = Join-Path $outDir "$Scenario.vm.log"
+    Remove-Item $kept -ErrorAction SilentlyContinue
+    $run = Invoke-NNBSpRun -Instance $inst -TestMod $testName -Mods $name, $testName -Paks "$name.pak" `
+        -EndPattern "\[$testName\] END result=" -TimeoutSec (Get-NNBSpTimeout $hostTimeout $TimeoutSec) -LogOut $kept -Prepare {
+            param($stage)
+            & (Join-Path $here 'deploy.ps1') -Instance $stage -Test -Scenario $Scenario -Staged
+        }
+    if (-not $run.Log) { Write-Host 'No UE4SS.log from the VM.'; exit 1 }
+    & (Join-Path $here 'check.ps1') -Log $kept -Scenario $Scenario -Target vm
+    exit $LASTEXITCODE
+}
 
 Add-Type -Namespace CoreRun -Name Win -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool PostMessage(System.IntPtr h, uint msg, System.IntPtr w, System.IntPtr l);

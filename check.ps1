@@ -13,13 +13,23 @@
   ./check.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Scenario bad-input
   ./check.ps1 -Log C:\...\my-hand-test.log -Scenario manual
   ./check.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Scenario ui
+  ./check.ps1 -Log C:\...\nuclear-nightmare\dumps\v8.1.2-build26193463\nucleus\ui.vm.log -Scenario ui -Target vm
+.NOTES
+  -Target vm (a log from run.ps1 -Target vm): the VM's game shares the CPU with the host, so the one timing assertion
+  inside a functional scenario, ui's "no steady-state hud tick over 1 ms" (hud slow tick ... steady state), is a soft
+  check there; soak judges only timing and is refused.
 #>
 param(
     [string] $Instance,
     [string] $Log,
     [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'soak', 'manual')]
-    [string] $Scenario = 'skeleton'
+    [string] $Scenario = 'skeleton',
+    [ValidateSet('host', 'vm')] [string] $Target = 'host'
 )
+if ($Target -eq 'vm' -and $Scenario -eq 'soak') { Write-Host 'FAIL: soak judges tick timing and is valid only on the host (run.ps1 without -Target vm).'; exit 1 }
+# Timing inside functional scenarios: hard on the host, soft in the VM (its game shares the CPU with the host's).
+$hard = if ($Target -eq 'vm') { '?!' } else { '!' }
+$slowWarnOk = if ($Target -eq 'vm') { 'hud slow tick ' } else { 'hud slow tick .*(; HUD event: |steady state, a Lua GC step ran inside it)' }
 $manifest = Get-Content (Join-Path $PSScriptRoot 'mod.json') -Raw | ConvertFrom-Json
 $name = $manifest.name
 $version = $manifest.version
@@ -143,13 +153,14 @@ $ui = $started + @(
     "\[$T\] EVENT \d+ attached reason=HUD back in the viewport"
     "#1|\[$T\] WARN hud watcher \d+: "
     "#1|\[$T\] WARN text 'long': text is longer than 256 characters"
-    "!\[$T\] WARN (?!hud watcher \d+: |text 'long': |hud slow tick .*(; HUD event: |steady state, a Lua GC step ran inside it))"
+    "!\[$T\] WARN (?!hud watcher \d+: |text 'long': |$slowWarnOk)"
     "!\[$T\] ERROR"
     "\[$T\] DEBUG hud tick n=\d+ "
     "\[$T\] DEBUG ui (widget\(s\) gone with the HUD; freed handle\(s\) .*'pre' |'pre': new widget .*; freed the handle)"
     # Story 7: steady-state ticks never pass 1 ms. Soft: a tick that handles a HUD event (attach after a new HUD), and
     # a steady tick a step of the Lua collector landed in (that work belongs to the whole Lua state, not to the tick).
-    "!\[$T\] WARN hud slow tick .*steady state\)"
+    # Soft in the VM (-Target vm).
+    "$hard\[$T\] WARN hud slow tick .*steady state\)"
     "?!\[$T\] WARN hud slow tick .*steady state, a Lua GC step"
     "?!\[$T\] WARN hud slow tick .*HUD event"
     "\[$T\] DEBUG hud prof event=attached "
