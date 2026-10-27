@@ -6,7 +6,7 @@
 local scriptDir = debug.getinfo(1, "S").source:gsub("^@", ""):match("^(.*)[/\\]")
 local ME = scriptDir:match("([^/\\]+)[/\\][Ss]cripts$")
 local CORE = ME:match("^(.-)SkelPeer$") -- the one place the core's name comes from: this folder's name
-local NEED = "0.2.0"
+local NEED = "0.3.0"
 
 local function say(fmt, ...) print("[" .. ME .. "] " .. string.format(fmt, ...) .. "\n") end
 
