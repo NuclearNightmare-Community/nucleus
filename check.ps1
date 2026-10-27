@@ -144,12 +144,28 @@ foreach ($p in 'menu1', 'match1') {
                     'ui-journal-unwatch-nil', 'ui-journal-unwatch-table', 'ui-journal-unwatch-two', 'ui-journal-isopen-arg',
                     'ui-journal-isopen-ok', 'ui-journal-find-arg', 'ui-journal-find-ok', 'ui-journal-watch-ok', 'ui-journal-stats',
                     'ui-create-journal-near', 'ui-place-host', 'ui-place-host-num', 'ui-place-host-journal-near', 'ui-place-host-journal-ok',
-                    'ui-isshown-journal', 'off-ui-journal-watch', 'off-ui-journal-unwatch', 'off-ui-journal-isopen', 'off-ui-journal-find') {
+                    'ui-isshown-journal', 'off-ui-journal-watch', 'off-ui-journal-unwatch', 'off-ui-journal-isopen', 'off-ui-journal-find',
+                    # story 14: panels and their reordering (AC 5), and the panel functions off the game thread
+                    'ui-panel-create-none', 'ui-panel-create-unknown', 'ui-panel-create-noid', 'ui-panel-layout-grid', 'ui-panel-layout-num',
+                    'ui-panel-gap-3', 'ui-panel-gap-huge', 'ui-panel-place-str', 'ui-panel-style-purple', 'ui-panel-create-ok', 'ui-panel-in-panel',
+                    'ui-panel-place-in-panel', 'ui-panel-child-num', 'ui-panel-child-str', 'ui-panel-child-forged', 'ui-panel-child-text',
+                    'ui-panel-child-corner', 'ui-panel-child-33', 'ui-panel-setvis-yes', 'ui-panel-setstyle-str', 'ui-text-set-on-panel',
+                    'ui-panel-id-taken', 'ui-panel-setorder-missing', 'ui-panel-setorder-dup', 'ui-panel-setorder-other', 'ui-panel-setorder-removed',
+                    'ui-panel-setorder-nonhandle', 'ui-panel-setorder-forged', 'ui-panel-setorder-nontable', 'ui-panel-setorder-nil',
+                    'ui-panel-setorder-holes', 'ui-panel-setorder-two', 'ui-panel-move-0', 'ui-panel-move-n1', 'ui-panel-move-float',
+                    'ui-panel-move-str', 'ui-panel-move-nil', 'ui-panel-move-other', 'ui-panel-move-removed', 'ui-panel-move-forged',
+                    'ui-panel-order-unchanged', 'ui-panel-move-ok', 'ui-panel-setorder-ok', 'ui-panel-order-arg', 'ui-panel-remove-ok',
+                    'ui-panel-remove-again', 'ui-panel-removed-child', 'ui-panel-removed-order', 'ui-panel-removed-intent',
+                    'off-ui-panel-create', 'off-ui-panel-setstyle', 'off-ui-panel-setvis', 'off-ui-panel-remove', 'off-ui-panel-isshown',
+                    'off-ui-panel-order', 'off-ui-panel-setorder', 'off-ui-panel-move') {
         $badInput += "\[$T\] OK CASE $p\.$id "
     }
+    foreach ($fn in 'setstyle', 'setvis', 'remove', 'isshown', 'order', 'setorder', 'move') {
+        foreach ($h in 'nil', 'num', 'forged', 'text') { $badInput += "\[$T\] OK CASE $p\.ui-panel-$fn-h-$h " }
+    }
 }
-foreach ($id in 'pre-create', 'pre-watch', 'pre-find', 'pre-elements', 'pre-overlaps', 'pre-journal-watch', 'pre-journal-isopen') { $badInput += "\[$T\] OK CASE $id " }
-$badInput += "\[$T\] OK CASES before-connect recorded=7"
+foreach ($id in 'pre-create', 'pre-watch', 'pre-find', 'pre-elements', 'pre-overlaps', 'pre-journal-watch', 'pre-journal-isopen', 'pre-panel-create', 'pre-panel-move') { $badInput += "\[$T\] OK CASE $id " }
+$badInput += "\[$T\] OK CASES before-connect recorded=9"
 # UI helpers in game (stories 7-10): what run.ps1 -Scenario ui proves unattended. END result=PASS already means every
 # check the test made passed; these name the ones the stories' acceptance criteria rest on, plus core's own lines.
 $ui = $started + @(
@@ -216,6 +232,23 @@ $ui = $started + @(
     "\[$T\] OK UIHID match2 'hid' is still hidden on the new HUD"
     "\[$T\] OK UIEVENTS "
     "\[$T\] OK UICLEAN match2 "
+    # Story 14: panels on the HUD (AC 1-4, 6), through the RemoveAllWidgets re-add and the map change (AC 3).
+    "\[$T\] OK UIPANEL match1 'pv' has exactly one widget"
+    "\[$T\] OK UIPANEL match1 the three texts sit in its VBox in creation order"
+    "\[$T\] OK UIPANEL match1 shown in order, top to bottom, 8 units"
+    "\[$T\] OK UIPANEL match1 one dim box around all three"
+    "\[$T\] OK UIPANEL match1 the panel stacks under 'pre'"
+    "\[$T\] OK UIHPANEL match1 a horizontal panel lays its children out left to right"
+    "\[$T\] OK UIPREMOVE match1 removing a panel removes its children"
+    "\[$T\] OK UIPHIDE match1 hiding the middle child closes the gap"
+    "\[$T\] OK UIPHIDE match1 hiding the panel hides all three"
+    "\[$T\] OK UIPORDER match1 move\(panel, third, 1\) shows the third first"
+    "\[$T\] OK UIPORDER match1 setOrder with the reversed list reverses them"
+    "\[$T\] OK UIPORDER match1 the same three widgets"
+    "\[$T\] OK UIPORDER match1 shown reversed"
+    "\[$T\] OK UIPREBUILD match1 "
+    "\[$T\] OK UIPMAP match2 "
+    "\[$T\] OK UIPREMOVE match2 "
 )
 # Story 13 unattended (run.ps1 -Scenario journal): the Journal's map page as a host, opened and closed with the real
 # map key twelve times (ten in a row, after a revive, after a map change). END result=PASS already means every check
@@ -230,7 +263,14 @@ $journal = $started + @(
     "#12|\[$T\] OK JKEY \S+ the real [A-Z] key press opened the map"
     "#12|\[$T\] OK JKEY \S+ the real [A-Z] key press closed the map"
     "#12|\[$T\] OK JNEW \S+ open \d+ is a new Journal_C instance"
-    "#12|\[$T\] OK JONE \S+ one widget per element in the map canvas \(jt=1 jp1=1 jp2=1 jp3=1\)"
+    "#12|\[$T\] OK JONE \S+ one widget per element in the map canvas, the panel's two in its box \(jt=1 jpanel=1 jb1=1 jb2=1\)"
+    # Story 14 AC 6: the panel's order on every open; reversed while open 5 is open, kept on open 6, back on open 7.
+    "#12|\[$T\] OK JORDER (open|revive|match2)\S* the panel's children in the expected order"
+    "\[$T\] OK JORDER open5 applies while the map is open: box jb2,jb1"
+    "\[$T\] OK JORDER open6 the panel's children in the expected order jb2,jb1"
+    "\[$T\] OK JORDER open7 the panel's children in the expected order jb1,jb2"
+    "#12|\[$T\] OK JPSHOWN "
+    "\[$T\] JSTEPS 10 opens, average per step: canvas \d+; "
     "#12|\[$T\] OK JCORNER "
     "#12|\[$T\] OK JCLOSED "
     "\[$T\] OK JEVENTS 10 opens: opened=10 closed=10 lost=0"
@@ -243,7 +283,7 @@ $journal = $started + @(
     "\[$T\] OK JKEYALL 12 of 12 opens by the real"
     "\[$T\] OK JTRACK "
     "#1|\[$T\] WARN journal watcher \d+: "
-    "\[$T\] DEBUG ui journal attach n=4 in \d+ us: 'jt' created "
+    "\[$T\] DEBUG ui journal attach n=4 in \d+ us \(canvas \d+; 'jt' \d+ \(create \d+\); 'jb1' \d+ \(create \d+, in 'jpanel'\); 'jb2' \d+ \(create \d+, in 'jpanel'\); 'jpanel' \d+ \(create \d+, own -?\d+\); place \d+\): 'jt' created "
     "\[$T\] DEBUG ui journal closed: freed 4 widget handle\(s\)"
     "!\[$T\] ui journal attach left "
     "!\[$T\] WARN (?!journal watcher \d+: |$slowWarnOk)"

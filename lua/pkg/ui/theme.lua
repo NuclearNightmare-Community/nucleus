@@ -16,4 +16,15 @@ M.paddingNames = { "none", "tight", "normal", "loose" }
 -- Padding when a style has a background but names no padding, so a box never hugs the text.
 M.paddingWithBackground = "normal"
 
+-- Story 14: a panel with no style is still a visible box.
+M.panelDefault = { background = "dim", padding = "normal" }
+
+-- Story 15: buttons. The background is the button's face (a style's background replaces it); hover and pressed are
+-- the theme's, whatever the face. A disabled button keeps its face and is drawn at disabledOpacity.
+M.button        = { r = 0.10, g = 0.10, b = 0.10, a = 0.85 }
+M.buttonHover   = { r = 0.24, g = 0.24, b = 0.24, a = 0.90 }
+M.buttonPressed = { r = 0.04, g = 0.04, b = 0.04, a = 0.95 }
+M.buttonPadding = "tight"
+M.disabledOpacity = 0.45
+
 return M

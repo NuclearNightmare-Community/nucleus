@@ -13,7 +13,8 @@ local clockm = require(BASE .. ".clock")
 local uiOk, uiErr = pcall(function()
     return { common = require(BASE .. ".ui.common"), hud = require(BASE .. ".ui.hud"),
              journal = require(BASE .. ".ui.journal"),
-             text = require(BASE .. ".ui.text"), place = require(BASE .. ".ui.place"), debug = require(BASE .. ".ui.debug") }
+             text = require(BASE .. ".ui.text"), place = require(BASE .. ".ui.place"), debug = require(BASE .. ".ui.debug"),
+             panel = require(BASE .. ".ui.panel") }
 end)
 
 local NAME, LOWER = V.name, V.name:lower()
@@ -127,6 +128,9 @@ function C.connect(opts)
                 journal = { find = U.journal.find, watch = U.journal.watch, unwatch = U.journal.unwatch, isOpen = U.journal.isOpen, stats = U.journal.stats },
                 text = { create = U.text.create, set = U.text.set, setStyle = U.text.setStyle, setVisible = U.text.setVisible,
                          remove = U.text.remove, isShown = U.text.isShown, stats = U.text.stats, tagOf = U.text.tagOf },
+                -- story 14 (core 0.3.0): panels, with reordering
+                panel = { create = U.panel.create, setStyle = U.panel.setStyle, setVisible = U.panel.setVisible, remove = U.panel.remove,
+                          isShown = U.panel.isShown, order = U.panel.order, setOrder = U.panel.setOrder, move = U.panel.move },
                 place = U.place.place,
                 elements = U.place.elements,
                 debug = { overlaps = U.debug.overlaps }, -- story 12: a diagnostic for testing a mod's UI

@@ -81,6 +81,8 @@ if SCENARIO == "bad-input" then
     try("pre-overlaps", "ui.debug.overlaps({}) [before connect]", "debug", "overlaps", {})
     try("pre-journal-watch", "ui.journal.watch(fn) [before connect]", "journal", "watch", function() end)
     try("pre-journal-isopen", "ui.journal.isOpen() [before connect]", "journal", "isOpen")
+    try("pre-panel-create", "ui.panel.create{ id = 'early' } [before connect]", "panel", "create", { id = "early" })
+    try("pre-panel-move", "ui.panel.move({}, {}, 1) [before connect]", "panel", "move", {}, {}, 1)
 end
 
 local REQ, DONE = scriptDir .. "\\request.txt", scriptDir .. "\\done.txt"
@@ -383,6 +385,7 @@ function E.callErr(prefix) return { what = "false, '" .. prefix .. "...'", test 
 
 local cases = { total = 0, passed = 0 }
 local uiOffThreadCases -- defined with the UI cases below
+local panelCases -- story 14, defined with the UI cases below
 local function case(id, desc, fn, expect)
     local r = table.pack(pcall(fn))
     local ok = table.remove(r, 1); r.n = r.n - 1
@@ -592,6 +595,104 @@ local function offThreadCases(phase)
     end)
 end
 
+-- Story 14: panels with bad values (AC 5), on the game thread. Every element made here is removed again.
+local PANEL_CASE_IDS = {}
+panelCases = function(P, f, okRet)
+    local U, T, PN = core.ui, core.ui.text, core.ui.panel
+    local UI = CORE:lower() .. ".ui"
+    local function pcase(id, desc, fn, expect) PANEL_CASE_IDS[#PANEL_CASE_IDS + 1] = id; case(P .. id, desc, fn, expect) end
+    local PC, PL = UI .. ".panel.create: ", UI .. ".place: "
+    local away = function(y) return { absolute = { anchor = "center", x = 0, y = y } } end
+    pcase("panel-create-none", "ui.panel.create()", f(PN.create), E.err(PC .. "expected a table"))
+    pcase("panel-create-unknown", "ui.panel.create{ id = 'bp', lay = 'x' }", f(PN.create, { id = "bp", lay = "x" }), E.err(PC .. "unknown key 'lay' (valid: gap, id, layout, place, style)"))
+    pcase("panel-create-noid", "ui.panel.create{}", f(PN.create, {}), E.err(PC .. "id must be a string, got nil"))
+    pcase("panel-layout-grid", "ui.panel.create{ layout = 'grid' }", f(PN.create, { id = "bp", layout = "grid" }), E.err(PC .. "unknown layout 'grid' (valid: vertical, horizontal)"))
+    pcase("panel-layout-num", "ui.panel.create{ layout = 1 }", f(PN.create, { id = "bp", layout = 1 }), E.err(PC .. "unknown layout 1"))
+    pcase("panel-gap-3", "ui.panel.create{ gap = 3 }", f(PN.create, { id = "bp", gap = 3 }), E.err(PC .. "unknown gap 3 (valid: tight, normal, loose)"))
+    pcase("panel-gap-huge", "ui.panel.create{ gap = 'huge' }", f(PN.create, { id = "bp", gap = "huge" }), E.err(PC .. "unknown gap 'huge'"))
+    pcase("panel-place-str", "ui.panel.create{ place = 'top-right' }", f(PN.create, { id = "bp", place = "top-right" }), E.err(PC .. "place must be a table or nil, got 'top-right'"))
+    pcase("panel-style-purple", "ui.panel.create{ style = { background = 'purple' } }", f(PN.create, { id = "bp", style = { background = "purple" } }), E.err(UI .. ".panel: unknown background 'purple'"))
+    local pa, pb
+    pcase("panel-create-ok", "ui.panel.create{ id = 'bpa' } [control]", function()
+        pa = PN.create{ id = "bpa", place = away(140) }
+        return pa
+    end, E.ret("a handle { id = 'bpa' }", function(r) return type(r[1]) == "table" and r[1].id == "bpa" end))
+    if not pa then return end
+    pcase("panel-in-panel", "ui.panel.create{ place = { panel = <panel> } }", f(PN.create, { id = "bp", place = { panel = pa } }), E.err(PC .. "a panel can't go inside a panel (one level only)"))
+    pb = PN.create{ id = "bpb", place = away(180), layout = "horizontal" }
+    pcase("panel-place-in-panel", "ui.place(<panel>, { panel = <panel> })", f(U.place, pa, { panel = pb }), E.err(PL .. "a panel can't go inside a panel (one level only)"))
+    local k = {}
+    for i = 1, 3 do k[i] = T.create{ id = "bk" .. i, text = "k" .. i, place = { panel = pa } } end
+    local o1 = T.create{ id = "bo1", text = "o", place = { panel = pb } }
+    local kx = T.create{ id = "bkx", text = "x", place = { panel = pa } }
+    T.remove(kx)
+    -- the panel in an intent
+    pcase("panel-child-num", "ui.text.create{ place = { panel = 5 } }", f(T.create, { id = "bc", place = { panel = 5 } }), E.err(PL .. "panel must be a panel handle, got 5"))
+    pcase("panel-child-str", "ui.text.create{ place = { panel = 'bpa' } }", f(T.create, { id = "bc", place = { panel = "bpa" } }), E.err(PL .. "panel must be a panel handle, got 'bpa'"))
+    pcase("panel-child-forged", "ui.text.create{ place = { panel = { id = 'bpa' } } } [forged]", f(T.create, { id = "bc", place = { panel = { id = "bpa" } } }), E.err(PL .. "panel is not a panel handle"))
+    pcase("panel-child-text", "ui.text.create{ place = { panel = <text handle> } }", f(T.create, { id = "bc", place = { panel = k[1] } }), E.err(PL .. "panel is a text element ('bk1'), not a panel"))
+    pcase("panel-child-corner", "ui.text.create{ place = { panel = <panel>, corner = 'top-left' } }", f(T.create, { id = "bc", place = { panel = pa, corner = "top-left" } }), E.err(PL .. "corner is not allowed with panel"))
+    -- the 33rd child
+    pcase("panel-child-33", "ui.text.create{ place = { panel = <panel with 32 children> } } [the 33rd]", function()
+        local made = {}
+        for i = 1, 29 do made[i] = T.create{ id = "bm" .. i, text = "m", place = { panel = pa } } end
+        local ok, err = pcall(T.create, { id = "bm30", text = "m", place = { panel = pa } })
+        for _, m in ipairs(made) do T.remove(m) end
+        if not ok then error(err, 0) end
+    end, E.err(PL .. "panel 'bpa' already has 32 children (at most 32)"))
+    -- every panel function with handles that aren't panels
+    local forged = { id = "bpa" }
+    local fns = {
+        { "setstyle", "panel.setStyle", PN.setStyle, nil }, { "setvis", "panel.setVisible", PN.setVisible, true },
+        { "remove", "panel.remove", PN.remove, nil }, { "isshown", "panel.isShown", PN.isShown, nil },
+        { "order", "panel.order", PN.order, nil }, { "setorder", "panel.setOrder", PN.setOrder, {} }, { "move", "panel.move", PN.move, k[1] },
+    }
+    for _, d in ipairs(fns) do
+        local key, name, fn, arg = d[1], d[2], d[3], d[4]
+        local pre = UI .. "." .. name .. ": "
+        pcase("panel-" .. key .. "-h-nil", "ui." .. name .. "(nil, ...)", f(fn, nil, arg), E.err(pre .. "expected a panel handle, got nil"))
+        pcase("panel-" .. key .. "-h-num", "ui." .. name .. "(42, ...)", f(fn, 42, arg), E.err(pre .. "expected a panel handle, got 42"))
+        pcase("panel-" .. key .. "-h-forged", "ui." .. name .. "({ id = 'bpa' }, ...) [forged]", f(fn, forged, arg), E.err(pre .. "not a panel handle"))
+        pcase("panel-" .. key .. "-h-text", "ui." .. name .. "(<text handle>, ...)", f(fn, k[1], arg), E.err(pre .. "not a panel handle ('bk1' is a text element)"))
+    end
+    pcase("panel-setvis-yes", "ui.panel.setVisible(p, 'yes')", f(PN.setVisible, pa, "yes"), E.err(UI .. ".panel.setVisible: visible must be a boolean, got string"))
+    pcase("panel-setstyle-str", "ui.panel.setStyle(p, 'dim')", f(PN.setStyle, pa, "dim"), E.err(UI .. ".panel: style must be a table"))
+    pcase("text-set-on-panel", "ui.text.set(<panel handle>, 'x')", f(T.set, pa, "x"), E.err(UI .. ".text.set: not a text element handle ('bpa' is a panel)"))
+    pcase("panel-id-taken", "ui.text.create{ id = 'bpa' } [a panel's id]", f(T.create, { id = "bpa" }), E.err(UI .. ".text.create: id 'bpa' is already a panel of this mod"))
+    -- reorder (AC 5): each refused, the order unchanged
+    local SO, MV = UI .. ".panel.setOrder: ", UI .. ".panel.move: "
+    pcase("panel-setorder-missing", "ui.panel.setOrder(p, { k2, k1 }) [a child missing]", f(PN.setOrder, pa, { k[2], k[1] }), E.err(SO .. "order has 2 handle(s) but panel 'bpa' has 3 child(ren)"))
+    pcase("panel-setorder-dup", "ui.panel.setOrder(p, { k2, k1, k1 }) [a duplicate]", f(PN.setOrder, pa, { k[2], k[1], k[1] }), E.err(SO .. "order[3] ('bk1') appears twice"))
+    pcase("panel-setorder-other", "ui.panel.setOrder(p, { k2, k1, <another panel's child> })", f(PN.setOrder, pa, { k[2], k[1], o1 }), E.err(SO .. "order[3] ('bo1') is not a child of panel 'bpa'"))
+    pcase("panel-setorder-removed", "ui.panel.setOrder(p, { k2, k1, <removed child> })", f(PN.setOrder, pa, { k[2], k[1], kx }), E.err(SO .. "order[3]: handle 'bkx' was removed"))
+    pcase("panel-setorder-nonhandle", "ui.panel.setOrder(p, { k2, k1, 5 })", f(PN.setOrder, pa, { k[2], k[1], 5 }), E.err(SO .. "order[3] is not a child handle, got 5"))
+    pcase("panel-setorder-forged", "ui.panel.setOrder(p, { k2, k1, { id = 'bk3' } }) [forged]", f(PN.setOrder, pa, { k[2], k[1], { id = "bk3" } }), E.err(SO .. "order[3] is not an element handle"))
+    pcase("panel-setorder-nontable", "ui.panel.setOrder(p, 'bk1,bk2,bk3')", f(PN.setOrder, pa, "bk1,bk2,bk3"), E.err(SO .. "order must be a table of the panel's child handles, got 'bk1,bk2,bk3'"))
+    pcase("panel-setorder-nil", "ui.panel.setOrder(p, nil)", f(PN.setOrder, pa, nil), E.err(SO .. "order must be a table of the panel's child handles, got nil"))
+    pcase("panel-setorder-holes", "ui.panel.setOrder(p, { k2, k1, k3, x = 1 })", f(PN.setOrder, pa, { k[2], k[1], k[3], x = 1 }), E.err(SO .. "order must be a list (keys 1 to n), got key 'x'"))
+    pcase("panel-setorder-two", "ui.panel.setOrder(p, order, 1)", f(PN.setOrder, pa, { k[1], k[2], k[3] }, 1), E.err(SO .. "expected 2 arguments (handle, order), got 3"))
+    pcase("panel-move-0", "ui.panel.move(p, k1, 0)", f(PN.move, pa, k[1], 0), E.err(MV .. "index 0 is out of range (1 to 3)"))
+    pcase("panel-move-n1", "ui.panel.move(p, k1, 4) [count + 1]", f(PN.move, pa, k[1], 4), E.err(MV .. "index 4 is out of range (1 to 3)"))
+    pcase("panel-move-float", "ui.panel.move(p, k1, 1.5)", f(PN.move, pa, k[1], 1.5), E.err(MV .. "index must be an integer from 1 to 3, got 1.5"))
+    pcase("panel-move-str", "ui.panel.move(p, k1, '1')", f(PN.move, pa, k[1], "1"), E.err(MV .. "index must be an integer from 1 to 3, got '1'"))
+    pcase("panel-move-nil", "ui.panel.move(p, k1, nil)", f(PN.move, pa, k[1], nil), E.err(MV .. "index must be an integer from 1 to 3, got nil"))
+    pcase("panel-move-other", "ui.panel.move(p, <another panel's child>, 1)", f(PN.move, pa, o1, 1), E.err(MV .. "'bo1' is not a child of panel 'bpa'"))
+    pcase("panel-move-removed", "ui.panel.move(p, <removed child>, 1)", f(PN.move, pa, kx, 1), E.err(UI .. ".text: handle 'bkx' was removed"))
+    pcase("panel-move-forged", "ui.panel.move(p, { id = 'bk1' }, 1) [forged child]", f(PN.move, pa, { id = "bk1" }, 1), E.err(MV .. "not an element handle"))
+    pcase("panel-order-unchanged", "ui.panel.order(p) [control: every refused call left the order]", f(PN.order, pa),
+        E.ret("{ bk1, bk2, bk3 }", function(r) local o = r[1] return type(o) == "table" and #o == 3 and rawequal(o[1], k[1]) and rawequal(o[2], k[2]) and rawequal(o[3], k[3]) end))
+    pcase("panel-move-ok", "ui.panel.move(p, k3, 1) [control]", f(PN.move, pa, k[3], 1), E.none)
+    pcase("panel-setorder-ok", "ui.panel.setOrder(p, { k1, k2, k3 }) [control]", f(PN.setOrder, pa, { k[1], k[2], k[3] }), E.none)
+    pcase("panel-order-arg", "ui.panel.order(p, 1)", f(PN.order, pa, 1), E.err(UI .. ".panel.order: expected 1 argument (handle), got 2"))
+    -- removing the panel removes its children; their handles and the panel's raise
+    pcase("panel-remove-ok", "ui.panel.remove(p) [control]", f(PN.remove, pa), E.none)
+    pcase("panel-remove-again", "ui.panel.remove(p) [again]", f(PN.remove, pa), E.none)
+    pcase("panel-removed-child", "ui.text.set(<child of a removed panel>, 'x')", f(T.set, k[2], "x"), E.err(UI .. ".text: handle 'bk2' was removed"))
+    pcase("panel-removed-order", "ui.panel.order(<removed>)", f(PN.order, pa), E.err(UI .. ".panel: handle 'bpa' was removed"))
+    pcase("panel-removed-intent", "ui.text.create{ place = { panel = <removed panel> } }", f(T.create, { id = "bc", place = { panel = pa } }), E.err(UI .. ".panel: handle 'bpa' was removed"))
+    PN.remove(pb)
+end
+
 -- UI helpers (stories 7-10): every public function with bad values, on the game thread. Elements made here are
 -- removed again at the end. Expected messages are the exact first lines the contract gives.
 local function uiCases(phase)
@@ -790,6 +891,7 @@ local function uiCases(phase)
         T.remove(h2)
         return fresh
     end, E.ret("a new handle", function(r) return r[1] == true end))
+    panelCases(P, f, okRet)
     case(P .. "stats", "ui.text.stats() [control]", f(T.stats), E.ret("a table with elements = 0", function(r) return type(r[1]) == "table" and r[1].elements == 0 end))
     case(P .. "hud-stats", "ui.hud.stats() [control]", f(U.hud.stats), E.ret("findAllCalls == 1", function(r) return type(r[1]) == "table" and r[1].findAllCalls == 1 end))
 end
@@ -819,18 +921,28 @@ uiOffThreadCases = function(P, h)
     off("journal-unwatch", "journal.unwatch", U.journal.unwatch, 1)
     off("journal-isopen", "journal.isOpen", U.journal.isOpen)
     off("journal-find", "journal.find", U.journal.find)
+    -- story 14: the off-thread check comes before any argument check, so a forged handle is enough
+    off("panel-create", "panel.create", U.panel.create, { id = "off" })
+    off("panel-setstyle", "panel.setStyle", U.panel.setStyle, {}, nil)
+    off("panel-setvis", "panel.setVisible", U.panel.setVisible, {}, true)
+    off("panel-remove", "panel.remove", U.panel.remove, {})
+    off("panel-isshown", "panel.isShown", U.panel.isShown, {})
+    off("panel-order", "panel.order", U.panel.order, {})
+    off("panel-setorder", "panel.setOrder", U.panel.setOrder, {}, {})
+    off("panel-move", "panel.move", U.panel.move, {}, {}, 1)
 end
 
 local function preConnectCases()
     step("before-connect cases", function()
         local UI = CORE:lower() .. ".ui"
         local want = { create = "text.create", watch = "hud.watch", find = "hud.find", elements = "elements", overlaps = "debug.overlaps",
-            ["pre-journal-watch"] = "journal.watch", ["pre-journal-isopen"] = "journal.isOpen" }
+            ["pre-journal-watch"] = "journal.watch", ["pre-journal-isopen"] = "journal.isOpen",
+            ["pre-panel-create"] = "panel.create", ["pre-panel-move"] = "panel.move" }
         for _, r in ipairs(PRE_CONNECT) do
             case(r.id, r.desc, function() if not r.ok then error(r.err, 0) end return "no error" end,
                 E.err(UI .. ": " .. tostring(want[r.id] or want[r.fn]) .. " called before connect"))
         end
-        check(#PRE_CONNECT == 7, "CASES before-connect recorded=%d (expected 7)", #PRE_CONNECT)
+        check(#PRE_CONNECT == 9, "CASES before-connect recorded=%d (expected 9)", #PRE_CONNECT)
     end)
 end
 
@@ -1026,6 +1138,59 @@ local function uiCreate(id, opts)
     local h = core.ui.text.create(opts)
     UIS[id] = h
     return h
+end
+
+-- ---- story 14 helpers: panels. A panel widget is WBP_<Core>Panel_C, tagged in its CoreTag variable; its children sit
+-- in its VBox (vertical) or HBox (horizontal). Screen rectangles come from core's geometry functions on ModActor's CDO.
+local PANEL_SHORT = "WBP_" .. CORE .. "Panel_C"
+local BUTTON_SHORT = "WBP_" .. CORE .. "Button_C"
+local function clsOf(o) local ok, n = pcall(function() return o:GetClass():GetFName():ToString() end) return ok and n or "?" end
+-- The tag of any core widget (text: ToolTipText; panel and button: CoreTag), or nil.
+local function tagOfWidget(c)
+    local k = clsOf(c)
+    local ok, t
+    if k == TEXT_SHORT then ok, t = pcall(function() return c.ToolTipText:ToString() end)
+    elseif k == PANEL_SHORT or k == BUTTON_SHORT then ok, t = pcall(function() return c.CoreTag:ToString() end) end
+    return ok and t or nil
+end
+-- Our widgets for one id among a container's children (any core class): the first and how many.
+local function taggedIn(container, id)
+    local tag = core.ui.text.tagOf(id)
+    local first, n = nil, 0
+    for i = 0, container:GetChildrenCount() - 1 do
+        local c = container:GetChildAt(i)
+        if valid(c) and tagOfWidget(c) == tag then n = n + 1; first = first or c end
+    end
+    return first, n
+end
+-- The element ids of a box's children, in order ("a,b,c").
+local function boxIds(box)
+    local t = {}
+    for i = 0, box:GetChildrenCount() - 1 do
+        local c = box:GetChildAt(i)
+        local tag = valid(c) and tagOfWidget(c)
+        t[#t + 1] = tag and tag:match("[^:]+$") or "?"
+    end
+    return table.concat(t, ",")
+end
+-- Screen rectangle (desktop pixels) from Slate's cached geometry, or nil.
+local function absR(w)
+    local cdo = found(ACTOR_CDO)
+    if not (cdo and valid(w)) then return nil end
+    local ok, r = pcall(function()
+        local a, b = cdo[CORE .. "_AbsTopLeft"](cdo, w), cdo[CORE .. "_AbsBottomRight"](cdo, w)
+        return { l = a.X, t = a.Y, r = b.X, b = b.Y }
+    end)
+    return ok and r or nil
+end
+local function rsA(r) return r and string.format("(%.0f,%.0f)-(%.0f,%.0f)", r.l, r.t, r.r, r.b) or "?" end
+local function scaleOf() local hud = core.ui.hud.find() return hud and WLL():GetViewportScale(hud:GetWorld()) or 1 end
+local function nearPx(a, b) return math.abs(a - b) <= 1.5 end
+-- The live HUD's panel widget for an id (one expected), its box, and the children's rectangles by id.
+local function hudPanel(id)
+    local hud = core.ui.hud.find()
+    if not hud then return nil, 0 end
+    return taggedIn(hud.OwningCanvas, id)
 end
 
 local function buildUi()
@@ -1350,6 +1515,106 @@ local function buildUi()
         core.ui.hud.unwatch(UIS.lateToken)
     end)
 
+    -- Story 14: panels on the HUD. AC 1: a vertical panel in the top-right corner (it stacks under 'pre') with three
+    -- texts; AC 4: a horizontal one bottom-left. Kept until match2 (AC 3: the rebuild and the map change below).
+    local PN = function() return core.ui.panel end
+    step("match1: panels", function()
+        UIS.pv = PN().create{ id = "pv", place = { corner = "top-right" } }
+        UIS.pv1 = uiCreate("pv1", { text = "panel one", place = { panel = UIS.pv } })
+        UIS.pv2 = uiCreate("pv2", { text = "panel two, longer", place = { panel = UIS.pv } })
+        UIS.pv3 = uiCreate("pv3", { text = "panel three", place = { panel = UIS.pv } })
+        UIS.ph = PN().create{ id = "ph", place = { corner = "bottom-left" }, layout = "horizontal", style = { background = "dark" } }
+        for i = 1, 3 do UIS["ph" .. i] = uiCreate("ph" .. i, { text = "h" .. i, place = { panel = UIS.ph } }) end
+        return afterMs(1500), 3, "panel layout"
+    end)
+    -- Rectangles of a panel's children, in screen pixels, by id.
+    local function kids(pw, ids)
+        local box = pw.VBox
+        local out = {}
+        for _, id in ipairs(ids) do local w = taggedIn(box, id) out[id] = w and absR(w) end
+        return out
+    end
+    step("match1: panel check", function()
+        local pw, n = hudPanel("pv")
+        if not check(pw ~= nil and n == 1, "UIPANEL match1 'pv' has exactly one widget in the HUD canvas (found %d, class %s)", n, pw and clsOf(pw) or "?") then return end
+        local box = pw.VBox
+        local _, n1 = taggedIn(box, "pv1"); local _, n2 = taggedIn(box, "pv2"); local _, n3 = taggedIn(box, "pv3")
+        check(boxIds(box) == "pv1,pv2,pv3" and n1 == 1 and n2 == 1 and n3 == 1 and pw.HBox:GetChildrenCount() == 0,
+            "UIPANEL match1 the three texts sit in its VBox in creation order (%s), one widget each", boxIds(box))
+        local s = scaleOf()
+        local P_, r = absR(pw), kids(pw, { "pv1", "pv2", "pv3" })
+        local inside = P_ and r.pv1 and r.pv3 and r.pv1.t >= P_.t and r.pv3.b <= P_.b + 0.5 and r.pv1.l >= P_.l and r.pv2.r <= P_.r + 0.5
+        check(r.pv1 and r.pv2 and r.pv3 and nearPx(r.pv2.t, r.pv1.b + 8 * s) and nearPx(r.pv3.t, r.pv2.b + 8 * s),
+            "UIPANEL match1 shown in order, top to bottom, 8 units (tight) apart: %s %s %s (scale %.3f)", rsA(r.pv1), rsA(r.pv2), rsA(r.pv3), s)
+        local col, pad = pw.Background.BrushColor, pw.Background.Padding
+        check(inside and near(col.A, 0.35) and near(pad.Left, 8) and P_ and nearPx(r.pv1.t, P_.t + 8 * s),
+            "UIPANEL match1 one dim box around all three: panel %s brush alpha %.2f padding %.0f", rsA(P_), col.A, pad.Left)
+        local pre = widgetOf("pre")
+        local rp = pre and absR(pre)
+        check(rp and P_ and nearPx(P_.t, rp.b + 16 * s) and nearPx(P_.r, rp.r), "UIPANEL match1 the panel stacks under 'pre' in the top-right corner, 16 apart: pre %s panel %s", rsA(rp), rsA(P_))
+        check(PN().isShown(UIS.pv) and T().isShown(UIS.pv2), "UIPANEL match1 isShown: the panel and its children")
+        -- AC 4: left to right
+        local hw, hn = hudPanel("ph")
+        if check(hw ~= nil and hn == 1, "UIHPANEL match1 'ph' has exactly one widget (found %d)", hn) then
+            local hb = hw.HBox
+            local h1, h2, h3 = absR(taggedIn(hb, "ph1")), absR(taggedIn(hb, "ph2")), absR(taggedIn(hb, "ph3"))
+            check(boxIds(hb) == "ph1,ph2,ph3" and h1 and h2 and h3 and nearPx(h2.l, h1.r + 8 * s) and nearPx(h3.l, h2.r + 8 * s) and nearPx(h1.t, h3.t),
+                "UIHPANEL match1 a horizontal panel lays its children out left to right, 8 apart: %s %s %s", rsA(h1), rsA(h2), rsA(h3))
+        end
+        PN().remove(UIS.ph)
+        local okR, errR = pcall(T().isShown, UIS.ph2)
+        check(select(2, hudPanel("ph")) == 0 and not okR and firstLine(errR):find("handle 'ph2' was removed", 1, true) ~= nil,
+            "UIPREMOVE match1 removing a panel removes its children: no widget left, a child's handle raises (%s)", firstLine(errR))
+        -- AC 2: hide the middle child: the gap closes
+        T().setVisible(UIS.pv2, false)
+        return afterMs(1000), 3, "layout"
+    end)
+    step("match1: panel hide child", function()
+        local pw = hudPanel("pv")
+        local s = scaleOf()
+        local r = kids(pw, { "pv1", "pv3" })
+        local w2 = taggedIn(pw.VBox, "pv2")
+        check(r.pv1 and r.pv3 and nearPx(r.pv3.t, r.pv1.b + 8 * s) and w2 and tonumber(w2:GetVisibility()) == 1 and T().isShown(UIS.pv2) == false,
+            "UIPHIDE match1 hiding the middle child closes the gap: pv1 %s pv3 %s, pv2 collapsed", rsA(r.pv1), rsA(r.pv3))
+        T().setVisible(UIS.pv2, true)
+        PN().setVisible(UIS.pv, false)
+        check(PN().isShown(UIS.pv) == false and T().isShown(UIS.pv1) == false and T().isShown(UIS.pv2) == false and T().isShown(UIS.pv3) == false
+            and tonumber(pw:GetVisibility()) == 1, "UIPHIDE match1 hiding the panel hides all three (panel collapsed, isShown false)")
+        PN().setVisible(UIS.pv, true)
+        -- AC 6: reorder
+        UIS.pvW = {}
+        for _, id in ipairs({ "pv1", "pv2", "pv3" }) do UIS.pvW[id] = pathOf(taggedIn(pw.VBox, id)) end
+        UIS.created0 = uiStats().attachCreated
+        PN().move(UIS.pv, UIS.pv3, 1)
+        return afterMs(1000), 3, "layout"
+    end)
+    step("match1: panel reorder", function()
+        local pw = hudPanel("pv")
+        local s = scaleOf()
+        local r = kids(pw, { "pv1", "pv2", "pv3" })
+        check(boxIds(pw.VBox) == "pv3,pv1,pv2" and r.pv3 and r.pv1 and r.pv2 and nearPx(r.pv1.t, r.pv3.b + 8 * s) and nearPx(r.pv2.t, r.pv1.b + 8 * s),
+            "UIPORDER match1 move(panel, third, 1) shows the third first: %s; %s %s %s", boxIds(pw.VBox), rsA(r.pv3), rsA(r.pv1), rsA(r.pv2))
+        PN().setOrder(UIS.pv, { UIS.pv2, UIS.pv1, UIS.pv3 })
+        local o = PN().order(UIS.pv)
+        check(boxIds(pw.VBox) == "pv2,pv1,pv3" and #o == 3 and rawequal(o[1], UIS.pv2) and rawequal(o[2], UIS.pv1) and rawequal(o[3], UIS.pv3),
+            "UIPORDER match1 setOrder with the reversed list reverses them, and order() returns the new order (%s)", boxIds(pw.VBox))
+        local same = true
+        for _, id in ipairs({ "pv1", "pv2", "pv3" }) do if pathOf(taggedIn(pw.VBox, id)) ~= UIS.pvW[id] then same = false end end
+        check(same and uiStats().attachCreated == UIS.created0, "UIPORDER match1 the same three widgets (no new widget: created %d -> %d)", UIS.created0, uiStats().attachCreated)
+        local c0 = uiStats().uobjectCalls
+        PN().setOrder(UIS.pv, { UIS.pv2, UIS.pv1, UIS.pv3 })
+        PN().move(UIS.pv, UIS.pv1, 2)
+        check(uiStats().uobjectCalls == c0, "UINOOP match1 an unchanged order made %d UObject calls", uiStats().uobjectCalls - c0)
+        return afterMs(1000), 3, "layout"
+    end)
+    step("match1: panel reorder layout", function()
+        local pw = hudPanel("pv")
+        local s = scaleOf()
+        local r = kids(pw, { "pv1", "pv2", "pv3" })
+        check(r.pv2 and r.pv1 and r.pv3 and nearPx(r.pv1.t, r.pv2.b + 8 * s) and nearPx(r.pv3.t, r.pv1.b + 8 * s),
+            "UIPORDER match1 shown reversed: %s %s %s", rsA(r.pv2), rsA(r.pv1), rsA(r.pv3))
+    end)
+
     -- RemoveAllWidgets and re-add (story 7 AC 3, story 10 AC 4): lost, then attached "HUD back in the viewport", reused.
     step("match1: RemoveAllWidgets", function()
         local w = widgetOf("pre")
@@ -1371,6 +1636,11 @@ local function buildUi()
         check(w ~= nil and n == 1 and pathOf(w) == UIS.prePath, "UIRAW match1 'pre' reused, not duplicated (widgets=%d, same widget=%s)", n, tostring(w and pathOf(w) == UIS.prePath))
         local hid, nh = widgetOf("hid")
         check(hid ~= nil and nh == 1 and tonumber(hid:GetVisibility()) == 1 and T().isShown(UIS.hid) == false, "UIHID match1 'hid' still hidden (widgets=%d)", nh)
+        -- Story 14 AC 3: the panel and its children back, reused, in the same order, one widget each.
+        local pw, pn = hudPanel("pv")
+        local ones = pw and select(2, taggedIn(pw.VBox, "pv1")) == 1 and select(2, taggedIn(pw.VBox, "pv2")) == 1 and select(2, taggedIn(pw.VBox, "pv3")) == 1
+        check(pw ~= nil and pn == 1 and ones and boxIds(pw.VBox) == "pv2,pv1,pv3" and pathOf(taggedIn(pw.VBox, "pv1")) == UIS.pvW.pv1,
+            "UIPREBUILD match1 after RemoveAllWidgets and re-add: one panel widget (%d), children reused in the same order (%s)", pn, pw and boxIds(pw.VBox) or "?")
         local wp = widgetOf("pre")
         UIS.oldPre = wp and { handle = core.ref(wp), path = pathOf(wp) } or nil
     end)
@@ -1441,7 +1711,16 @@ local function buildUi()
         check((EV.count.attached or 0) >= 4 and (EV.count.lost or 0) >= 3 and (EV.count.shown or 0) >= 1,
             "UIEVENTS attached=%d shown=%d hidden=%d lost=%d", EV.count.attached or 0, EV.count.shown or 0, EV.count.hidden or 0, EV.count.lost or 0)
         local s = uiStats()
-        say("UISTATS elements=%d created=%d reused=%d freed=%d uobjectCalls=%d", s.elements, s.attachCreated, s.attachReused, s.handlesFreed, s.uobjectCalls)
+        say("UISTATS elements=%d created=%d reused=%d freed=%d uobjectCalls=%d panelRebuilds=%s", s.elements, s.attachCreated, s.attachReused, s.handlesFreed, s.uobjectCalls, tostring(s.panelRebuilds))
+        -- Story 14 AC 3: after the map change the panel is back with its children in the same order, one widget each.
+        local pw, pn = hudPanel("pv")
+        local ones = pw and select(2, taggedIn(pw.VBox, "pv1")) == 1 and select(2, taggedIn(pw.VBox, "pv2")) == 1 and select(2, taggedIn(pw.VBox, "pv3")) == 1
+        check(pw ~= nil and pn == 1 and ones and boxIds(pw.VBox) == "pv2,pv1,pv3" and core.ui.panel.isShown(UIS.pv),
+            "UIPMAP match2 after the map change: one panel widget (%d), its children in the same order (%s), one widget each", pn, pw and boxIds(pw.VBox) or "?")
+        core.ui.panel.remove(UIS.pv)
+        local okR, errR = pcall(T().set, UIS.pv1, "x")
+        check(select(2, hudPanel("pv")) == 0 and not okR and firstLine(errR):find("handle 'pv1' was removed", 1, true) ~= nil,
+            "UIPREMOVE match2 removing the panel removes all three (%s)", firstLine(errR))
         T().remove(UIS.pre); T().remove(UIS.hid)
         core.ui.hud.unwatch(UIS.thrower)
         core.ui.hud.unwatch(UIS.recorder)
@@ -1459,8 +1738,12 @@ end
 -- change, a GC count of live core widgets, and the cost lines. Never keeps a Journal or widget across steps.
 local JOURNAL_CLASS_PATH = "/Game/Graphics/Journal/Journal.Journal_C"
 local JEV = { list = {}, count = {} }
-local JS = { seen = {}, opens = 0, keyOpens = 0, attach = {} }
-local J_IDS = { "jt", "jp1", "jp2", "jp3" } -- one text top-right; three in a bottom-right stack (a panel and two buttons' stand-in)
+local JS = { seen = {}, opens = 0, keyOpens = 0, attach = {}, steps = {} }
+-- One text top-right, and a panel bottom-right holding two elements (story 13 AC 6's panel with two buttons and a
+-- text). Story 14: the two are texts standing in for story 15's buttons.
+local J_IDS = { "jt", "jpanel", "jb1", "jb2" }
+local J_TOP = { "jt", "jpanel" }       -- in the map canvas
+local J_KIDS = { "jb1", "jb2" }        -- in jpanel's VBox
 local OPENS = 10
 
 local function jrecorder(_, info)
@@ -1473,19 +1756,6 @@ local function jcount(e) return JEV.count[e] or 0 end
 local function mapCanvasOf(j)
     local ok, c = pcall(function() return j.MapWidget.WidgetTree.RootWidget end)
     return ok and valid(c) and c or nil
-end
--- Our widgets for one id in a canvas, by tag: the first and how many.
-local function taggedIn(canvas, id)
-    local tag = core.ui.text.tagOf(id)
-    local first, n = nil, 0
-    for i = 0, canvas:GetChildrenCount() - 1 do
-        local c = canvas:GetChildAt(i)
-        if valid(c) and c:GetClass():GetFName():ToString() == TEXT_SHORT then
-            local ok, t = pcall(function() return c.ToolTipText:ToString() end)
-            if ok and t == tag then n = n + 1; first = first or c end
-        end
-    end
-    return first, n
 end
 local function cls(o) local ok, n = pcall(function() return o:GetClass():GetFName():ToString() end) return ok and n or "?" end
 local function absRect(w)
@@ -1585,6 +1855,39 @@ local function probeTree(phase, j)
     if not ok then say("JTREE %s failed: %s", phase, firstLine(err)) end
 end
 
+-- Story 14: one open's attach steps (journal.stats().attachSteps) as a line, and their averages over several opens.
+local function stepsLine(s)
+    if type(s) ~= "table" or type(s.items) ~= "table" then return "?" end
+    local parts = { string.format("canvas %d", s.canvas or -1) }
+    for _, it in ipairs(s.items) do
+        parts[#parts + 1] = string.format("'%s' %d (create %d%s)", it.id, it.us, it.create, it.panel and (", in '" .. it.panel .. "'") or "")
+    end
+    parts[#parts + 1] = string.format("place %d", s.place or -1)
+    return table.concat(parts, "; ")
+end
+local function stepsAvg(list)
+    local n, canvas, place, by, order = 0, 0, 0, {}, {}
+    for _, s in ipairs(list) do
+        if type(s) == "table" and type(s.items) == "table" then
+            n = n + 1
+            canvas, place = canvas + s.canvas, place + s.place
+            for _, it in ipairs(s.items) do
+                if not by[it.id] then by[it.id] = { us = 0, create = 0, n = 0 }; order[#order + 1] = it.id end
+                local b = by[it.id]
+                b.us, b.create, b.n = b.us + it.us, b.create + it.create, b.n + 1
+            end
+        end
+    end
+    if n == 0 then return "none" end
+    local parts = { string.format("canvas %.0f", canvas / n) }
+    for _, id in ipairs(order) do
+        local b = by[id]
+        parts[#parts + 1] = string.format("'%s' %.0f (create %.0f)", id, b.us / b.n, b.create / b.n)
+    end
+    parts[#parts + 1] = string.format("place %.0f", place / n)
+    return table.concat(parts, "; ")
+end
+
 -- One open: the map key (or Lua when asked), then the opened event; checks on the next steps.
 local function openMap(phase, viaKey)
     step(phase .. ": open", function()
@@ -1620,12 +1923,24 @@ local function openMap(phase, viaKey)
         if not check(canvas ~= nil, "JCANVAS %s the map page's root canvas found", phase) then return end
         local all = true
         local counts = {}
-        for _, id in ipairs(J_IDS) do
+        for _, id in ipairs(J_TOP) do
             local _, n = taggedIn(canvas, id)
             counts[#counts + 1] = id .. "=" .. n
             if n ~= 1 then all = false end
         end
-        check(all, "JONE %s one widget per element in the map canvas (%s)", phase, table.concat(counts, " "))
+        local pw = taggedIn(canvas, "jpanel")
+        local box = pw and pw.VBox
+        for _, id in ipairs(J_KIDS) do
+            local n = box and select(2, taggedIn(box, id)) or 0
+            counts[#counts + 1] = id .. "=" .. n
+            if n ~= 1 then all = false end
+        end
+        check(all, "JONE %s one widget per element in the map canvas, the panel's two in its box (%s)", phase, table.concat(counts, " "))
+        -- Story 14 AC 6: the panel's order on every open (a reorder made while open or closed shows on the next open).
+        if box then
+            check(boxIds(box) == JS.order, "JORDER %s the panel's children in the expected order %s (box: %s)", phase, JS.order, boxIds(box))
+            check(core.ui.panel.isShown(JS.h.jpanel) and core.ui.text.isShown(JS.h.jb1), "JPSHOWN %s the panel and its children are shown on the map", phase)
+        end
         check(core.ui.text.isShown(JS.h.jt) == true, "JSHOWN %s 'jt' isShown=true while the map is open", phase)
         local w = taggedIn(canvas, "jt")
         if w then
@@ -1636,7 +1951,28 @@ local function openMap(phase, viaKey)
         end
         local st = core.ui.journal.stats()
         JS.attach[#JS.attach + 1] = st.attachLast
-        say("JCOST %s attach of %d elements on this open: %d us (avg %.0f, max %d over %d opens)", phase, st.attachElements, st.attachLast, st.attachAvg, st.attachMax, st.attachOpens)
+        JS.steps[#JS.steps + 1] = st.attachSteps
+        say("JCOST %s attach of %d elements on this open: %d us (avg %.0f, max %d over %d opens); steps: %s", phase, st.attachElements, st.attachLast, st.attachAvg, st.attachMax, st.attachOpens, stepsLine(st.attachSteps))
+    end)
+end
+
+-- Story 14: a reorder of the Journal's panel while the map is open (it applies at once) or closed (next open).
+local function reorderJournal(phase, ids, open)
+    step(phase .. ": reorder", function()
+        local list = {}
+        for i, id in ipairs(ids) do list[i] = JS.h[id] end
+        core.ui.panel.setOrder(JS.h.jpanel, list)
+        JS.order = table.concat(ids, ",")
+        local o = core.ui.panel.order(JS.h.jpanel)
+        local got = {}
+        for i, h in ipairs(o) do got[i] = h.id end
+        check(table.concat(got, ",") == JS.order, "JORDER %s order() returns %s after setOrder", phase, table.concat(got, ","))
+        if open then
+            local j = core.ui.journal.find()
+            local canvas = j and mapCanvasOf(j)
+            local pw = canvas and taggedIn(canvas, "jpanel")
+            check(pw ~= nil and boxIds(pw.VBox) == JS.order, "JORDER %s applies while the map is open: box %s (expected %s)", phase, pw and boxIds(pw.VBox) or "?", JS.order)
+        end
     end)
 end
 
@@ -1671,10 +2007,11 @@ local function gcCount(phase)
     end)
     step(phase .. ": gc count", function()
         local n, journals = 0, 0
-        for _, w in ipairs(FindAllOf(TEXT_SHORT) or {}) do
-            if valid(w) then
-                local ok, t = pcall(function() return w.ToolTipText:ToString() end)
-                if ok and t:find(":j[tp]%d?$") then n = n + 1 end
+        local mine = {}
+        for _, id in ipairs(J_IDS) do mine[core.ui.text.tagOf(id)] = true end
+        for _, short in ipairs({ TEXT_SHORT, PANEL_SHORT, BUTTON_SHORT }) do
+            for _, w in ipairs(FindAllOf(short) or {}) do
+                if valid(w) and mine[tagOfWidget(w) or ""] then n = n + 1 end
             end
         end
         for _, j in ipairs(FindAllOf("Journal_C") or {}) do if valid(j) and not pathOf(j):find("Default__", 1, true) then journals = journals + 1 end end
@@ -1690,10 +2027,11 @@ local function buildJournal()
         UIS.jthrow = core.ui.journal.watch(function() error("test journal watcher throws on purpose") end)
         JS.h = {}
         JS.h.jt = core.ui.text.create{ id = "jt", text = CORE .. " journal", place = { host = "journal", corner = "top-right" } }
-        for i = 1, 3 do
-            JS.h["jp" .. i] = core.ui.text.create{ id = "jp" .. i, text = i == 1 and "panel" or ("button " .. (i - 1)),
-                place = { host = "journal", corner = "bottom-right", gap = "tight" }, style = { background = "dim" } }
+        JS.h.jpanel = core.ui.panel.create{ id = "jpanel", place = { host = "journal", corner = "bottom-right" } }
+        for i, id in ipairs(J_KIDS) do
+            JS.h[id] = core.ui.text.create{ id = id, text = "button " .. i .. " (stand-in)", place = { panel = JS.h.jpanel } }
         end
+        JS.order = table.concat(J_KIDS, ",")
         check(core.ui.text.isShown(JS.h.jt) == false and core.ui.journal.isOpen() == false, "JPENDING menu1 journal elements created, not shown (no Journal)")
     end)
     waitWorld("menu1", "NewMainMenu", 120)
@@ -1706,7 +2044,14 @@ local function buildJournal()
     -- AC 1: ten opens and closes in a row, every one by the real key press.
     for i = 1, OPENS do
         openMap("open" .. i, true)
+        if i == 1 then step("open1: shot", function() return request("shot journal-open1"), 30, "screenshot" end) end
+        -- Story 14 AC 6: reversed while open 5 is open; kept on open 6; back while closed, shown on open 7.
+        if i == 5 then
+            reorderJournal("open5", { J_KIDS[2], J_KIDS[1] }, true)
+            step("open5: shot", function() return request("shot journal-open5-reordered"), 30, "screenshot" end)
+        end
         closeMap("close" .. i, true)
+        if i == 6 then reorderJournal("close6", { J_KIDS[1], J_KIDS[2] }, false) end
     end
     step("opens: events", function()
         -- AC 3: opened and closed once per open and close.
@@ -1716,6 +2061,7 @@ local function buildJournal()
         for _, us in ipairs(JS.attach) do sum = sum + us; if us > max then max = us end end
         -- AC 6: under 2 ms per open (timing: judged on the host; reported in the VM).
         say("%s JCOSTS %d opens: attach avg %.0f us, max %d us (target under 2000 us per open)", max < 2000 and "OK" or "SLOW", #JS.attach, #JS.attach > 0 and sum / #JS.attach or 0, max)
+        say("JSTEPS %d opens, average per step: %s", #JS.steps, stepsAvg(JS.steps))
     end)
     gcCount("opens")
     -- AC 2: a death and revive, then the map again.
@@ -1769,7 +2115,8 @@ local function buildJournal()
         for _ in pairs(JS.seen) do distinct = distinct + 1 end
         check(distinct == JS.opens, "JNEWALL %d opens, %d distinct Journal_C instances", JS.opens, distinct)
         check(JS.keyOpens == JS.opens, "JKEYALL %d of %d opens by the real %s key press", JS.keyOpens, JS.opens, JS.key)
-        for _, id in ipairs(J_IDS) do core.ui.text.remove(JS.h[id]) end
+        core.ui.text.remove(JS.h.jt)
+        core.ui.panel.remove(JS.h.jpanel) -- and its children
         core.ui.journal.unwatch(UIS.jthrow)
         core.ui.journal.unwatch(UIS.jrec)
     end)

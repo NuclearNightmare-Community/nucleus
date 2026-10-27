@@ -13,6 +13,15 @@ C.TEXT_SHORT = "WBP_" .. C.NAME .. "Text_C"
 C.TEXT_CLASS = C.TEXT_PKG .. "." .. C.TEXT_SHORT
 C.HUD_CLASS = "/Game/Graphics/Inventory/InventoryUI.InventoryUI_C"
 C.HUD_SHORT = "InventoryUI_C"
+-- Story 14: WBP_<Core>Panel (Border "Background" -> Overlay -> VerticalBox "VBox" / HorizontalBox "HBox").
+C.PANEL_PKG = "/Game/Mods/" .. C.NAME .. "/WBP_" .. C.NAME .. "Panel"
+C.PANEL_SHORT = "WBP_" .. C.NAME .. "Panel_C"
+C.PANEL_CLASS = C.PANEL_PKG .. "." .. C.PANEL_SHORT
+-- Story 15: WBP_<Core>Button (Button "Btn" -> TextBlock "Label"); its OnClicked calls <Core>_OnClicked on itself.
+C.BUTTON_PKG = "/Game/Mods/" .. C.NAME .. "/WBP_" .. C.NAME .. "Button"
+C.BUTTON_SHORT = "WBP_" .. C.NAME .. "Button_C"
+C.BUTTON_CLASS = C.BUTTON_PKG .. "." .. C.BUTTON_SHORT
+C.CLICK_FN = C.BUTTON_CLASS .. ":" .. C.NAME .. "_OnClicked"
 C.JOURNAL_PKG = "/Game/Graphics/Journal/Journal"
 C.JOURNAL_SHORT = "Journal_C"
 C.JOURNAL_CLASS = C.JOURNAL_PKG .. "." .. C.JOURNAL_SHORT
@@ -130,20 +139,42 @@ function C.warnOnce(key, fmt, ...)
 end
 function C.forgetWarning(key) warned[key] = nil end
 
--- ---- element registry (filled by text.lua; read by place.lua)
-C.els = {}                                  -- id -> element (removed ones are dropped)
+-- ---- element registry (filled by text.lua, panel.lua, button.lua; read by place.lua)
+-- An element is a plain table: kind ("text", "panel", "button"), id, place, style, visible, ref/path of its live
+-- widget. A panel's children (story 14) have el.panel = the panel element and el.place = { inPanel = true } (no host:
+-- every per-host loop skips them; their panel attaches and places them).
+C.els = {}                                  -- id -> element (removed ones are dropped); ids are unique across kinds
 C.order = {}                                -- elements in creation order (for corner stacking)
 C.handleOf = setmetatable({}, { __mode = "k" })  -- handle table -> element
 C.removedHandle = setmetatable({}, { __mode = "k" }) -- handle table -> id, after remove
+C.removedKind = setmetatable({}, { __mode = "k" })   -- handle table -> kind, after remove
 C.seq = 0
 
--- The element behind a handle, or a clean error. fn is e.g. "text.set".
-function C.element(h, fn)
-    if type(h) ~= "table" then C.fail("%s.%s: expected an element handle, got %s", C.UI, fn, C.describe(h)) end
+-- The host an element is drawn on: its own, or its panel's.
+function C.hostOf(el)
+    if el.panel then return el.panel.place.host end
+    return el.place.host
+end
+
+local ARTICLE = { text = "a text element", panel = "a panel", button = "a button" }
+C.ARTICLE = ARTICLE
+
+-- The element behind a handle, or a clean error. fn is e.g. "text.set"; kind, when given, is the kind the function
+-- takes ("text", "panel", "button"); nil takes any element.
+function C.element(h, fn, kind)
+    if type(h) ~= "table" then
+        C.fail("%s.%s: expected %s handle, got %s", C.UI, fn, (kind == nil or kind == "text") and "an element" or ARTICLE[kind], C.describe(h))
+    end
     local id = C.removedHandle[h]
-    if id then C.fail("%s.text: handle '%s' was removed", C.UI, id) end
+    if id then C.fail("%s.%s: handle '%s' was removed", C.UI, C.removedKind[h] or "text", id) end
     local el = C.handleOf[h]
-    if not el then C.fail("%s.%s: not an element handle (use the handle that text.create returned)", C.UI, fn) end
+    if not el then
+        if kind == nil or kind == "text" then C.fail("%s.%s: not an element handle (use the handle that text.create returned)", C.UI, fn) end
+        C.fail("%s.%s: not %s handle (use the handle that %s.create returned)", C.UI, fn, ARTICLE[kind], kind)
+    end
+    if kind and el.kind ~= kind then
+        C.fail("%s.%s: not %s handle ('%s' is %s)", C.UI, fn, ARTICLE[kind], el.id, ARTICLE[el.kind])
+    end
     return el
 end
 

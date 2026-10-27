@@ -343,16 +343,17 @@ function J.stats()
     return { tracked = #paths, watchers = #watchers, open = S.path ~= nil, openPath = S.path, lastClosed = lastClosed,
         opens = T.opens, closes = T.closes, lost = T.lost, findAllCalls = C.stats.journalFindAllCalls or 0,
         attachOpens = T.attachN, attachAvg = T.attachN > 0 and T.attachSum / T.attachN or 0, attachMax = T.attachMax,
-        attachLast = T.attachLast, attachElements = T.attachEls }
+        attachLast = T.attachLast, attachElements = T.attachEls, attachSteps = T.steps }
 end
 
 -- ---- internal (text.lua)
 function J._watch(fn) return addWatcher(fn, true) end
 function J._ticker(fn) tickers[#tickers + 1] = fn end
 function J._poll() seed() return pollOpen(false) end
--- The attach cost of one open (story 13 AC 6): us on the game thread for n elements.
-function J._recordAttach(us, n)
-    T.attachN, T.attachSum, T.attachLast, T.attachEls = T.attachN + 1, T.attachSum + us, us, n
+-- The attach cost of one open (story 13 AC 6): us on the game thread for n elements, and (story 14) its steps:
+-- { canvas = us, place = us, items = { { id, us, create, panel }, ... } } (stats() hands out this table; diagnostic).
+function J._recordAttach(us, n, steps)
+    T.attachN, T.attachSum, T.attachLast, T.attachEls, T.steps = T.attachN + 1, T.attachSum + us, us, n, steps
     if us > T.attachMax then T.attachMax = us end
 end
 
