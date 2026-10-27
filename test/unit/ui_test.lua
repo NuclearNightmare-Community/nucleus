@@ -668,20 +668,20 @@ ovW = widgetOfId("ov"); ABS[ovW] = R(900, 16, 1000, 46)
 ok(C.stats.overlapScheduled > sched0, "auto check: scheduled on a re-place")
 tick()
 ok(countLogs("^WARN ui overlap 'ov': ") == nWarn, "auto check: not before its delay")
-tick(); tick()
+for _ = 1, 10 do tick() end -- the corner's other elements are checked first (one check per tick, creation order)
 ok(countLogs("^WARN ui overlap 'ov': ") == nWarn + 4, "auto check: one WARN per overlapping widget", countLogs("^WARN ui overlap 'ov': ") - nWarn)
 ok(countLogs("^WARN ui overlap 'ov': .*OtherMod") == 0 and countLogs("^WARN ui overlap 'ov': " .. C.pathOf(otherEl):gsub("%p", "%%%0") .. " %(WBP_NucleusText_C%) %(880,30%)%-%(960,60%)$") == 1,
     "auto check: names the widget, its class and rect")
 ok(countLogs("^DEBUG ui overlap 'ov' checked %(place%): 4 overlap%(s%), 4 new;") == 1, "auto check: one DEBUG summary", logs[#logs])
-P.place(ov, { corner = "top-right" }); tick(); tick(); tick()
+P.place(ov, { corner = "top-right" }); for _ = 1, 10 do tick() end
 ok(countLogs("^WARN ui overlap 'ov': ") == nWarn + 4, "auto check: once per pair (a re-place logs nothing new)")
 local late2 = put(gw("Image", R(905, 20, 915, 30)))
-hudN.vis = 2; tick(); hudN.vis = 4; tick(); tick(); tick(); tick()
+hudN.vis = 2; tick(); hudN.vis = 4; for _ = 1, 12 do tick() end
 ok(countLogs("^WARN ui overlap 'ov': ") == nWarn + 5 and countLogs("^WARN ui overlap 'ov': " .. C.pathOf(late2):gsub("%p", "%%%0")) == 1, "auto check: HUD shown again checks again; only the new pair is logged")
 -- not painted: retried, then one DEBUG line
 ABS[ovW] = R(0, 0, 0, 0)
 X.setVisible(ov, false); X.setVisible(ov, true)
-for _ = 1, 12 do tick() end
+for _ = 1, 24 do tick() end
 ok(countLogs("^DEBUG ui overlap 'ov' not checked %(re%-stack%): not painted yet") == 1, "auto check: not painted -> retried, then one DEBUG line")
 X.remove(ov)
 C.log.debugEnabled = true

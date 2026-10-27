@@ -233,11 +233,15 @@ local ticking = false
 local function onTick()
     dtick = dtick + 1
     if next(pending) == nil then return end
+    -- Removed elements (no longer in C.order) are dropped; the rest go in creation order (deterministic, unlike
+    -- pairs over table keys).
+    for el in pairs(pending) do if el.removed then pending[el] = nil end end
     -- One check per tick at most: a check is a walk of tens to hundreds of widgets (milliseconds).
-    for el, p in pairs(pending) do
-        if dtick >= p.at then
+    for _, el in ipairs(C.order) do
+        local p = pending[el]
+        if p and dtick >= p.at then
             pending[el] = nil
-            if el.removed or not C.debugOn() then return end
+            if not C.debugOn() then return end
             C.tickEvent = "overlap check" -- an event tick for the timing summary, not a steady one
             local hits, info = guarded(el)
             if hits == nil then
