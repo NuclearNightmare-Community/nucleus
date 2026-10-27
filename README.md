@@ -9,6 +9,7 @@ $inst = 'C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463'   # absol
 ./build.ps1                                   # native + blueprint + lua + package (needs VS 2026, UE 5.6, ue4ss-src)
 ./deploy.ps1 -Instance $inst                  # core only; -Test adds the test dependent; -Remove takes it all out
 ./run.ps1 -Instance $inst -Scenario skeleton  # unattended in-game run + check.ps1 (also no-native, no-pak, bad-input, ui, soak)
+./run.ps1 -Instance $inst -Scenario skeleton -Target vm   # the same in the Hyper-V VM, while you play (below)
 ./check.ps1 -Instance $inst -Scenario skeleton
 ```
 
@@ -25,6 +26,23 @@ $inst = 'C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463'   # absol
 | `ui` | the UI helpers (stories 7-10) unattended, menu → match → `RemoveAllWidgets` and re-add → menu → match: an element created before the first match, the same id twice, `set` and its no-op, long text, `remove`, style, `setVisible` across map changes, all four corners and gaps, `offset`, `absolute`, a three-element stack (offset, hide, grow, remove), `near` the crosshair with `HideCrosshair`, a late and a throwing watcher, old handles freed, `FindAllOf` exactly once, tick timing lines. Several minutes; `run.ps1` gives it 900 s |
 | `soak` | story 7 AC 7 unattended: menu, match, Enter at touchdown, then 10 minutes idle in the match with one element and one watcher; `check.ps1` fails any steady-state slow tick and any event-free minute window whose steady maximum is 500 us or more or whose poll average is 100 us or more. `run.ps1` gives it 1000 s |
 | `manual` | for hand testing (below), not for `run.ps1`: `check.ps1` only checks that nothing broke |
+
+## Tests in the VM
+
+`run.ps1 -Target vm` runs a scenario in the Hyper-V VM `NNB` (account B; workspace `tools/vm/README.md`, "Single-player tests in the VM") instead of on the host, so it can run while you play on the host with your own account:
+
+```powershell
+./run.ps1 -Instance $inst -Scenario skeleton -Target vm
+./run.ps1 -Instance $inst -Scenario bad-input -Target vm
+./check.ps1 -Log <workspace>\dumps\v8.1.2-build26193463\nucleus\skeleton.vm.log -Scenario skeleton -Target vm
+```
+
+- `-Instance` is still the host's copy (absolute, also from a worktree): it names the build and finds the workspace's `tools/`. The VM's copy (`C:\nn\<same name>`) must be the same build; the run refuses otherwise. Nothing of the host copy is read except its exe size, and no host game is started, stopped or checked.
+- What's installed is what `deploy.ps1 -Test -Scenario <s>` would install, from this repo's `build/package` (the VM path never builds): `deploy.ps1 -Staged` writes it into a host-side staging folder, which `tools/vm/vm-sp.ps1` copies into the VM copy. UE4SS is switched on for the run; afterwards the VM copy is put back exactly as it was (UE4SS off, no mods), also after a crash or a time limit. An interrupted run is undone by the next one, or by `tools/vm/vm-sp-restore.ps1`.
+- Enter at touchdown: the test dependent's `request.txt`/`done.txt` are polled in the VM copy over PowerShell Direct, and the key is posted with `tools/vm/vm-key.ps1`.
+- Time limits are the host's times 1.5 (the VM's game is slower), unless `-TimeoutSec` is given. The log is kept as `dumps/<copy>/nucleus/<scenario>.vm.log`.
+- In the VM: `skeleton`, `bad-input`, `no-native`, `no-pak`, `ui`. Host only: `soak` (it judges tick costs; refused with `-Target vm`). `check.ps1 -Target vm` makes the one timing assertion inside a functional scenario soft: `ui`'s "no steady-state hud tick over 1 ms" (`WARN hud slow tick ... steady state`) shows as `warn:` instead of failing. `manual` is a hand test and isn't run by `run.ps1` anywhere.
+- Builds still happen on the host (`build.ps1`, CPU-heavy: the game you're playing may stutter meanwhile), and the VM's game itself shares the host's CPU and GPU.
 
 ## Hand testing
 

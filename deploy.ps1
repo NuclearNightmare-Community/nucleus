@@ -11,6 +11,8 @@
   bad-input, ui, soak and manual install all parts like skeleton. The scenario goes to the test dependent's Scripts/scenario.txt.
   manual is for hand testing: the test dependent never travels or presses keys, and keeps a text widget in the live
   HUD's top-right corner (README.md, "Hand testing").
+  -Staged: $Instance is the host-side staging folder of a VM run (run.ps1 -Target vm, tools/vm/vm-sp.ps1), not a game
+  copy; only the running-game check is skipped (no game runs from it, and the host's game may be in use meanwhile).
   Pass the main checkout's instance path when running from a worktree.
 .EXAMPLE
   ./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Test
@@ -22,7 +24,8 @@ param(
     [switch] $Test,
     [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'soak', 'manual')]
     [string] $Scenario = 'skeleton',
-    [switch] $Remove
+    [switch] $Remove,
+    [switch] $Staged
 )
 $ErrorActionPreference = 'Stop'
 $here      = $PSScriptRoot
@@ -39,7 +42,7 @@ $pkg       = Join-Path $here 'build\package'
 
 if (-not (Test-Path (Join-Path $win64 'NuclearNightmare-Win64-Shipping.exe'))) { throw "Not a game instance: $inst" }
 if (-not (Test-Path (Join-Path $ue4ss 'UE4SS.dll'))) { throw "UE4SS is not installed in $win64" }
-if (Get-Process -Name 'NuclearNightmare*' -ErrorAction SilentlyContinue) { throw 'Nuclear Nightmare is running; close it first (the DLL is locked while it runs).' }
+if (-not $Staged -and (Get-Process -Name 'NuclearNightmare*' -ErrorAction SilentlyContinue)) { throw 'Nuclear Nightmare is running; close it first (the DLL is locked while it runs).' }
 
 # Clean slate: no core or test files, no core or test lines.
 Remove-Item (Join-Path $modsDir $name), (Join-Path $modsDir $testName) -Recurse -Force -ErrorAction SilentlyContinue
