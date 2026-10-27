@@ -29,7 +29,7 @@
 local scriptDir = debug.getinfo(1, "S").source:gsub("^@", ""):match("^(.*)[/\\]")
 local ME = scriptDir:match("([^/\\]+)[/\\][Ss]cripts$")
 local CORE = ME:match("^(.-)SkelTest$") -- the one place the core's name comes from: this folder's name
-local NEED = "0.2.0" -- story 13 (core.ui.journal) lands in 0.3.0, still unreleased: the version stays 0.2.0 until stories 13-15 are in
+local NEED = "0.3.0" -- core.ui.journal, panel and button (stories 13-15); below 1.0.0 the caret rule needs the same minor
 
 local function say(fmt, ...) print("[" .. ME .. "] " .. string.format(fmt, ...) .. "\n") end
 
