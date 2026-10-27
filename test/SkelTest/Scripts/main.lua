@@ -17,6 +17,9 @@
 --            setVisible, all four corners and gaps, offset, absolute, a three-element stack, near the crosshair with
 --            HideCrosshair, an element moved onto the crosshair reporting it (story 12 AC 2), a late and a throwing
 --            watcher, and handles freed across map changes (buildUi below).
+-- ui also runs story 15 at its end: on the Journal (map opened by the real key), a panel with two buttons and a text,
+--            real OS clicks on each (run.ps1 "click x y"), Enter on a focused button, a throwing onClick, a disabled
+--            button, a button of a second test dependent (<Core>SkelPeer), and two calls in a row (the 250 ms debounce).
 -- manual:    for hand testing. Never travels, requests keys, runs timed checks or logs FAIL. Keeps a
 --            "<Core> manual: <n>" element in the top-right corner of the HUD through core.ui.text (core re-attaches it
 --            whenever the HUD is rebuilt, replaced or put back in the viewport; n counts attaches), and logs reports
@@ -83,6 +86,7 @@ if SCENARIO == "bad-input" then
     try("pre-journal-isopen", "ui.journal.isOpen() [before connect]", "journal", "isOpen")
     try("pre-panel-create", "ui.panel.create{ id = 'early' } [before connect]", "panel", "create", { id = "early" })
     try("pre-panel-move", "ui.panel.move({}, {}, 1) [before connect]", "panel", "move", {}, {}, 1)
+    try("pre-button-create", "ui.button.create{ id = 'early' } [before connect]", "button", "create", { id = "early" })
 end
 
 local REQ, DONE = scriptDir .. "\\request.txt", scriptDir .. "\\done.txt"
@@ -386,6 +390,7 @@ function E.callErr(prefix) return { what = "false, '" .. prefix .. "...'", test 
 local cases = { total = 0, passed = 0 }
 local uiOffThreadCases -- defined with the UI cases below
 local panelCases -- story 14, defined with the UI cases below
+local buttonCases -- story 15, defined with the UI cases below
 local function case(id, desc, fn, expect)
     local r = table.pack(pcall(fn))
     local ok = table.remove(r, 1); r.n = r.n - 1
@@ -693,6 +698,70 @@ panelCases = function(P, f, okRet)
     PN.remove(pb)
 end
 
+-- Story 15: buttons with bad values (AC 7), on the game thread. Every element made here is removed again.
+buttonCases = function(P, f)
+    local U, T, PN, B = core.ui, core.ui.text, core.ui.panel, core.ui.button
+    local UI = CORE:lower() .. ".ui"
+    local BC = UI .. ".button.create: "
+    local jp = { host = "journal", corner = "top-left" }
+    local nop = function() end
+    case(P .. "button-create-none", "ui.button.create()", f(B.create), E.err(BC .. "expected a table"))
+    case(P .. "button-create-unknown", "ui.button.create{ ..., colour = 1 }", f(B.create, { id = "bb", onClick = nop, place = jp, colour = 1 }), E.err(BC .. "unknown key 'colour' (valid: enabled, id, label, onClick, place, style)"))
+    case(P .. "button-create-noid", "ui.button.create{ onClick = fn }", f(B.create, { onClick = nop, place = jp }), E.err(BC .. "id must be a string, got nil"))
+    case(P .. "button-onclick-missing", "ui.button.create{ id, label, place } [no onClick]", f(B.create, { id = "bb", label = "x", place = jp }), E.err(BC .. "onClick must be a function, got nil"))
+    case(P .. "button-onclick-str", "ui.button.create{ onClick = 'f' }", f(B.create, { id = "bb", label = "x", place = jp, onClick = "f" }), E.err(BC .. "onClick must be a function, got 'f'"))
+    case(P .. "button-onclick-num", "ui.button.create{ onClick = 1 }", f(B.create, { id = "bb", label = "x", place = jp, onClick = 1 }), E.err(BC .. "onClick must be a function, got 1"))
+    case(P .. "button-onclick-table", "ui.button.create{ onClick = {} }", f(B.create, { id = "bb", label = "x", place = jp, onClick = {} }), E.err(BC .. "onClick must be a function, got table"))
+    case(P .. "button-label-table", "ui.button.create{ label = {} }", f(B.create, { id = "bb", label = {}, place = jp, onClick = nop }), E.err(BC .. "label must be a string, a number or nil, got table"))
+    case(P .. "button-label-bool", "ui.button.create{ label = true }", f(B.create, { id = "bb", label = true, place = jp, onClick = nop }), E.err(BC .. "label must be a string, a number or nil, got boolean"))
+    case(P .. "button-label-65", "ui.button.create{ label = <65 chars> }", f(B.create, { id = "bb", label = string.rep("x", 65), place = jp, onClick = nop }), E.err(BC .. "label is 65 characters, at most 64"))
+    case(P .. "button-host-hud", "ui.button.create{ place = { host = 'hud', corner = 'top-left' } }", f(B.create, { id = "bb", label = "x", place = { host = "hud", corner = "top-left" }, onClick = nop }),
+        E.err(BC .. "buttons need a host with a cursor (journal); see input mode, story 16"))
+    case(P .. "button-host-default", "ui.button.create{ no place: the HUD }", f(B.create, { id = "bb", label = "x", onClick = nop }), E.err(BC .. "buttons need a host with a cursor (journal)"))
+    case(P .. "button-enabled-yes", "ui.button.create{ enabled = 'yes' }", f(B.create, { id = "bb", label = "x", place = jp, onClick = nop, enabled = "yes" }), E.err(BC .. "enabled must be a boolean or nil, got 'yes'"))
+    case(P .. "button-enabled-num", "ui.button.create{ enabled = 1 }", f(B.create, { id = "bb", label = "x", place = jp, onClick = nop, enabled = 1 }), E.err(BC .. "enabled must be a boolean or nil, got 1"))
+    case(P .. "button-style-pink", "ui.button.create{ style = { background = 'pink' } }", f(B.create, { id = "bb", label = "x", place = jp, onClick = nop, style = { background = "pink" } }), E.err(UI .. ".button: unknown background 'pink'"))
+    case(P .. "button-place-str", "ui.button.create{ place = 'journal' }", f(B.create, { id = "bb", label = "x", place = "journal", onClick = nop }), E.err(BC .. "place must be a table or nil, got 'journal'"))
+    local hp = PN.create{ id = "bhp", place = { absolute = { anchor = "center", x = 0, y = 220 } } }
+    case(P .. "button-in-hud-panel", "ui.button.create{ place = { panel = <panel on the HUD> } }", f(B.create, { id = "bb", label = "x", place = { panel = hp }, onClick = nop }), E.err(BC .. "buttons need a host with a cursor (journal)"))
+    PN.remove(hp)
+    local bb
+    case(P .. "button-create-ok", "ui.button.create{ id = 'bb', place = journal } [control: pending on the closed Journal]", function()
+        bb = B.create{ id = "bb", label = string.rep("y", 64), place = jp, onClick = nop }
+        return bb
+    end, E.ret("a handle { id = 'bb' }", function(r) return type(r[1]) == "table" and r[1].id == "bb" end))
+    if not bb then return end
+    case(P .. "button-isshown-closed", "ui.button.isShown(b) [control: the Journal is closed]", f(B.isShown, bb), E.ret("false", function(r) return r[1] == false end))
+    case(P .. "button-place-hud", "ui.place(b, { host = 'hud', corner = 'top-left' })", f(U.place, bb, { host = "hud", corner = "top-left" }), E.err(UI .. ".place: buttons need a host with a cursor (journal)"))
+    local jpan = PN.create{ id = "bjp", place = { host = "journal", corner = "bottom-left" } }
+    B.create{ id = "bb2", label = "z", place = { panel = jpan }, onClick = nop }
+    case(P .. "button-panel-to-hud", "ui.place(<panel holding a button>, { host = 'hud', ... })", f(U.place, jpan, { host = "hud", corner = "top-left" }),
+        E.err(UI .. ".place: panel 'bjp' holds buttons, which need a host with a cursor (journal); see input mode, story 16"))
+    PN.remove(jpan)
+    case(P .. "button-setlabel-table", "ui.button.setLabel(b, {})", f(B.setLabel, bb, {}), E.err(UI .. ".button.setLabel: label must be a string, a number or nil, got table"))
+    case(P .. "button-setlabel-65", "ui.button.setLabel(b, <65 chars>)", f(B.setLabel, bb, string.rep("z", 65)), E.err(UI .. ".button.setLabel: label is 65 characters, at most 64"))
+    case(P .. "button-setenabled-yes", "ui.button.setEnabled(b, 'yes')", f(B.setEnabled, bb, "yes"), E.err(UI .. ".button.setEnabled: enabled must be a boolean, got 'yes'"))
+    case(P .. "button-setenabled-nil", "ui.button.setEnabled(b)", f(B.setEnabled, bb), E.err(UI .. ".button.setEnabled: enabled must be a boolean, got nil"))
+    case(P .. "button-setvis-1", "ui.button.setVisible(b, 1)", f(B.setVisible, bb, 1), E.err(UI .. ".button.setVisible: visible must be a boolean, got number"))
+    local th = T.create{ id = "btx", text = "t", place = { absolute = { anchor = "center", x = 0, y = 240 } } }
+    local fns = { { "setlabel", "button.setLabel", B.setLabel, "x" }, { "setenabled", "button.setEnabled", B.setEnabled, true },
+        { "setvis", "button.setVisible", B.setVisible, true }, { "remove", "button.remove", B.remove, nil }, { "isshown", "button.isShown", B.isShown, nil } }
+    for _, d in ipairs(fns) do
+        local key, name, fn, arg = d[1], d[2], d[3], d[4]
+        local pre = UI .. "." .. name .. ": "
+        case(P .. "button-" .. key .. "-h-nil", "ui." .. name .. "(nil, ...)", f(fn, nil, arg), E.err(pre .. "expected a button handle, got nil"))
+        case(P .. "button-" .. key .. "-h-num", "ui." .. name .. "(42, ...)", f(fn, 42, arg), E.err(pre .. "expected a button handle, got 42"))
+        case(P .. "button-" .. key .. "-h-forged", "ui." .. name .. "({ id = 'bb' }, ...) [forged]", f(fn, { id = "bb" }, arg), E.err(pre .. "not a button handle"))
+        case(P .. "button-" .. key .. "-h-text", "ui." .. name .. "(<text handle>, ...)", f(fn, th, arg), E.err(pre .. "not a button handle ('btx' is a text element)"))
+    end
+    T.remove(th)
+    case(P .. "button-remove-ok", "ui.button.remove(b) [control]", f(B.remove, bb), E.none)
+    case(P .. "button-remove-again", "ui.button.remove(b) [again]", f(B.remove, bb), E.none)
+    case(P .. "button-removed-setlabel", "ui.button.setLabel(<removed>, 'x')", f(B.setLabel, bb, "x"), E.err(UI .. ".button: handle 'bb' was removed"))
+    case(P .. "button-removed-isshown", "ui.button.isShown(<removed>)", f(B.isShown, bb), E.err(UI .. ".button: handle 'bb' was removed"))
+    case(P .. "button-stats", "ui.button.stats() [control]", f(B.stats), E.ret("a table, hooked", function(r) return type(r[1]) == "table" and r[1].hooked == true and r[1].hookTries == 1 end))
+end
+
 -- UI helpers (stories 7-10): every public function with bad values, on the game thread. Elements made here are
 -- removed again at the end. Expected messages are the exact first lines the contract gives.
 local function uiCases(phase)
@@ -892,6 +961,7 @@ local function uiCases(phase)
         return fresh
     end, E.ret("a new handle", function(r) return r[1] == true end))
     panelCases(P, f, okRet)
+    buttonCases(P, f)
     case(P .. "stats", "ui.text.stats() [control]", f(T.stats), E.ret("a table with elements = 0", function(r) return type(r[1]) == "table" and r[1].elements == 0 end))
     case(P .. "hud-stats", "ui.hud.stats() [control]", f(U.hud.stats), E.ret("findAllCalls == 1", function(r) return type(r[1]) == "table" and r[1].findAllCalls == 1 end))
 end
@@ -930,6 +1000,13 @@ uiOffThreadCases = function(P, h)
     off("panel-order", "panel.order", U.panel.order, {})
     off("panel-setorder", "panel.setOrder", U.panel.setOrder, {}, {})
     off("panel-move", "panel.move", U.panel.move, {}, {}, 1)
+    -- story 15
+    off("button-create", "button.create", U.button.create, { id = "off" })
+    off("button-setlabel", "button.setLabel", U.button.setLabel, {}, "x")
+    off("button-setenabled", "button.setEnabled", U.button.setEnabled, {}, true)
+    off("button-setvis", "button.setVisible", U.button.setVisible, {}, true)
+    off("button-remove", "button.remove", U.button.remove, {})
+    off("button-isshown", "button.isShown", U.button.isShown, {})
 end
 
 local function preConnectCases()
@@ -937,12 +1014,12 @@ local function preConnectCases()
         local UI = CORE:lower() .. ".ui"
         local want = { create = "text.create", watch = "hud.watch", find = "hud.find", elements = "elements", overlaps = "debug.overlaps",
             ["pre-journal-watch"] = "journal.watch", ["pre-journal-isopen"] = "journal.isOpen",
-            ["pre-panel-create"] = "panel.create", ["pre-panel-move"] = "panel.move" }
+            ["pre-panel-create"] = "panel.create", ["pre-panel-move"] = "panel.move", ["pre-button-create"] = "button.create" }
         for _, r in ipairs(PRE_CONNECT) do
             case(r.id, r.desc, function() if not r.ok then error(r.err, 0) end return "no error" end,
                 E.err(UI .. ": " .. tostring(want[r.id] or want[r.fn]) .. " called before connect"))
         end
-        check(#PRE_CONNECT == 9, "CASES before-connect recorded=%d (expected 9)", #PRE_CONNECT)
+        check(#PRE_CONNECT == 10, "CASES before-connect recorded=%d (expected 10)", #PRE_CONNECT)
     end)
 end
 
@@ -1739,8 +1816,8 @@ end
 local JOURNAL_CLASS_PATH = "/Game/Graphics/Journal/Journal.Journal_C"
 local JEV = { list = {}, count = {} }
 local JS = { seen = {}, opens = 0, keyOpens = 0, attach = {}, steps = {} }
--- One text top-right, and a panel bottom-right holding two elements (story 13 AC 6's panel with two buttons and a
--- text). Story 14: the two are texts standing in for story 15's buttons.
+-- One text top-right, and a panel bottom-right holding two buttons (story 13 AC 6's panel with two buttons and a
+-- text; story 15). Every open clicks jb1 through the OS (story 15 AC 5: every click runs once).
 local J_IDS = { "jt", "jpanel", "jb1", "jb2" }
 local J_TOP = { "jt", "jpanel" }       -- in the map canvas
 local J_KIDS = { "jb1", "jb2" }        -- in jpanel's VBox
@@ -1939,7 +2016,7 @@ local function openMap(phase, viaKey)
         -- Story 14 AC 6: the panel's order on every open (a reorder made while open or closed shows on the next open).
         if box then
             check(boxIds(box) == JS.order, "JORDER %s the panel's children in the expected order %s (box: %s)", phase, JS.order, boxIds(box))
-            check(core.ui.panel.isShown(JS.h.jpanel) and core.ui.text.isShown(JS.h.jb1), "JPSHOWN %s the panel and its children are shown on the map", phase)
+            check(core.ui.panel.isShown(JS.h.jpanel) and core.ui.button.isShown(JS.h.jb1) and core.ui.button.isShown(JS.h.jb2), "JPSHOWN %s the panel and its buttons are shown on the map", phase)
         end
         check(core.ui.text.isShown(JS.h.jt) == true, "JSHOWN %s 'jt' isShown=true while the map is open", phase)
         local w = taggedIn(canvas, "jt")
@@ -1953,6 +2030,26 @@ local function openMap(phase, viaKey)
         JS.attach[#JS.attach + 1] = st.attachLast
         JS.steps[#JS.steps + 1] = st.attachSteps
         say("JCOST %s attach of %d elements on this open: %d us (avg %.0f, max %d over %d opens); steps: %s", phase, st.attachElements, st.attachLast, st.attachAvg, st.attachMax, st.attachOpens, stepsLine(st.attachSteps))
+    end)
+end
+
+-- Story 15 AC 5: one real click on jb1 per open, through the OS; its onClick must run exactly once.
+local function jclick(phase)
+    step(phase .. ": click", function()
+        local j = core.ui.journal.find()
+        local canvas = j and mapCanvasOf(j)
+        local pw = canvas and taggedIn(canvas, "jpanel")
+        local w = pw and taggedIn(pw.VBox, "jb1")
+        local r = w and absR(w)
+        JS.clickBefore = JS.clicks.jb1 or 0
+        if not check(r ~= nil and r.r > r.l, "JPOINT %s 'jb1' has a screen rectangle %s", phase, rsA(r)) then return end
+        local x, y = math.floor((r.l + r.r) / 2 + 0.5), math.floor((r.t + r.b) / 2 + 0.5)
+        return request(string.format("click %d %d", x, y)), 40, phase .. " click served"
+    end)
+    step(phase .. ": click settle", function() return afterMs(800), 3, "click settle" end)
+    step(phase .. ": click check", function()
+        local n = JS.clicks.jb1 or 0
+        check(n == JS.clickBefore + 1, "JCLICK %s a real click on 'jb1' ran its onClick exactly once (%d -> %d)", phase, JS.clickBefore, n)
     end)
 end
 
@@ -2028,8 +2125,10 @@ local function buildJournal()
         JS.h = {}
         JS.h.jt = core.ui.text.create{ id = "jt", text = CORE .. " journal", place = { host = "journal", corner = "top-right" } }
         JS.h.jpanel = core.ui.panel.create{ id = "jpanel", place = { host = "journal", corner = "bottom-right" } }
+        JS.clicks = {}
         for i, id in ipairs(J_KIDS) do
-            JS.h[id] = core.ui.text.create{ id = id, text = "button " .. i .. " (stand-in)", place = { panel = JS.h.jpanel } }
+            JS.h[id] = core.ui.button.create{ id = id, label = "Button " .. i, place = { panel = JS.h.jpanel },
+                onClick = function() JS.clicks[id] = (JS.clicks[id] or 0) + 1 end }
         end
         JS.order = table.concat(J_KIDS, ",")
         check(core.ui.text.isShown(JS.h.jt) == false and core.ui.journal.isOpen() == false, "JPENDING menu1 journal elements created, not shown (no Journal)")
@@ -2045,6 +2144,7 @@ local function buildJournal()
     for i = 1, OPENS do
         openMap("open" .. i, true)
         if i == 1 then step("open1: shot", function() return request("shot journal-open1"), 30, "screenshot" end) end
+        jclick("open" .. i)
         -- Story 14 AC 6: reversed while open 5 is open; kept on open 6; back while closed, shown on open 7.
         if i == 5 then
             reorderJournal("open5", { J_KIDS[2], J_KIDS[1] }, true)
@@ -2087,6 +2187,7 @@ local function buildJournal()
     end)
     step("revive: settle", function() say("NEWPAWN revive %s (was %s)", pathOf(pc():K2_GetPawn()), tostring(JS.pawnBefore)) return after(3), 5, "settle" end)
     openMap("revive-open", true)
+    jclick("revive-open")
     closeMap("revive-close", true)
     -- AC 2: a map change.
     travel("menu2", MENU_MAP, "")
@@ -2097,6 +2198,7 @@ local function buildJournal()
     step("match2: hud", function() return function() return core.ui.hud.isVisible() end, 120, "match2 HUD visible" end)
     lobbyOver("match2")
     openMap("match2-open", true)
+    jclick("match2-open")
     closeMap("match2-close", true)
     -- AC 4: the cost while the map is closed: wait for a one-minute tick window with the map closed.
     step("closed: tick window", function()
@@ -2115,12 +2217,169 @@ local function buildJournal()
         for _ in pairs(JS.seen) do distinct = distinct + 1 end
         check(distinct == JS.opens, "JNEWALL %d opens, %d distinct Journal_C instances", JS.opens, distinct)
         check(JS.keyOpens == JS.opens, "JKEYALL %d of %d opens by the real %s key press", JS.keyOpens, JS.opens, JS.key)
+        local bs = core.ui.button.stats()
+        check((JS.clicks.jb1 or 0) == JS.opens and (JS.clicks.jb2 or 0) == 0 and bs.hookTries == 1,
+            "JCLICKALL %d real clicks on 'jb1' over %d opens (a revive and a map change among them) ran its onClick %d time(s); 'jb2' %d; one hook (tries %d, clicks %d, dropped %d, debounced %d, ignored %d)",
+            JS.opens, JS.opens, JS.clicks.jb1 or 0, JS.clicks.jb2 or 0, bs.hookTries, bs.clicks, bs.dropped, bs.debounced, bs.ignored)
         core.ui.text.remove(JS.h.jt)
         core.ui.panel.remove(JS.h.jpanel) -- and its children
         core.ui.journal.unwatch(UIS.jthrow)
         core.ui.journal.unwatch(UIS.jrec)
     end)
     gcCount("end")
+end
+
+-- ---------------------------------------------------------------- ui, story 15: buttons on the Journal (unattended)
+-- At the end of the ui scenario (match2): a panel with two buttons and a text on the Journal's map page, the map opened
+-- by the real key, then real OS clicks (run.ps1 / vm-click "click x y" at each button's centre, from core's geometry
+-- functions), Enter on a focused button, a throwing onClick, a disabled button, a button of the second test dependent
+-- (<Core>SkelPeer), and two calls in a row. Each click is checked by the callback counts and the widget's own
+-- ClickCount (the Blueprint saw it too).
+local BS = { hits = {} }
+local function bcount(id) return BS.hits[id] or 0 end
+local function bhit(id) return function(h) BS.hits[id] = bcount(id) + 1; say("BHIT '%s' %d (handle %s)", id, BS.hits[id], tostring(h and h.id)) end end
+local function mapCanvasNow() local j = core.ui.journal.find() return j and mapCanvasOf(j) end
+local function inPanelOnMap(id)
+    local canvas = mapCanvasNow()
+    local pw = canvas and taggedIn(canvas, "bpanel")
+    if not pw then return nil, 0 end
+    return taggedIn(pw.VBox, id)
+end
+local function peerWidget()
+    local canvas = mapCanvasNow()
+    if not canvas then return nil end
+    local want = CORE:lower() .. ":" .. CORE .. "SkelPeer:peer"
+    for i = 0, canvas:GetChildrenCount() - 1 do
+        local c = canvas:GetChildAt(i)
+        if valid(c) and tagOfWidget(c) == want then return c end
+    end
+    return nil
+end
+local function clicksOf(w) local ok, n = pcall(function() return w.ClickCount end) return ok and tonumber(n) or -1 end
+-- A real click on a widget's centre (finder() returns it), then a pause for the hook.
+local function clickOn(phase, what, finder)
+    step(phase .. ": click", function()
+        local w = finder()
+        local r = w and absR(w)
+        if not check(r ~= nil and r.r > r.l, "BPOINT %s %s has a screen rectangle %s", phase, what, rsA(r)) then return end
+        BS.wclicks = clicksOf(w)
+        local x, y = math.floor((r.l + r.r) / 2 + 0.5), math.floor((r.t + r.b) / 2 + 0.5)
+        say("BCLICKREQ %s clicking %s at (%d,%d), rectangle %s", phase, what, x, y, rsA(r))
+        return request(string.format("click %d %d", x, y)), 40, phase .. " click served"
+    end)
+    step(phase .. ": settle", function() return afterMs(800), 3, "click settle" end)
+end
+
+local function buildButtons()
+    local B = function() return core.ui.button end
+    step("buttons: create", function()
+        BS.p = core.ui.panel.create{ id = "bpanel", place = { host = "journal", corner = "bottom-right" } }
+        BS.b1 = B().create{ id = "b1", label = "Button one", place = { panel = BS.p }, onClick = bhit("b1") }
+        BS.b2 = B().create{ id = "b2", label = "Button two", place = { panel = BS.p }, onClick = function(h)
+            BS.hits.b2 = bcount("b2") + 1
+            say("BHIT 'b2' %d (handle %s)", BS.hits.b2, tostring(h and h.id))
+            if BS.hits.b2 == 1 then error("b2 throws on its first click, on purpose") end
+        end }
+        BS.bt = core.ui.text.create{ id = "bt", text = "Nucleus buttons", place = { panel = BS.p } }
+        local st = B().stats()
+        check(st.hooked == true and st.hookTries == 1, "BHOOK match2 one click hook in this Lua state, registered at the first button.create (hooked=%s tries=%d)", tostring(st.hooked), st.hookTries)
+        check(B().isShown(BS.b1) == false, "BPENDING match2 the buttons wait for the map to open")
+    end)
+    lobbyOver("match2")
+    readMapKey()
+    step("buttons: open", function() say("BKEY pressing %s to open the map", JS.key) return request("key " .. JS.key), 30, "map key served" end)
+    step("buttons: opened", function() return function() return core.ui.journal.isOpen() end, 10, "map open" end)
+    step("buttons: settle", function() return afterMs(1500), 3, "layout" end)
+    step("buttons: on the map", function()
+        local canvas = mapCanvasNow()
+        local _, np = taggedIn(canvas, "bpanel")
+        local _, n1 = inPanelOnMap("b1"); local _, n2 = inPanelOnMap("b2"); local _, nt = inPanelOnMap("bt")
+        check(np == 1 and n1 == 1 and n2 == 1 and nt == 1 and B().isShown(BS.b1) and B().isShown(BS.b2),
+            "BMAP match2 a panel with two buttons and a text on the map page, one widget each (bpanel=%d b1=%d b2=%d bt=%d)", np, n1, n2, nt)
+        local w1 = inPanelOnMap("b1")
+        check(w1 and clsOf(w1) == BUTTON_SHORT and tagOfWidget(w1) == core.ui.text.tagOf("b1"), "BTAG match2 'b1' is a %s tagged %s", w1 and clsOf(w1) or "?", w1 and tostring(tagOfWidget(w1)) or "?")
+        local peer = peerWidget()
+        check(peer ~= nil, "BPEER match2 the second test dependent's button is on the map page (%s)", peer and pathOf(peer) or "not found")
+        return request("shot buttons-open"), 30, "screenshot"
+    end)
+    -- AC 1: a real click on each button runs its onClick exactly once
+    clickOn("click-b1", "'b1'", function() return inPanelOnMap("b1") end)
+    step("click-b1: check", function()
+        local w = inPanelOnMap("b1")
+        check(bcount("b1") == 1 and clicksOf(w) == BS.wclicks + 1, "BCLICK match2 a real mouse click on 'b1' ran its onClick exactly once (onClick %d, widget ClickCount %d -> %d)", bcount("b1"), BS.wclicks, clicksOf(w))
+    end)
+    -- AC 3: a throwing onClick logs one WARN, and the next click works
+    clickOn("click-b2", "'b2'", function() return inPanelOnMap("b2") end)
+    step("click-b2: check", function()
+        check(bcount("b2") == 1, "BCLICK match2 a real mouse click on 'b2' ran its onClick exactly once (it threw: %d)", bcount("b2"))
+    end)
+    clickOn("click-b2-again", "'b2'", function() return inPanelOnMap("b2") end)
+    step("click-b2-again: check", function()
+        local st = B().stats()
+        check(bcount("b2") == 2 and st.throws == 1, "BTHROW match2 after the throwing onClick the next click works (onClick %d, throws %d)", bcount("b2"), st.throws)
+    end)
+    -- AC 1: Enter on a focused button counts as one click
+    step("enter-b1: focus", function()
+        local w = inPanelOnMap("b1")
+        BS.before, BS.wclicks = bcount("b1"), clicksOf(w)
+        local ok, err = pcall(function() w.Btn:SetKeyboardFocus() end)
+        local okF, has = pcall(function() return w.Btn:HasKeyboardFocus() end)
+        say("BFOCUS match2 'b1' SetKeyboardFocus ok=%s hasKeyboardFocus=%s%s", tostring(ok), tostring(okF and has), ok and "" or (" " .. firstLine(err)))
+        return request("key ENTER"), 30, "Enter served"
+    end)
+    step("enter-b1: settle", function() return afterMs(800), 3, "Enter settle" end)
+    step("enter-b1: check", function()
+        local w = inPanelOnMap("b1")
+        check(bcount("b1") == BS.before + 1, "BENTER match2 Enter on the focused 'b1' counted as one click (onClick %d -> %d, widget ClickCount %d -> %d)", BS.before, bcount("b1"), BS.wclicks, clicksOf(w))
+    end)
+    -- AC 4: a disabled button runs nothing and looks disabled; enabling it restores clicks
+    step("disable-b1", function() B().setEnabled(BS.b1, false) return afterMs(700), 3, "redraw" end)
+    step("disable-b1: look", function()
+        local w = inPanelOnMap("b1")
+        local okE, en = pcall(function() return w.Btn:GetIsEnabled() end)
+        local op = w:GetRenderOpacity()
+        check(okE and en == false and math.abs(op - 0.45) < 0.01, "BDISABLED match2 'b1' looks disabled (Btn enabled=%s, opacity %.2f)", tostring(en), op)
+        BS.before = bcount("b1")
+        return request("shot buttons-disabled"), 30, "screenshot"
+    end)
+    clickOn("click-disabled", "'b1' (disabled)", function() return inPanelOnMap("b1") end)
+    step("click-disabled: check", function()
+        local w = inPanelOnMap("b1")
+        check(bcount("b1") == BS.before and clicksOf(w) == BS.wclicks, "BDISABLED match2 a real click on the disabled 'b1' ran nothing (onClick %d, widget ClickCount %d -> %d)", bcount("b1"), BS.wclicks, clicksOf(w))
+        B().setEnabled(BS.b1, true)
+    end)
+    clickOn("click-enabled", "'b1' (enabled again)", function() return inPanelOnMap("b1") end)
+    step("click-enabled: check", function()
+        local w = inPanelOnMap("b1")
+        check(bcount("b1") == BS.before + 1 and math.abs(w:GetRenderOpacity() - 1) < 0.01, "BENABLED match2 enabled again: the next click runs once (onClick %d -> %d)", BS.before, bcount("b1"))
+    end)
+    -- AC 2: a click on the other dependent's button runs only its callback (check.ps1 counts its PEERCLICK line)
+    step("peer: before", function() BS.ours = bcount("b1") + bcount("b2") end)
+    clickOn("click-peer", "the second dependent's button", peerWidget)
+    step("click-peer: check", function()
+        check(bcount("b1") + bcount("b2") == BS.ours, "BOWNER match2 a click on the second dependent's button ran none of ours (b1 %d, b2 %d)", bcount("b1"), bcount("b2"))
+    end)
+    -- Two calls in a row (no OS click can be that quick on demand): the 250 ms debounce lets one through
+    step("double", function()
+        local w = inPanelOnMap("b1")
+        local st0 = B().stats()
+        BS.before = bcount("b1")
+        local fn = CORE .. "_OnClicked"
+        local ok1 = pcall(function() w[fn](w) end)
+        local ok2 = pcall(function() w[fn](w) end)
+        local st1 = B().stats()
+        check(ok1 and ok2 and bcount("b1") - BS.before <= 1 and (bcount("b1") - BS.before == 0 or st1.debounced == st0.debounced + 1),
+            "BDOUBLE match2 two %s calls in a row ran onClick %d time(s) (debounced %d -> %d)", fn, bcount("b1") - BS.before, st0.debounced, st1.debounced)
+    end)
+    step("buttons: close", function() return request("key " .. JS.key), 30, "map key served" end)
+    step("buttons: closed", function() return function() return not core.ui.journal.isOpen() end, 10, "map closed" end)
+    step("buttons: clean", function()
+        check(B().isShown(BS.b1) == false, "BCLOSED match2 the map closed: 'b1' isShown=false")
+        local st = B().stats()
+        say("BSTATS clicks=%d dropped=%d debounced=%d ignored=%d throws=%d hookTries=%d", st.clicks, st.dropped, st.debounced, st.ignored, st.throws, st.hookTries)
+        core.ui.panel.remove(BS.p)
+        check(core.ui.text.stats().elements == 0 and st.hookTries == 1, "BCLEAN match2 every element removed; one hook all along")
+    end)
 end
 
 -- ---------------------------------------------------------------- soak (story 7 AC 7, unattended)
@@ -2391,7 +2650,7 @@ client.connect{
         elseif SCENARIO == "ui" or SCENARIO == "soak" then
             core.log.debugEnabled = true -- the helpers' DEBUG lines (tick summaries, freed handles) are part of the check
             profile(true)
-            if SCENARIO == "ui" then buildUi() else buildSoak() end
+            if SCENARIO == "ui" then buildUi() buildButtons() else buildSoak() end
         else buildSkeleton() end
         -- The runner: a game-thread loop registered here on the game thread, cancelled once finished. Never
         -- LoopAsync + ExecuteInGameThread (core's ui/hud.lua: the pinned UE4SS can lose such callbacks).

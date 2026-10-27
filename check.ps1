@@ -35,6 +35,7 @@ $name = $manifest.name
 $version = $manifest.version
 $t = "${name}SkelTest"
 $N = [regex]::Escape($name); $T = [regex]::Escape($t); $Ver = [regex]::Escape($version)
+$Peer = [regex]::Escape("${name}SkelPeer")   # story 15's second test dependent (scenario ui)
 if (-not $Log) { $Log = Join-Path (Resolve-Path $Instance) 'NuclearNightmare\Binaries\Win64\ue4ss\UE4SS.log' }
 if (-not (Test-Path $Log)) { Write-Host "FAIL: no log at $Log"; exit 1 }
 
@@ -157,15 +158,28 @@ foreach ($p in 'menu1', 'match1') {
                     'ui-panel-order-unchanged', 'ui-panel-move-ok', 'ui-panel-setorder-ok', 'ui-panel-order-arg', 'ui-panel-remove-ok',
                     'ui-panel-remove-again', 'ui-panel-removed-child', 'ui-panel-removed-order', 'ui-panel-removed-intent',
                     'off-ui-panel-create', 'off-ui-panel-setstyle', 'off-ui-panel-setvis', 'off-ui-panel-remove', 'off-ui-panel-isshown',
-                    'off-ui-panel-order', 'off-ui-panel-setorder', 'off-ui-panel-move') {
+                    'off-ui-panel-order', 'off-ui-panel-setorder', 'off-ui-panel-move',
+                    # story 15: buttons (AC 7) and the button functions off the game thread
+                    'ui-button-create-none', 'ui-button-create-unknown', 'ui-button-create-noid', 'ui-button-onclick-missing',
+                    'ui-button-onclick-str', 'ui-button-onclick-num', 'ui-button-onclick-table', 'ui-button-label-table',
+                    'ui-button-label-bool', 'ui-button-label-65', 'ui-button-host-hud', 'ui-button-host-default', 'ui-button-enabled-yes',
+                    'ui-button-enabled-num', 'ui-button-style-pink', 'ui-button-place-str', 'ui-button-in-hud-panel', 'ui-button-create-ok',
+                    'ui-button-isshown-closed', 'ui-button-place-hud', 'ui-button-panel-to-hud', 'ui-button-setlabel-table',
+                    'ui-button-setlabel-65', 'ui-button-setenabled-yes', 'ui-button-setenabled-nil', 'ui-button-setvis-1',
+                    'ui-button-remove-ok', 'ui-button-remove-again', 'ui-button-removed-setlabel', 'ui-button-removed-isshown', 'ui-button-stats',
+                    'off-ui-button-create', 'off-ui-button-setlabel', 'off-ui-button-setenabled', 'off-ui-button-setvis',
+                    'off-ui-button-remove', 'off-ui-button-isshown') {
         $badInput += "\[$T\] OK CASE $p\.$id "
     }
     foreach ($fn in 'setstyle', 'setvis', 'remove', 'isshown', 'order', 'setorder', 'move') {
         foreach ($h in 'nil', 'num', 'forged', 'text') { $badInput += "\[$T\] OK CASE $p\.ui-panel-$fn-h-$h " }
     }
+    foreach ($fn in 'setlabel', 'setenabled', 'setvis', 'remove', 'isshown') {
+        foreach ($h in 'nil', 'num', 'forged', 'text') { $badInput += "\[$T\] OK CASE $p\.ui-button-$fn-h-$h " }
+    }
 }
-foreach ($id in 'pre-create', 'pre-watch', 'pre-find', 'pre-elements', 'pre-overlaps', 'pre-journal-watch', 'pre-journal-isopen', 'pre-panel-create', 'pre-panel-move') { $badInput += "\[$T\] OK CASE $id " }
-$badInput += "\[$T\] OK CASES before-connect recorded=9"
+foreach ($id in 'pre-create', 'pre-watch', 'pre-find', 'pre-elements', 'pre-overlaps', 'pre-journal-watch', 'pre-journal-isopen', 'pre-panel-create', 'pre-panel-move', 'pre-button-create') { $badInput += "\[$T\] OK CASE $id " }
+$badInput += "\[$T\] OK CASES before-connect recorded=10"
 # UI helpers in game (stories 7-10): what run.ps1 -Scenario ui proves unattended. END result=PASS already means every
 # check the test made passed; these name the ones the stories' acceptance criteria rest on, plus core's own lines.
 $ui = $started + @(
@@ -184,7 +198,7 @@ $ui = $started + @(
     "#1|\[$T\] WARN text 'long': text is longer than 256 characters"
     # Story 12: with debug on, the automatic overlap check WARNs per overlapping widget (a diagnostic, allowed here); a
     # check or a widget that fails ("ui overlap check failed", "ui overlap: ... could not be checked") is not.
-    "!\[$T\] WARN (?!hud watcher \d+: |text 'long': |ui overlap '|$slowWarnOk)"
+    "!\[$T\] WARN (?!hud watcher \d+: |text 'long': |ui overlap '|button 'b2' onClick: |$slowWarnOk)"
     "\[$T\] OK UIOVERLAP match1 'xcross' \(near the crosshair, offset x=-24\) reports the crosshair "
     "\[$T\] WARN ui overlap 'xcross': \S+[.:]Crosshair \(Image\) "
     "\[$T\] OK UIOVERLAP match1 automatic checks were scheduled"
@@ -249,6 +263,30 @@ $ui = $started + @(
     "\[$T\] OK UIPREBUILD match1 "
     "\[$T\] OK UIPMAP match2 "
     "\[$T\] OK UIPREMOVE match2 "
+    # Story 15 (end of match2, on the Journal): real OS clicks, Enter, a throwing onClick, a disabled button, another
+    # dependent's button (SkelPeer: its callback runs, exactly once; ours don't), two calls in a row.
+    "\[$Peer\] CONNECT ok $N $Ver "
+    "\[$Peer\] PEER ready: button 'peer' created"
+    "#1|\[$Peer\] PEERCLICK \d+ 'peer'"
+    "\[$Peer\] PEERCLICK 1 'peer'"
+    "!\[$Peer\] (ERROR|WARN (?!$slowWarnOk))"
+    "\[$T\] OK BHOOK match2 "
+    "\[$T\] OK BPENDING match2 "
+    "\[$T\] OK BMAP match2 "
+    "\[$T\] OK BTAG match2 "
+    "\[$T\] OK BPEER match2 "
+    "\[$T\] OK BCLICK match2 a real mouse click on 'b1' ran its onClick exactly once"
+    "\[$T\] OK BCLICK match2 a real mouse click on 'b2' ran its onClick exactly once"
+    "#1|\[$T\] WARN button 'b2' onClick: .*b2 throws on its first click"
+    "\[$T\] OK BTHROW match2 "
+    "\[$T\] OK BENTER match2 "
+    "\[$T\] OK BDISABLED match2 'b1' looks disabled"
+    "\[$T\] OK BDISABLED match2 a real click on the disabled 'b1' ran nothing"
+    "\[$T\] OK BENABLED match2 "
+    "\[$T\] OK BOWNER match2 "
+    "\[$T\] OK BDOUBLE match2 "
+    "\[$T\] OK BCLOSED match2 "
+    "\[$T\] OK BCLEAN match2 "
 )
 # Story 13 unattended (run.ps1 -Scenario journal): the Journal's map page as a host, opened and closed with the real
 # map key twelve times (ten in a row, after a revive, after a map change). END result=PASS already means every check
@@ -270,6 +308,9 @@ $journal = $started + @(
     "\[$T\] OK JORDER open6 the panel's children in the expected order jb2,jb1"
     "\[$T\] OK JORDER open7 the panel's children in the expected order jb1,jb2"
     "#12|\[$T\] OK JPSHOWN "
+    # Story 15 AC 5: one real click on 'jb1' per open (ten in a row, after a revive, after a map change), each once.
+    "#12|\[$T\] OK JCLICK \S+ a real click on 'jb1' ran its onClick exactly once"
+    "\[$T\] OK JCLICKALL 12 real clicks on 'jb1' over 12 opens"
     "\[$T\] JSTEPS 10 opens, average per step: canvas \d+; "
     "#12|\[$T\] OK JCORNER "
     "#12|\[$T\] OK JCLOSED "

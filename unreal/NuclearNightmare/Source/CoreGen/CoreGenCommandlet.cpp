@@ -6,6 +6,8 @@
 #include "Blueprint/WidgetBlueprintGeneratedClass.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
+#include "Components/Button.h"
+#include "Components/ButtonSlot.h"
 #include "Components/BorderSlot.h"
 #include "Components/HorizontalBox.h"
 #include "Components/Overlay.h"
@@ -18,6 +20,7 @@
 #include "Engine/BlueprintGeneratedClass.h"
 #include "GameFramework/Actor.h"
 #include "K2Node_CallFunction.h"
+#include "K2Node_ComponentBoundEvent.h"
 #include "K2Node_FunctionEntry.h"
 #include "K2Node_FunctionResult.h"
 #include "K2Node_MakeStruct.h"
@@ -59,6 +62,8 @@ namespace
 	}
 	FEdGraphPinType Vec2T() { return PinType(UEdGraphSchema_K2::PC_Struct, TBaseStructure<FVector2D>::Get()); }
 	FEdGraphPinType ObjT(UClass* C) { return PinType(UEdGraphSchema_K2::PC_Object, C); }
+	FEdGraphPinType BoolT() { return PinType(UEdGraphSchema_K2::PC_Boolean); }
+	FEdGraphPinType IntT() { return PinType(UEdGraphSchema_K2::PC_Int); }
 
 	using FParams = TArray<TPair<FName, FEdGraphPinType>>;
 
@@ -73,6 +78,17 @@ namespace
 		FGraph(UBlueprint* InBP, UEdGraph* InG) : BP(InBP), G(InG) {}
 
 		void Place(UEdGraphNode* N) { N->NodePosX = X; N->NodePosY = 0; X += 320; }
+
+		/** A call to a function of the Blueprint itself (one added with AddFunction). */
+		UK2Node_CallFunction* CallSelf(FName Fn)
+		{
+			FGraphNodeCreator<UK2Node_CallFunction> C(*G);
+			UK2Node_CallFunction* N = C.CreateNode(false);
+			N->FunctionReference.SetSelfMember(Fn);
+			Place(N);
+			C.Finalize();
+			return N;
+		}
 
 		UK2Node_CallFunction* Call(UClass* Owner, FName Fn)
 		{
@@ -463,6 +479,153 @@ namespace
 		return WBP;
 	}
 
+	/**
+	 * WBP_<Core>Button (story 15): Button "Btn" -> TextBlock "Label" (white, drop shadow, size 18, centred). Functions:
+	 *   SetLabel(NewLabel: String)          Label.SetText(NewLabel)
+	 *   SetEnabledState(Enabled: Bool)      Btn.SetIsEnabled(Enabled) (a disabled button never fires OnClicked)
+	 *   SetColors(NR, NG, NB, NA, HR, HG, HB, HA, PR, PG, PB, PA, Padding: Float)
+	 *                                       Btn.SetStyle: a solid brush per state (normal and disabled N, hovered H,
+	 *                                       pressed P) and the same padding all round in both padding slots
+	 *   SetTag(NewTag: String)              CoreTag = NewTag
+	 *   <Core>_OnClicked()                  ClickCount += 1. The button's OnClicked calls it and nothing else; each
+	 *                                       dependent's Lua post-hooks it by full path (bp-spike's NNSpike_OnClicked)
+	 * Lua draws it disabled at the theme's opacity (SetRenderOpacity on the widget).
+	 */
+	UWidgetBlueprint* BuildButton(const FString& Dir, const FString& Core)
+	{
+		UWidgetBlueprint* WBP = CastChecked<UWidgetBlueprint>(NewBlueprint(Dir / FString::Printf(TEXT("WBP_%sButton"), *Core),
+			UUserWidget::StaticClass(), UWidgetBlueprint::StaticClass(), UWidgetBlueprintGeneratedClass::StaticClass()));
+		const FString ClickFn = Core + TEXT("_OnClicked");
+		CheckNames({TEXT("SetLabel"), TEXT("SetEnabledState"), TEXT("SetColors"), TEXT("SetTag"), *ClickFn});
+
+		UWidgetTree* T = WBP->WidgetTree;
+		UButton* Btn = T->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn"));
+		Btn->bIsVariable = true;
+		T->RootWidget = Btn;
+		UTextBlock* Label = T->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Label"));
+		Label->SetText(FText::GetEmpty());
+		Label->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		Label->SetShadowOffset(FVector2D(1.f, 1.f));
+		Label->SetShadowColorAndOpacity(FLinearColor(0.f, 0.f, 0.f, 0.85f));
+		FSlateFontInfo Font = Label->GetFont();
+		Font.Size = 18;
+		Label->SetFont(Font);
+		Label->SetJustification(ETextJustify::Center);
+		Label->SetVisibility(ESlateVisibility::HitTestInvisible);
+		Label->bIsVariable = true;
+		UButtonSlot* LabelSlot = CastChecked<UButtonSlot>(Btn->AddChild(Label));
+		LabelSlot->SetPadding(FMargin(0.f));
+		LabelSlot->SetHorizontalAlignment(HAlign_Center);
+		LabelSlot->SetVerticalAlignment(VAlign_Center);
+		WBP->OnVariableAdded(TEXT("Btn"));
+		WBP->OnVariableAdded(TEXT("Label"));
+		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("ClickCount"), IntT(), TEXT("0"));
+
+		// The functions need the compiled widget variables, so compile first.
+		FFunc SetLabel = AddFunction(WBP, TEXT("SetLabel"), {{TEXT("NewLabel"), StrT()}}, {});
+		FFunc SetEnabled = AddFunction(WBP, TEXT("SetEnabledState"), {{TEXT("Enabled"), BoolT()}}, {});
+		FParams ColorsIn;
+		for (const TCHAR* State : {TEXT("N"), TEXT("H"), TEXT("P")})
+		{
+			for (const TCHAR* Ch : {TEXT("R"), TEXT("G"), TEXT("B"), TEXT("A")})
+			{
+				ColorsIn.Add({FName(FString(State) + Ch), RealT()});
+			}
+		}
+		ColorsIn.Add({TEXT("Padding"), RealT()});
+		FFunc SetColors = AddFunction(WBP, TEXT("SetColors"), ColorsIn, {});
+		FFunc SetTag = AddTag(WBP);
+		FFunc OnClicked = AddFunction(WBP, FName(ClickFn), {}, {});
+		if (!Compile(WBP)) return nullptr;
+		FillTag(WBP, SetTag);
+		{
+			FGraph G(WBP, SetLabel.G);
+			UK2Node_VariableGet* GetLabel = G.Get(TEXT("Label"));
+			UK2Node_CallFunction* ToText = G.Call(UKismetTextLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetTextLibrary, Conv_StringToText));
+			G.Link(SetLabel.Entry, TEXT("NewLabel"), ToText, TEXT("InString"));
+			UK2Node_CallFunction* Set = G.Call(UTextBlock::StaticClass(), GET_FUNCTION_NAME_CHECKED(UTextBlock, SetText));
+			G.Link(GetLabel, TEXT("Label"), Set, PN_Self);
+			G.Link(ToText, PN_Ret, Set, TEXT("InText"));
+			G.Chain({SetLabel.Entry, Set});
+		}
+		{
+			FGraph G(WBP, SetEnabled.G);
+			UK2Node_VariableGet* GetBtn = G.Get(TEXT("Btn"));
+			UK2Node_CallFunction* Set = G.Call(UWidget::StaticClass(), GET_FUNCTION_NAME_CHECKED(UWidget, SetIsEnabled));
+			G.Link(GetBtn, TEXT("Btn"), Set, PN_Self);
+			G.Link(SetEnabled.Entry, TEXT("Enabled"), Set, TEXT("bInIsEnabled"));
+			G.Chain({SetEnabled.Entry, Set});
+		}
+		{
+			// SetColors: Btn.SetStyle(Make ButtonStyle(Normal/Disabled = brush N, Hovered = brush H, Pressed = brush P,
+			// NormalPadding = PressedPadding = Margin(Padding))), each brush Make SlateBrush(TintColor = Make SlateColor(
+			// SpecifiedColor = MakeColor(r, g, b, a))): a solid box of that colour (a brush with no image draws one).
+			FGraph G(WBP, SetColors.G);
+			auto Brush = [&](const TCHAR* State) -> UEdGraphPin*
+			{
+				UK2Node_CallFunction* Make = G.Call(UKismetMathLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, MakeColor));
+				for (const TCHAR* Ch : {TEXT("R"), TEXT("G"), TEXT("B"), TEXT("A")})
+				{
+					G.Link(SetColors.Entry, FName(FString(State) + Ch), Make, FName(Ch));
+				}
+				UK2Node_MakeStruct* Color = G.MakeStruct(FSlateColor::StaticStruct());
+				G.Link(Make, PN_Ret, Color, FName(TEXT("SpecifiedColor")));
+				UK2Node_MakeStruct* B = G.MakeStruct(FSlateBrush::StaticStruct());
+				G.Link(G.OnlyOutput(Color), G.Pin(B, FName(TEXT("TintColor"))));
+				return G.OnlyOutput(B);
+			};
+			UK2Node_MakeStruct* Style = G.MakeStruct(FButtonStyle::StaticStruct());
+			UEdGraphPin* Normal = Brush(TEXT("N"));
+			G.Link(Normal, G.Pin(Style, GET_MEMBER_NAME_CHECKED(FButtonStyle, Normal)));
+			G.Link(Normal, G.Pin(Style, GET_MEMBER_NAME_CHECKED(FButtonStyle, Disabled)));
+			G.Link(Brush(TEXT("H")), G.Pin(Style, GET_MEMBER_NAME_CHECKED(FButtonStyle, Hovered)));
+			G.Link(Brush(TEXT("P")), G.Pin(Style, GET_MEMBER_NAME_CHECKED(FButtonStyle, Pressed)));
+			UK2Node_MakeStruct* Margin = G.MakeStruct(FMargin::StaticStruct());
+			for (const FName Side : {GET_MEMBER_NAME_CHECKED(FMargin, Left), GET_MEMBER_NAME_CHECKED(FMargin, Top),
+			                         GET_MEMBER_NAME_CHECKED(FMargin, Right), GET_MEMBER_NAME_CHECKED(FMargin, Bottom)})
+			{
+				G.Link(SetColors.Entry, TEXT("Padding"), Margin, Side);
+			}
+			G.Link(G.OnlyOutput(Margin), G.Pin(Style, GET_MEMBER_NAME_CHECKED(FButtonStyle, NormalPadding)));
+			G.Link(G.OnlyOutput(Margin), G.Pin(Style, GET_MEMBER_NAME_CHECKED(FButtonStyle, PressedPadding)));
+			UK2Node_VariableGet* GetBtn = G.Get(TEXT("Btn"));
+			UK2Node_CallFunction* Set = G.Call(UButton::StaticClass(), GET_FUNCTION_NAME_CHECKED(UButton, SetStyle));
+			G.Link(GetBtn, TEXT("Btn"), Set, PN_Self);
+			G.Link(G.OnlyOutput(Style), G.Pin(Set, TEXT("InStyle")));
+			G.Chain({SetColors.Entry, Set});
+		}
+		{
+			// <Core>_OnClicked(): ClickCount = ClickCount + 1.
+			FGraph G(WBP, OnClicked.G);
+			UK2Node_VariableGet* GetCount = G.Get(TEXT("ClickCount"));
+			UK2Node_CallFunction* Add = G.Call(UKismetMathLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, Add_IntInt));
+			G.Link(GetCount, TEXT("ClickCount"), Add, TEXT("A"));
+			G.Default(Add, TEXT("B"), TEXT("1"));
+			UK2Node_VariableSet* SetCount = G.Set(TEXT("ClickCount"));
+			G.Link(Add, PN_Ret, SetCount, TEXT("ClickCount"));
+			G.Chain({OnClicked.Entry, SetCount});
+		}
+		{
+			// Event graph: Btn.OnClicked -> <Core>_OnClicked(), nothing else.
+			UEdGraph* EG = FBlueprintEditorUtils::FindEventGraph(WBP);
+			ClearGraph(WBP, EG);
+			FGraph G(WBP, EG);
+			FObjectProperty* BtnProp = FindFProperty<FObjectProperty>(WBP->SkeletonGeneratedClass, TEXT("Btn"));
+			FMulticastDelegateProperty* Delegate = FindFProperty<FMulticastDelegateProperty>(UButton::StaticClass(), TEXT("OnClicked"));
+			check(BtnProp && Delegate);
+			FGraphNodeCreator<UK2Node_ComponentBoundEvent> C(*EG);
+			UK2Node_ComponentBoundEvent* Bound = C.CreateNode(false);
+			Bound->InitializeComponentBoundEventParams(BtnProp, Delegate);
+			G.Place(Bound);
+			C.Finalize();
+			UK2Node_CallFunction* Call = G.CallSelf(FName(ClickFn));
+			G.Chain({Bound, Call});
+		}
+
+		if (!Compile(WBP) || !Save(WBP)) return nullptr;
+		return WBP;
+	}
+
 	/** <Core>_Call(Request) -> ReturnValue: "bp-default:" + Request. Core's Lua RegisterHooks it and replaces the result. */
 	void AddChannel(UBlueprint* BP, const FString& Core)
 	{
@@ -557,6 +720,7 @@ int32 UCoreGenCommandlet::Main(const FString& Params)
 	const FString Dir = TEXT("/Game/Mods/") + Core;
 	if (!BuildText(Dir, Core)) return 1;
 	if (!BuildPanel(Dir, Core)) return 1;
+	if (!BuildButton(Dir, Core)) return 1;
 	if (!BuildActor(Dir, Core)) return 1;
 	UE_LOG(LogCoreGen, Display, TEXT("CoreGen: all assets for %s generated."), *Core);
 	return 0;
