@@ -25,6 +25,7 @@
 local BASE = (...):gsub("%.ui%.debug$", "")
 local C = require(BASE .. ".ui.common")
 local H = require(BASE .. ".ui.hud")
+local J = require(BASE .. ".ui.journal")
 
 local D = {}
 D.CAP = 2000                   -- widgets visited per check
@@ -123,18 +124,20 @@ local function topLevel(world, uwClass, hudAddr, add)
 end
 
 -- The check for one widget w on the live HUD hud. Returns hits, info or nil, reason. Raises only on a broken engine
--- call outside the per-widget walk (callers pcall).
-function D._check(hud, w)
+-- call outside the per-widget walk (callers pcall). journal: the open Journal instead of a HUD (story 13); then only
+-- the Journal is walked (it covers the screen, so the HUD and other top-level widgets under it don't count), and the
+-- screen is the Journal's own rectangle.
+function D._check(hud, w, journal)
     C.stats.overlapChecks = (C.stats.overlapChecks or 0) + 1
     local cdo = C.found(CDO)
     if not cdo then return nil, "core's ModActor is not loaded" end
-    local canvas = hud.OwningCanvas
-    if not C.valid(canvas) then return nil, "the HUD has no OwningCanvas" end
+    local canvas = journal or hud.OwningCanvas
+    if not C.valid(canvas) then return nil, journal and "the Journal is gone" or "the HUD has no OwningCanvas" end
     local mine = absRect(cdo, w)
     if not D.hasArea(mine) then return nil, "not painted yet (no on-screen geometry)" end
     local screen = absRect(cdo, canvas)
     local sw, sh = screen.r - screen.l, screen.b - screen.t
-    if sw <= 0 or sh <= 0 then return nil, "not painted yet (the HUD canvas has no on-screen geometry)" end
+    if sw <= 0 or sh <= 0 then return nil, journal and "not painted yet (the Journal has no on-screen geometry)" or "not painted yet (the HUD canvas has no on-screen geometry)" end
 
     local classes = {}
     for _, n in ipairs(D.DRAWN) do
@@ -146,7 +149,7 @@ function D._check(hud, w)
 
     local roots = { canvas }
     local tops, via = 0, "none"
-    if UW then
+    if UW and not journal then
         local okT, n, how = pcall(topLevel, hud:GetWorld(), UW, hud:GetAddress(), function(x) roots[#roots + 1] = x end)
         if okT then tops, via = n, how end
     end
@@ -205,6 +208,16 @@ local function checkElement(el)
     if not el.visible then return nil, "the element is hidden (setVisible false)" end
     if el.nearAbsent then return nil, "the element is collapsed (its near target is not drawn)" end
     local w = el.ref and C.deref(el.ref)
+    if el.place.host == "journal" then
+        if not w then return nil, "the element is not attached (the Journal is closed)" end
+        local j = J._poll()
+        if not j then return nil, "the Journal is not open" end
+        if not J._mapPageActive(j) then return nil, "the Journal is not on its map page" end
+        local canvas = J._canvasOf(j)
+        local okP, p = pcall(function() return w:GetParent() end)
+        if not (okP and C.valid(p) and canvas and p:GetAddress() == canvas:GetAddress()) then return nil, "the element is not in the open Journal's map page" end
+        return D._check(nil, w, j)
+    end
     if not w then return nil, "the element is not attached to a HUD" end
     local hud, _, vis = H._poll()
     if not hud then return nil, "no live HUD" end
@@ -270,8 +283,10 @@ local function onTick()
 end
 
 -- Schedules the automatic check for one element (text.lua, on attach and re-place). Does nothing with debug off.
+-- HUD elements only: a Journal is open for seconds and is a new one each time, so its elements are checked on demand
+-- (overlaps(handle)) and never automatically.
 function D.schedule(el, why)
-    if not C.debugOn() or el == nil or el.removed then return end
+    if not C.debugOn() or el == nil or el.removed or el.place.host ~= "hud" then return end
     if not ticking then
         ticking = true
         H._ticker(function() local ok, err = pcall(onTick) if not ok then C.warnOnce("overlap tick", "ui overlap tick failed: %s", tostring(err):match("^[^\n]*")) end end)

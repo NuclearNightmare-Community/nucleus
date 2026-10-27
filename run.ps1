@@ -4,7 +4,8 @@
 .DESCRIPTION
   Launches only through the workspace's tools/launch.ps1 (which passes -userdir). Stops when the test dependent logs
   its END line, the game exits (crash), or -TimeoutSec runs out (hang); then closes the game, force-killing it
-  (and any crash reporter) after 15 s. The test dependent writes "<seq> key ENTER" to its Scripts/request.txt for
+  (and any crash reporter) after 15 s. The test dependent writes "<seq> key ENTER" (or "<seq> key <A-Z>", the journal
+  scenario's map key) to its Scripts/request.txt for
   touchdown; this script posts the key to the game window's message queue (PostMessage WM_KEYDOWN/WM_KEYUP; no
   foreground change and no global input, so it works behind a dialog and never types into another program), then
   writes <seq> to done.txt.
@@ -22,13 +23,13 @@
 #>
 param(
     [Parameter(Mandatory)] [string] $Instance,
-    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'soak')]
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'soak')]
     [string] $Scenario = 'skeleton',
-    [int] $TimeoutSec = 0, # 0: 420 s, 900 s for ui (it travels four times and waits for layout), 1000 s for soak (10 min idle); x1.5 in the VM
+    [int] $TimeoutSec = 0, # 0: 420 s, 900 s for ui (it travels four times and waits for layout), 1200 s for journal (24 key presses, a revive, a map change), 1000 s for soak (10 min idle); x1.5 in the VM
     [ValidateSet('host', 'vm')] [string] $Target = 'host'
 )
 $ErrorActionPreference = 'Stop'
-$hostTimeout = switch ($Scenario) { 'ui' { 900 } 'soak' { 1000 } default { 420 } }
+$hostTimeout = switch ($Scenario) { 'ui' { 900 } 'journal' { 1200 } 'soak' { 1000 } default { 420 } }
 if ($TimeoutSec -le 0 -and $Target -eq 'host') { $TimeoutSec = $hostTimeout }
 $here     = $PSScriptRoot
 $name     = (Get-Content (Join-Path $here 'mod.json') -Raw | ConvertFrom-Json).name
@@ -72,17 +73,27 @@ function Stop-Game {
     while ((Get-OurGame) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
 }
 function Invoke-Request([string] $cmd) {
-    if ($cmd -eq 'key ENTER') {
-        # Posted to the game window's own message queue: no foreground change, no global keystroke, so it reaches the
-        # game even behind another window or a system dialog, and can never type into another program.
-        $p = Get-OurGame
-        $h = if ($p) { $p.MainWindowHandle } else { [IntPtr]::Zero }
-        if ($h -eq [IntPtr]::Zero) { Write-Host '  key skipped: no game window'; return }
-        $down = [CoreRun.Win]::PostMessage($h, 0x0100, [IntPtr]0x0D, [IntPtr]0x001C0001)            # WM_KEYDOWN, VK_RETURN, scan 0x1C
-        Start-Sleep -Milliseconds 80
-        $up = [CoreRun.Win]::PostMessage($h, 0x0101, [IntPtr]0x0D, [IntPtr]([int64]0xC01C0001))   # WM_KEYUP
-        Write-Host ("  posted ENTER to the game window (down={0} up={1})" -f $down, $up)
-    } else { Write-Host "  unknown request: $cmd" }
+    # 'key ENTER' (touchdown) and 'key <A-Z>' (the journal scenario's map key); anything else is ignored.
+    $vk, $scan, $label = $null, $null, $null
+    if ($cmd -ceq 'key ENTER') { $vk, $scan, $label = 0x0D, 0x1C, 'ENTER' }
+    elseif ($cmd -cmatch '^key ([A-Z])$') {
+        $letter = $Matches[1]
+        # Set-1 scan codes of a US layout; the virtual key of a letter is its ASCII code.
+        $scans = @{ Q = 0x10; W = 0x11; E = 0x12; R = 0x13; T = 0x14; Y = 0x15; U = 0x16; I = 0x17; O = 0x18; P = 0x19
+            A = 0x1E; S = 0x1F; D = 0x20; F = 0x21; G = 0x22; H = 0x23; J = 0x24; K = 0x25; L = 0x26
+            Z = 0x2C; X = 0x2D; C = 0x2E; V = 0x2F; B = 0x30; N = 0x31; M = 0x32 }
+        $vk, $scan, $label = [int][char]$letter, $scans[$letter], $letter
+    }
+    if ($null -eq $vk) { Write-Host "  unknown request: $cmd"; return }
+    # Posted to the game window's own message queue: no foreground change, no global keystroke, so it reaches the
+    # game even behind another window or a system dialog, and can never type into another program.
+    $p = Get-OurGame
+    $h = if ($p) { $p.MainWindowHandle } else { [IntPtr]::Zero }
+    if ($h -eq [IntPtr]::Zero) { Write-Host '  key skipped: no game window'; return }
+    $down = [CoreRun.Win]::PostMessage($h, 0x0100, [IntPtr]$vk, [IntPtr](1 -bor ($scan -shl 16)))                         # WM_KEYDOWN
+    Start-Sleep -Milliseconds 80
+    $up = [CoreRun.Win]::PostMessage($h, 0x0101, [IntPtr]$vk, [IntPtr]([int64]0xC0000001 -bor ([int64]$scan -shl 16)))    # WM_KEYUP
+    Write-Host ("  posted {0} to the game window (down={1} up={2})" -f $label, $down, $up)
 }
 
 if (Get-Process -Name 'NuclearNightmare*' -ErrorAction SilentlyContinue) { throw 'Nuclear Nightmare is already running (a dev copy or the real game); not launching.' }

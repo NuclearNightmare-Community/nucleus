@@ -8,7 +8,7 @@
   Refuses unless the installed UE4SS.dll is byte-identical to the pinned zip's, and BPModLoaderMod is present.
   -Test also installs the walking-skeleton test dependent (test/SkelTest, installed as Mods/<name>SkelTest) above Keybinds.
   -Scenario breaks one part on purpose: skeleton (all parts), no-native (no dlls/main.dll), no-pak (no LogicMods pak);
-  bad-input, ui, soak and manual install all parts like skeleton. The scenario goes to the test dependent's Scripts/scenario.txt.
+  bad-input, ui, journal, soak and manual install all parts like skeleton. The scenario goes to the test dependent's Scripts/scenario.txt.
   manual is for hand testing: the test dependent never travels or presses keys, and keeps a text widget in the live
   HUD's top-right corner (README.md, "Hand testing").
   -Staged: $Instance is the host-side staging folder of a VM run (run.ps1 -Target vm, tools/vm/vm-sp.ps1), not a game
@@ -22,7 +22,7 @@
 param(
     [Parameter(Mandatory)] [string] $Instance,
     [switch] $Test,
-    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'soak', 'manual')]
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'soak', 'manual')]
     [string] $Scenario = 'skeleton',
     [switch] $Remove,
     [switch] $Staged

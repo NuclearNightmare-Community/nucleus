@@ -26,7 +26,7 @@
 local scriptDir = debug.getinfo(1, "S").source:gsub("^@", ""):match("^(.*)[/\\]")
 local ME = scriptDir:match("([^/\\]+)[/\\][Ss]cripts$")
 local CORE = ME:match("^(.-)SkelTest$") -- the one place the core's name comes from: this folder's name
-local NEED = "0.2.0"
+local NEED = "0.2.0" -- story 13 (core.ui.journal) lands in 0.3.0, still unreleased: the version stays 0.2.0 until stories 13-15 are in
 
 local function say(fmt, ...) print("[" .. ME .. "] " .. string.format(fmt, ...) .. "\n") end
 
@@ -79,6 +79,8 @@ if SCENARIO == "bad-input" then
     try("pre-find", "ui.hud.find() [before connect]", "hud", "find")
     try("pre-elements", "ui.elements() [before connect]", "place", "elements")
     try("pre-overlaps", "ui.debug.overlaps({}) [before connect]", "debug", "overlaps", {})
+    try("pre-journal-watch", "ui.journal.watch(fn) [before connect]", "journal", "watch", function() end)
+    try("pre-journal-isopen", "ui.journal.isOpen() [before connect]", "journal", "isOpen")
 end
 
 local REQ, DONE = scriptDir .. "\\request.txt", scriptDir .. "\\done.txt"
@@ -619,6 +621,35 @@ local function uiCases(phase)
     case(P .. "watch-ok", "ui.hud.watch(fn) then unwatch [control]", function() local t = U.hud.watch(nop) U.hud.unwatch(t) U.hud.unwatch(t) return t end,
         E.ret("a positive integer token", function(r) return math.type(r[1]) == "integer" and r[1] > 0 end))
 
+    -- UI-5 journal (story 13): the watcher's functions, and the journal host in intents.
+    local JW = UI .. ".journal."
+    case(P .. "journal-watch-nil", "ui.journal.watch(nil)", f(U.journal.watch, nil), E.err(JW .. "watch: fn must be a function, got nil"))
+    case(P .. "journal-watch-1", "ui.journal.watch(1)", f(U.journal.watch, 1), E.err(JW .. "watch: fn must be a function, got 1"))
+    case(P .. "journal-watch-str", "ui.journal.watch(\"x\")", f(U.journal.watch, "x"), E.err(JW .. "watch: fn must be a function, got 'x'"))
+    case(P .. "journal-watch-table", "ui.journal.watch({})", f(U.journal.watch, {}), E.err(JW .. "watch: fn must be a function, got table"))
+    case(P .. "journal-watch-two", "ui.journal.watch(fn, 1)", f(U.journal.watch, nop, 1), E.err(JW .. "watch: expected 1 argument (fn), got 2"))
+    case(P .. "journal-unwatch-forged", "ui.journal.unwatch(2^40) [forged token]", f(U.journal.unwatch, 1 << 40), E.err(JW .. "unwatch: unknown token 1099511627776 (not one journal.watch returned)"))
+    case(P .. "journal-unwatch-hudtoken", "ui.journal.unwatch(<a hud.watch token>)", function()
+        local t = U.hud.watch(nop)
+        local ok, err = pcall(U.journal.unwatch, t)
+        U.hud.unwatch(t)
+        if not ok then error(err, 0) end
+    end, E.err(JW .. "unwatch: unknown token"))
+    case(P .. "journal-unwatch-str", "ui.journal.unwatch(\"x\")", f(U.journal.unwatch, "x"), E.err(JW .. "unwatch: token must be an integer, got 'x'"))
+    case(P .. "journal-unwatch-float", "ui.journal.unwatch(1.5)", f(U.journal.unwatch, 1.5), E.err(JW .. "unwatch: token must be an integer, got 1.5"))
+    case(P .. "journal-unwatch-nil", "ui.journal.unwatch(nil)", f(U.journal.unwatch, nil), E.err(JW .. "unwatch: token must be an integer, got nil"))
+    case(P .. "journal-unwatch-table", "ui.journal.unwatch({})", f(U.journal.unwatch, {}), E.err(JW .. "unwatch: token must be an integer, got table"))
+    case(P .. "journal-unwatch-two", "ui.journal.unwatch(1, 2)", f(U.journal.unwatch, 1, 2), E.err(JW .. "unwatch: expected 1 argument (token), got 2"))
+    case(P .. "journal-isopen-arg", "ui.journal.isOpen(1)", f(U.journal.isOpen, 1), E.err(JW .. "isOpen: expected 0 arguments, got 1"))
+    case(P .. "journal-isopen-ok", "ui.journal.isOpen() [control]", f(U.journal.isOpen), E.ret("false (the map is closed)", function(r) return r[1] == false end))
+    case(P .. "journal-find-arg", "ui.journal.find(true)", f(U.journal.find, true), E.err(JW .. "find: expected 0 arguments, got 1"))
+    case(P .. "journal-find-ok", "ui.journal.find() [control]", f(U.journal.find), E.nilret)
+    case(P .. "journal-watch-ok", "ui.journal.watch(fn) then unwatch twice [control]", function() local t = U.journal.watch(nop) U.journal.unwatch(t) U.journal.unwatch(t) return t end,
+        E.ret("a positive integer token", function(r) return math.type(r[1]) == "integer" and r[1] > 0 end))
+    case(P .. "journal-stats", "ui.journal.stats() [control]", f(U.journal.stats), E.ret("a table, closed", function(r) return type(r[1]) == "table" and r[1].open == false end))
+    case(P .. "create-journal-near", "ui.text.create{ id = 'bj', place = { host = 'journal', near = 'crosshair' } }",
+        f(T.create, { id = "bj", place = { host = "journal", near = "crosshair" } }), E.err(UI .. ".place: near is not available on host 'journal'"))
+
     -- UI-3 elements()
     case(P .. "elements-ok", "ui.elements() [control]", f(U.elements), E.ret("{ crosshair = ... }", function(r) return type(r[1]) == "table" and type(r[1].crosshair) == "string" and r[1].mic == nil end))
     case(P .. "elements-arg", "ui.elements(1)", f(U.elements, 1), E.err(UI .. ".elements: expected 0 arguments, got 1"))
@@ -715,7 +746,9 @@ local function uiCases(phase)
     pc_("corner-num", "{ corner = 1 }", { corner = 1 }, E.err(PL .. "unknown corner 1"))
     pc_("gap-bad", "{ corner, gap = 'huge' }", { corner = "top-left", gap = "huge" }, E.err(PL .. "unknown gap 'huge' (valid: tight, normal, loose)"))
     pc_("gap-num", "{ corner, gap = 16 }", { corner = "top-left", gap = 16 }, E.err(PL .. "unknown gap 16"))
-    pc_("host", "{ host = 'journal', corner }", { host = "journal", corner = "top-left" }, E.err(PL .. "unknown host 'journal' (valid: hud)"))
+    pc_("host", "{ host = 'Journal', corner }", { host = "Journal", corner = "top-left" }, E.err(PL .. "unknown host 'Journal' (valid: hud, journal)"))
+    pc_("host-num", "{ host = 5, corner }", { host = 5, corner = "top-left" }, E.err(PL .. "unknown host 5 (valid: hud, journal)"))
+    pc_("host-journal-near", "{ host = 'journal', near = 'crosshair' }", { host = "journal", near = "crosshair" }, E.err(PL .. "near is not available on host 'journal' (it has no named elements yet; use corner or absolute)"))
     pc_("side-corner", "{ corner, side = 'left' }", { corner = "top-left", side = "left" }, E.err(PL .. "side is not allowed with corner"))
     pc_("off-str", "{ corner, offset = 'x' }", { corner = "top-left", offset = "x" }, E.err(PL .. "offset must be a table"))
     pc_("off-a", "{ corner, offset = { x = 'a' } }", { corner = "top-left", offset = { x = "a" } }, E.err(PL .. "offset.x must be a number, got 'a'"))
@@ -737,6 +770,8 @@ local function uiCases(phase)
     pc_("abs-key", "{ absolute = { left = 1 } }", { absolute = { left = 1 } }, E.err(PL .. "unknown key 'left' in absolute (valid keys: anchor, x, y)"))
     pc_("abs-offset", "{ absolute, offset = { x = 1 } }", { absolute = { x = 0, y = 0 }, offset = { x = 1 } }, E.err(PL .. "offset is not allowed with absolute"))
     pc_("abs-gap", "{ absolute, gap = 'tight' }", { absolute = { x = 0, y = 0 }, gap = "tight" }, E.err(PL .. "gap is not allowed with absolute"))
+    pc_("host-journal-ok", "{ host = 'journal', corner = 'top-left' } [control: moved to the closed Journal]", { host = "journal", corner = "top-left" }, E.none)
+    case(P .. "isshown-journal", "ui.text.isShown(h) [control: on the closed Journal]", f(T.isShown, h), E.ret("false", function(r) return r[1] == false end))
     pc_("abs-ok", "{ absolute = { anchor = 'center', x = 0, y = 260 } } [control]", { absolute = { anchor = "center", x = 0, y = 260 } }, E.none)
 
     -- Removed handles (story 8 AC 6, 14): every function raises "handle 'bi' was removed"; remove again does nothing.
@@ -780,17 +815,22 @@ uiOffThreadCases = function(P, h)
     off("unwatch", "hud.unwatch", U.hud.unwatch, 1)
     off("isvisible", "hud.isVisible", U.hud.isVisible)
     off("overlaps", "debug.overlaps", U.debug.overlaps, h)
+    off("journal-watch", "journal.watch", U.journal.watch, function() end)
+    off("journal-unwatch", "journal.unwatch", U.journal.unwatch, 1)
+    off("journal-isopen", "journal.isOpen", U.journal.isOpen)
+    off("journal-find", "journal.find", U.journal.find)
 end
 
 local function preConnectCases()
     step("before-connect cases", function()
         local UI = CORE:lower() .. ".ui"
-        local want = { create = "text.create", watch = "hud.watch", find = "hud.find", elements = "elements", overlaps = "debug.overlaps" }
+        local want = { create = "text.create", watch = "hud.watch", find = "hud.find", elements = "elements", overlaps = "debug.overlaps",
+            ["pre-journal-watch"] = "journal.watch", ["pre-journal-isopen"] = "journal.isOpen" }
         for _, r in ipairs(PRE_CONNECT) do
             case(r.id, r.desc, function() if not r.ok then error(r.err, 0) end return "no error" end,
-                E.err(UI .. ": " .. tostring(want[r.fn]) .. " called before connect"))
+                E.err(UI .. ": " .. tostring(want[r.id] or want[r.fn]) .. " called before connect"))
         end
-        check(#PRE_CONNECT == 5, "CASES before-connect recorded=%d (expected 5)", #PRE_CONNECT)
+        check(#PRE_CONNECT == 7, "CASES before-connect recorded=%d (expected 7)", #PRE_CONNECT)
     end)
 end
 
@@ -1409,6 +1449,333 @@ local function buildUi()
     end)
 end
 
+-- ---------------------------------------------------------------- journal (story 13, unattended)
+-- The Journal's map page as a host. menu -> match, Enter at touchdown, the lobby countdown cut to 2 s (the map key
+-- works only once the game has started), then the map opened and closed with the REAL map key ten times: the key
+-- IA_Map is bound to (read from IMC_Default) goes to run.ps1 as "key <letter>", which posts it to the game window, so
+-- the game's own input path opens it. Each open must be a new Journal_C with exactly one widget per element in the
+-- map page's canvas; the first open also logs the Journal's widget tree (which canvas is the map page). Then a death
+-- and revive (RemoveAllWidgets as the death does, the radio's reinforcement through the game's own code), a map
+-- change, a GC count of live core widgets, and the cost lines. Never keeps a Journal or widget across steps.
+local JOURNAL_CLASS_PATH = "/Game/Graphics/Journal/Journal.Journal_C"
+local JEV = { list = {}, count = {} }
+local JS = { seen = {}, opens = 0, keyOpens = 0, attach = {} }
+local J_IDS = { "jt", "jp1", "jp2", "jp3" } -- one text top-right; three in a bottom-right stack (a panel and two buttons' stand-in)
+local OPENS = 10
+
+local function jrecorder(_, info)
+    JEV.list[#JEV.list + 1] = { event = info.event, reason = info.reason, path = info.path, page = info.page }
+    JEV.count[info.event] = (JEV.count[info.event] or 0) + 1
+    say("JEVENT %d %s reason=%s page=%s journal=%s", #JEV.list, info.event, tostring(info.reason), tostring(info.page), tostring(info.path))
+end
+local function jcount(e) return JEV.count[e] or 0 end
+
+local function mapCanvasOf(j)
+    local ok, c = pcall(function() return j.MapWidget.WidgetTree.RootWidget end)
+    return ok and valid(c) and c or nil
+end
+-- Our widgets for one id in a canvas, by tag: the first and how many.
+local function taggedIn(canvas, id)
+    local tag = core.ui.text.tagOf(id)
+    local first, n = nil, 0
+    for i = 0, canvas:GetChildrenCount() - 1 do
+        local c = canvas:GetChildAt(i)
+        if valid(c) and c:GetClass():GetFName():ToString() == TEXT_SHORT then
+            local ok, t = pcall(function() return c.ToolTipText:ToString() end)
+            if ok and t == tag then n = n + 1; first = first or c end
+        end
+    end
+    return first, n
+end
+local function cls(o) local ok, n = pcall(function() return o:GetClass():GetFName():ToString() end) return ok and n or "?" end
+local function absRect(w)
+    local cdo = found(ACTOR_CDO)
+    if not (cdo and valid(w)) then return "?" end
+    local ok, s = pcall(function()
+        local a, b = cdo[CORE .. "_AbsTopLeft"](cdo, w), cdo[CORE .. "_AbsBottomRight"](cdo, w)
+        return string.format("(%.0f,%.0f)-(%.0f,%.0f)", a.X, a.Y, b.X, b.Y)
+    end)
+    return ok and s or "?"
+end
+
+-- The game state's lobby countdown, cut to 2 s on this (listen server) host: the character opens the map only when
+-- LobbyMinutes and LobbySeconds are both 0.
+local function lobbyOver(phase)
+    step(phase .. ": end the lobby", function()
+        local gs = GS():GetGameState(pc())
+        if not valid(gs) then check(false, "LOBBY %s game state found", phase) return end
+        local m, s = gs.LobbyMinutes, gs.LobbySeconds
+        say("LOBBY %s countdown %s:%s; set to 0:02", phase, tostring(m), tostring(s))
+        if (tonumber(m) or 0) > 0 or (tonumber(s) or 0) > 2 then pcall(function() gs.LobbyMinutes = 0; gs.LobbySeconds = 2 end) end
+        return function()
+            local g = GS():GetGameState(pc())
+            return valid(g) and (tonumber(g.LobbyMinutes) or 1) <= 0 and (tonumber(g.LobbySeconds) or 1) <= 0
+        end, 20, phase .. " lobby countdown over"
+    end)
+    step(phase .. ": lobby settle", function() return after(3), 5, "settle" end)
+end
+
+-- The key IA_Map is bound to, from IMC_Default (a capital letter), else M.
+local function readMapKey()
+    step("map key", function()
+        local key, all = nil, {}
+        local ok, err = pcall(function()
+            local imc = StaticFindObject("/Game/FirstPerson/Input/IMC_Default.IMC_Default")
+            if not valid(imc) then error("IMC_Default not loaded") end
+            imc.Mappings:ForEach(function(_, e)
+                local m = e:get()
+                local a = m.Action
+                if valid(a) and pathOf(a):find("IA_Map.IA_Map", 1, true) then
+                    local k = m.Key.KeyName:ToString()
+                    all[#all + 1] = k
+                    if not key and k:match("^[A-Z]$") then key = k end
+                end
+            end)
+        end)
+        JS.key = key or "M"
+        say("MAPKEY %s (IA_Map keys in IMC_Default: %s%s)", JS.key, table.concat(all, ", "), ok and "" or ("; read failed: " .. firstLine(err)))
+        check(key ~= nil, "MAPKEY IA_Map is bound to the letter %s in IMC_Default", JS.key)
+    end)
+end
+
+-- Fallback when the key did nothing: the character's own open path, from Lua (decompile BP_FirstPersonCharacter_C
+-- ~15040), so the rest of the run still has a Journal. A key failure is still a FAIL.
+local function openViaLua()
+    local c = pc()
+    local p = c and c:K2_GetPawn()
+    if not (valid(c) and valid(p)) then return false end
+    local cls_ = found(JOURNAL_CLASS_PATH)
+    local lib = StaticFindObject("/Script/NuclearNightmare.Default__NNPreparedWidgetLibrary")
+    local ok = pcall(function()
+        local j = lib:GetPreparedWidget(p, cls_, c)
+        j.Controller = c; j.OpenWithMap = true; j.Character = p; p.Map = j
+        j:AddToViewport(0)
+        WBL():SetInputMode_GameAndUIEx(c, j, 0, false, true)
+        c.bShowMouseCursor = true
+    end)
+    return ok
+end
+local function closeViaLua()
+    local j = core.ui.journal.find()
+    if not j then return end
+    pcall(function()
+        local c = pc()
+        WBL():SetInputMode_GameOnly(c, true)
+        c.bShowMouseCursor = false
+        j:RemoveFromParent()
+    end)
+end
+
+local function probeTree(phase, j)
+    local ok, err = pcall(function()
+        local root = j.WidgetTree.RootWidget
+        say("JTREE %s journal=%s root=%s (%s) rect=%s", phase, pathOf(j), pathOf(root), cls(root), absRect(j))
+        local sw = j.WidgetSwitcher_0
+        local n = sw:GetChildrenCount()
+        say("JTREE %s WidgetSwitcher_0 children=%d active=%d (%s) rect=%s", phase, n, sw:GetActiveWidgetIndex(), cls(sw:GetActiveWidget()), absRect(sw))
+        for i = 0, n - 1 do local ch = sw:GetChildAt(i) say("JTREE %s   switcher child %d: %s (%s) rect=%s", phase, i, pathOf(ch):match("[^.:]+$"), cls(ch), absRect(ch)) end
+        local m = j.MapWidget
+        local mroot = m.WidgetTree.RootWidget
+        local mn = mroot.GetChildrenCount and mroot:GetChildrenCount() or -1
+        say("JTREE %s MapWidget=%s (%s) root=%s (%s) children=%d rect=%s", phase, pathOf(m):match("[^.:]+$"), cls(m), pathOf(mroot):match("[^.:]+$"), cls(mroot), mn, absRect(mroot))
+        for i = 0, mn - 1 do local ch = mroot:GetChildAt(i) say("JTREE %s   map root child %d: %s (%s) rect=%s", phase, i, pathOf(ch):match("[^.:]+$"), cls(ch), absRect(ch)) end
+        local okU, mu = pcall(function() return m.MapUI end)
+        if okU and valid(mu) then say("JTREE %s MapUI=%s rect=%s", phase, cls(mu), absRect(mu)) end
+    end)
+    if not ok then say("JTREE %s failed: %s", phase, firstLine(err)) end
+end
+
+-- One open: the map key (or Lua when asked), then the opened event; checks on the next steps.
+local function openMap(phase, viaKey)
+    step(phase .. ": open", function()
+        JS.openedBefore = jcount("opened")
+        if viaKey then
+            say("JKEY %s pressing %s to open the map", phase, JS.key)
+            return request("key " .. JS.key), 30, phase .. " map key served"
+        end
+        say("JOPEN %s through the game's own calls from Lua", phase)
+        openViaLua()
+    end)
+    step(phase .. ": opened", function()
+        return function() return jcount("opened") > JS.openedBefore end, 10, phase .. " opened event"
+    end)
+    step(phase .. ": opened check", function()
+        local got = jcount("opened") > JS.openedBefore
+        if viaKey then
+            JS.keyOpens = JS.keyOpens + (got and 1 or 0)
+            check(got, "JKEY %s the real %s key press opened the map (opened events %d -> %d)", phase, JS.key, JS.openedBefore, jcount("opened"))
+            if not got then say("JOPEN %s falling back to the game's own calls from Lua", phase) openViaLua() return after(2), 5, "lua open" end
+        end
+    end)
+    step(phase .. ": settle", function() return afterMs(1200), 3, "layout" end)
+    step(phase .. ": check", function()
+        local j = core.ui.journal.find()
+        if not check(j ~= nil and core.ui.journal.isOpen(), "JOPEN %s journal.find() and isOpen() see the open Journal", phase) then return end
+        local p = pathOf(j)
+        JS.opens = JS.opens + 1
+        check(not JS.seen[p], "JNEW %s open %d is a new Journal_C instance (%s; %d distinct so far)", phase, JS.opens, p, (function() local n = 0 for _ in pairs(JS.seen) do n = n + 1 end return n end)())
+        JS.seen[p] = true
+        if JS.opens == 1 then probeTree(phase, j) end
+        local canvas = mapCanvasOf(j)
+        if not check(canvas ~= nil, "JCANVAS %s the map page's root canvas found", phase) then return end
+        local all = true
+        local counts = {}
+        for _, id in ipairs(J_IDS) do
+            local _, n = taggedIn(canvas, id)
+            counts[#counts + 1] = id .. "=" .. n
+            if n ~= 1 then all = false end
+        end
+        check(all, "JONE %s one widget per element in the map canvas (%s)", phase, table.concat(counts, " "))
+        check(core.ui.text.isShown(JS.h.jt) == true, "JSHOWN %s 'jt' isShown=true while the map is open", phase)
+        local w = taggedIn(canvas, "jt")
+        if w then
+            local slot = w.Slot
+            local an, al, pos = slot:GetAnchors(), slot:GetAlignment(), slot:GetPosition()
+            check(near(an.Minimum.X, 1) and near(an.Minimum.Y, 0) and near(al.X, 1) and near(pos.X, -16) and near(pos.Y, 16) and w:IsVisible(),
+                "JCORNER %s 'jt' top-right of the map canvas: anchors=(%.0f,%.0f) position=(%.0f,%.0f) screen=%s canvas=%s", phase, an.Minimum.X, an.Minimum.Y, pos.X, pos.Y, absRect(w), absRect(canvas))
+        end
+        local st = core.ui.journal.stats()
+        JS.attach[#JS.attach + 1] = st.attachLast
+        say("JCOST %s attach of %d elements on this open: %d us (avg %.0f, max %d over %d opens)", phase, st.attachElements, st.attachLast, st.attachAvg, st.attachMax, st.attachOpens)
+    end)
+end
+
+local function closeMap(phase, viaKey)
+    step(phase .. ": close", function()
+        JS.closedBefore = jcount("closed")
+        if viaKey then
+            say("JKEY %s pressing %s to close the map", phase, JS.key)
+            return request("key " .. JS.key), 30, phase .. " map key served"
+        end
+        closeViaLua()
+    end)
+    step(phase .. ": closed", function()
+        return function() return jcount("closed") > JS.closedBefore end, 10, phase .. " closed event"
+    end)
+    step(phase .. ": closed check", function()
+        local got = jcount("closed") > JS.closedBefore
+        if viaKey then
+            check(got, "JKEY %s the real %s key press closed the map", phase, JS.key)
+            if not got then closeViaLua() return after(2), 5, "lua close" end
+        end
+        check(core.ui.journal.isOpen() == false and core.ui.text.isShown(JS.h.jt) == false, "JCLOSED %s isOpen=false, 'jt' isShown=false", phase)
+    end)
+    step(phase .. ": pause", function() return afterMs(700), 3, "pause" end)
+end
+
+-- Counts live core text widgets of the journal elements (and live Journals), after a forced GC.
+local function gcCount(phase)
+    step(phase .. ": gc", function()
+        StaticFindObject("/Script/Engine.Default__KismetSystemLibrary"):CollectGarbage()
+        return after(3), 6, "gc"
+    end)
+    step(phase .. ": gc count", function()
+        local n, journals = 0, 0
+        for _, w in ipairs(FindAllOf(TEXT_SHORT) or {}) do
+            if valid(w) then
+                local ok, t = pcall(function() return w.ToolTipText:ToString() end)
+                if ok and t:find(":j[tp]%d?$") then n = n + 1 end
+            end
+        end
+        for _, j in ipairs(FindAllOf("Journal_C") or {}) do if valid(j) and not pathOf(j):find("Default__", 1, true) then journals = journals + 1 end end
+        check(n <= #J_IDS, "JGC %s %d live journal element widget(s) after %d opens and a GC (at most %d: one Journal's worth); %d Journal_C alive",
+            phase, n, JS.opens, #J_IDS, journals)
+    end)
+end
+
+local function buildJournal()
+    step("journal: watch and create", function()
+        UIS.t0 = os.time()
+        UIS.jrec = core.ui.journal.watch(jrecorder)
+        UIS.jthrow = core.ui.journal.watch(function() error("test journal watcher throws on purpose") end)
+        JS.h = {}
+        JS.h.jt = core.ui.text.create{ id = "jt", text = CORE .. " journal", place = { host = "journal", corner = "top-right" } }
+        for i = 1, 3 do
+            JS.h["jp" .. i] = core.ui.text.create{ id = "jp" .. i, text = i == 1 and "panel" or ("button " .. (i - 1)),
+                place = { host = "journal", corner = "bottom-right", gap = "tight" }, style = { background = "dim" } }
+        end
+        check(core.ui.text.isShown(JS.h.jt) == false and core.ui.journal.isOpen() == false, "JPENDING menu1 journal elements created, not shown (no Journal)")
+    end)
+    waitWorld("menu1", "NewMainMenu", 120)
+    travel("match1", MATCH_MAP, "listen")
+    waitWorld("match1", "SmallMap", 150)
+    touchdown("match1")
+    step("match1: hud", function() return function() return core.ui.hud.isVisible() end, 120, "match1 HUD visible" end)
+    lobbyOver("match1")
+    readMapKey()
+    -- AC 1: ten opens and closes in a row, every one by the real key press.
+    for i = 1, OPENS do
+        openMap("open" .. i, true)
+        closeMap("close" .. i, true)
+    end
+    step("opens: events", function()
+        -- AC 3: opened and closed once per open and close.
+        check(jcount("opened") == OPENS and jcount("closed") == OPENS and jcount("lost") == 0,
+            "JEVENTS %d opens: opened=%d closed=%d lost=%d", OPENS, jcount("opened"), jcount("closed"), jcount("lost"))
+        local max, sum = 0, 0
+        for _, us in ipairs(JS.attach) do sum = sum + us; if us > max then max = us end end
+        -- AC 6: under 2 ms per open (timing: judged on the host; reported in the VM).
+        say("%s JCOSTS %d opens: attach avg %.0f us, max %d us (target under 2000 us per open)", max < 2000 and "OK" or "SLOW", #JS.attach, #JS.attach > 0 and sum / #JS.attach or 0, max)
+    end)
+    gcCount("opens")
+    -- AC 2: a death and revive, then the map again.
+    step("revive: death's RemoveAllWidgets", function()
+        local okR = pcall(function() WLL():RemoveAllWidgets(pc()) end)
+        say("DEATHSIM revive RemoveAllWidgets ok=%s", tostring(okR))
+        JS.pawnBefore = pathOf(pc():K2_GetPawn())
+        return after(3), 8, "HUD lost"
+    end)
+    step("revive: reinforce", function()
+        local c = pc()
+        local p = c:K2_GetPawn()
+        local gs = GS():GetGameState(c)
+        local radio = FindFirstOf("BP_Radio_C")
+        if not (valid(gs) and valid(radio) and valid(p)) then check(false, "REINFORCE game state, radio and pawn found") return end
+        local okQ, eQ = pcall(function() gs:UpdateRespawnQue(c, p) end)
+        local okR, eR = pcall(function() radio:ReinforceSpecficPlayer(p) end)
+        say("REINFORCE UpdateRespawnQue ok=%s %s; ReinforceSpecficPlayer ok=%s %s", tostring(okQ), okQ and "" or firstLine(eQ), tostring(okR), okR and "" or firstLine(eR))
+        return function()
+            local np = pc():K2_GetPawn()
+            return valid(np) and pathOf(np) ~= JS.pawnBefore and core.ui.hud.isVisible()
+        end, 90, "revive: a new pawn with a visible HUD"
+    end)
+    step("revive: settle", function() say("NEWPAWN revive %s (was %s)", pathOf(pc():K2_GetPawn()), tostring(JS.pawnBefore)) return after(3), 5, "settle" end)
+    openMap("revive-open", true)
+    closeMap("revive-close", true)
+    -- AC 2: a map change.
+    travel("menu2", MENU_MAP, "")
+    waitWorld("menu2", "NewMainMenu", 150)
+    travel("match2", MATCH_MAP, "listen")
+    waitWorld("match2", "SmallMap", 150)
+    touchdown("match2")
+    step("match2: hud", function() return function() return core.ui.hud.isVisible() end, 120, "match2 HUD visible" end)
+    lobbyOver("match2")
+    openMap("match2-open", true)
+    closeMap("match2-close", true)
+    -- AC 4: the cost while the map is closed: wait for a one-minute tick window with the map closed.
+    step("closed: tick window", function()
+        JS.closedSince = os.time()
+        say("JWAIT waiting 65 s with the map closed for a one-minute hud tick summary")
+        return function() return os.time() >= JS.closedSince + 65 end, 80, "closed one-minute window"
+    end)
+    step("closed: report", function()
+        local st = core.ui.hud.stats()
+        local js = core.ui.journal.stats()
+        say("JTICK ticks=%d poll avg=%.1f max=%d us, watchers avg=%.1f max=%d us; steady n=%d avg=%.1f max=%d us; journal tracked=%d opens=%d closes=%d lost=%d findAll=%d",
+            st.ticks, st.pollAvg, st.pollMax, st.watchAvg, st.watchMax, st.steadyTicks, st.steadyAvg, st.steadyMax, js.tracked, js.opens, js.closes, js.lost, js.findAllCalls)
+        check(js.tracked <= 1, "JTRACK while closed at most one Journal is tracked (%d)", js.tracked)
+        check(jcount("opened") == OPENS + 2 and jcount("closed") == OPENS + 2, "JEVENTS all: opened=%d closed=%d lost=%d (expected %d each)", jcount("opened"), jcount("closed"), jcount("lost"), OPENS + 2)
+        local distinct = 0
+        for _ in pairs(JS.seen) do distinct = distinct + 1 end
+        check(distinct == JS.opens, "JNEWALL %d opens, %d distinct Journal_C instances", JS.opens, distinct)
+        check(JS.keyOpens == JS.opens, "JKEYALL %d of %d opens by the real %s key press", JS.keyOpens, JS.opens, JS.key)
+        for _, id in ipairs(J_IDS) do core.ui.text.remove(JS.h[id]) end
+        core.ui.journal.unwatch(UIS.jthrow)
+        core.ui.journal.unwatch(UIS.jrec)
+    end)
+    gcCount("end")
+end
+
 -- ---------------------------------------------------------------- soak (story 7 AC 7, unattended)
 -- menu -> match, Enter at touchdown, then SOAK_S seconds idle in the match with one element and one watcher, the way
 -- a real dependent sits there. The helpers' one-minute DEBUG tick lines (and the profiler's) are the measurement;
@@ -1671,6 +2038,9 @@ client.connect{
         core = api
         if SCENARIO == "manual" then profile(true) startManual() return end
         if SCENARIO == "bad-input" then buildBadInput()
+        elseif SCENARIO == "journal" then
+            core.log.debugEnabled = true -- the journal attach lines (cost per open) are DEBUG; no profiler: real costs
+            buildJournal()
         elseif SCENARIO == "ui" or SCENARIO == "soak" then
             core.log.debugEnabled = true -- the helpers' DEBUG lines (tick summaries, freed handles) are part of the check
             profile(true)
