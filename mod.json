@@ -3,7 +3,7 @@
   "name": "Nucleus",
   "version": "0.3.0",
   "scope": "all",
-  "game": { "version": "V8.1.3", "build": "26315336" },
+  "game": { "version": "V8.1.4", "build": "26341650" },
   "ue4ss": "v3.0.1-1181-g83330635",
   "dependsOn": []
 }
