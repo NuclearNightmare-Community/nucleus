@@ -352,6 +352,13 @@ load(w4, s4)
 ok(count("^FAIL WIRE lever: class /Game/Models/lever/Lever_Actor%.Lever_Actor_C did not load") == 1 and count("^FAIL") == 1 and count("^OK WIRE AISpawner_C") == 1, "unloadable: one FAIL line, the rest wired")
 unloadable.Lever_Actor_C = nil
 
+-- the service's class was dropped: not there at the game state's BeginPlay (ORDER present=false and one FAIL line)
+local w4b, s4b = demoLevel("/Game/Mods/DemoMap/Maps/L_DemoMap4b.L_DemoMap4b")
+dropClass("GameStartService_C")
+load(w4b, s4b)
+ok(count("^ORDER .*GameStartService_C present=false") == 1 and count("^FAIL WIRE GameStartService_C was not there at the game state's BeginPlay") == 1 and count("^FAIL") == 1, "no service first: ORDER present=false, one FAIL line")
+ok(count("^OK WIRE GameStartService_C at ") == 1, "no service first: spawned after the map load")
+
 -- ---------------------------------------------------------------- bad values: an Equipment entry naming itself, an unknown Item
 local w5, s5 = demoLevel("/Game/Mods/DemoMap/Maps/L_Bad.L_Bad", { selfEquipment = true, badItem = true })
 spawnedCount = 0

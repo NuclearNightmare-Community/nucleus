@@ -540,7 +540,7 @@ function M.onStartBeginPlay(marker)
         return fail("WIRE start marker=%s: a second Start marker in the level (need exactly 1); only %s sets up", fname(marker), W.startName or "?")
     end
     W.started, W.startMarker, W.startName = true, pathOf(marker), fname(marker)
-    W.host = M.isHost(world)
+    W.host = M.isHost(world, true) -- fresh: a cache from an earlier world of the same path may be another role's
     log.info("MAPSETUP start marker %s began play in %s; isHost=%s", W.startName, wp, tostring(W.host))
     if not W.host then return end
     local t0 = os.clock()
@@ -561,6 +561,7 @@ function M.onGameStateBeginPlay(gs)
     table.sort(done)
     log.info("ORDER game state BeginPlay: start marker began first=true GameStartService_C present=%s spawned before it: %s (isHost=%s)",
         tostring(alive(svc)), table.concat(done, ","), tostring(W.host))
+    if W.host and not alive(svc) then fail("WIRE GameStartService_C was not there at the game state's BeginPlay; the countdown won't start") end
 end
 
 -- The LoadMap post-hook (world: the loaded UWorld, or nil when travel failed).
@@ -603,7 +604,7 @@ local function hookOnce(fnPath, cb)
         local okC, err = pcall(function() cb(ctx:get()) end)
         if not okC then log.error("MAPSETUP %s hook failed: %s", fnPath, firstLine(err)) end
     end)
-    if okH then hooked[fnPath] = key log.info("MAPSETUP hooked %s", fnPath)
+    if okH then hooked[fnPath] = key log.debug("MAPSETUP hooked %s", fnPath)
     else log.error("MAPSETUP could not hook %s: %s", fnPath, firstLine(e)) end
     return okH
 end
