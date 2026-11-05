@@ -383,6 +383,18 @@ for _, c in ipairs({ { 19, 1, "19 PlayerStarts %(need 20%+%)" }, { 24, 0, "0 Cor
     ok(count("^OK WIRE GameStartService_C at .* x " .. c[1] .. " PlayerStarts") == 1 and count("^OK WIRE 8 EnemyWaypointActor_C") == 1, "starts " .. c[1] .. "/" .. c[2] .. ": otherwise wired as usual")
 end
 
+-- more PlayerStarts than the cap: the arrays stop at the cap, the overflow is reported
+do
+    local cap = MS.LIMIT.starts
+    MS.LIMIT.starts = 22
+    local w, s = demoLevel("/Game/Mods/DemoMap/Maps/L_Cap.L_Cap")
+    load(w, s)
+    MS.LIMIT.starts = cap
+    local svc = objects[MS.state().service]
+    ok(count("^FAIL WIRE PlayerStarts: .*more than 22 PlayerStarts") == 1, "starts cap: the overflow is one FAIL line", table.concat(lines("^FAIL"), " | "))
+    ok(svc and svc.BaseCampStarts:GetArrayNum() <= 22, "starts cap: the arrays stop at the cap", svc and svc.BaseCampStarts:GetArrayNum())
+end
+
 -- a position that is off: FAIL POS
 local w7, s7 = demoLevel("/Game/Mods/DemoMap/Maps/L_Off.L_Off")
 spawnOffset = 5

@@ -264,15 +264,15 @@ local SECTIONS = {} -- { name, keys, fn }
 local KIND_SECTION = { Item = "items", Intel = "intel", Computer = "computer", Lever = "lever", EnemySpawner = "spawner", EnemyWaypoint = "waypoints", Generator = "generator" }
 
 SECTIONS[#SECTIONS + 1] = { "service", { "service" }, function(world, cls)
-    local list = {}
+    local list, over = {}, false
     for _, ps in ipairs(FindAllOf("PlayerStart") or {}) do
         if alive(ps) and worldOf(ps) == W.world then
+            if #list >= M.LIMIT.starts then over = true break end
             list[#list + 1] = { name = fname(ps), tag = str(try(function() return ps.PlayerStartTag end)) or "", path = pathOf(ps) }
-            if #list > M.LIMIT.starts then break end
         end
     end
     local starts, corrective, problem = M.splitStarts(list)
-    if #list > M.LIMIT.starts then problem = (problem and problem .. ", " or "") .. string.format("more than %d PlayerStarts", M.LIMIT.starts) end
+    if over then problem = (problem and problem .. ", " or "") .. string.format("more than %d PlayerStarts", M.LIMIT.starts) end
     if problem then fail("WIRE PlayerStarts: %s; %d go into the *Starts arrays", problem, #starts) end
     local sm = W.startMarker and StaticFindObject(W.startMarker)
     if not alive(sm) then return fail("WIRE GameStartService_C: the start marker is gone") end
