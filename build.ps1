@@ -70,6 +70,11 @@ if (-not (Test-Path $repak)) {
     $repak = Join-Path $mainWs 'tools\repak\repak.exe'
 }
 $abiCheck = Join-Path $root 'mods\cpp-spike\abi-check.ps1'
+# -RefreshTemplate writes files: only into a template named explicitly. From a Nucleus worktree the default is the main
+# checkout's map-spike, which a refresh must never rewrite behind the user's back.
+if ($RefreshTemplate -and -not $PSBoundParameters.ContainsKey('Template')) {
+    throw "-RefreshTemplate rewrites the template's map files, so it needs -Template <the template project> passed explicitly (the default would be $(Join-Path $root 'mods\map-spike\unreal\NuclearNightmare'))"
+}
 if (-not $Template) { $Template = Join-Path $root 'mods\map-spike\unreal\NuclearNightmare' }
 # The map markers' kinds (CoreGenCommandlet.cpp BuildMarkers) and the Item enum: the assets under /Game/Mods/<name>/Map/.
 $markerKinds = 'Start', 'Item', 'Intel', 'Computer', 'Generator', 'Lever', 'EnemySpawner', 'EnemyWaypoint', 'Landing', 'Map', 'Location', 'Sky'
@@ -155,6 +160,9 @@ Step 'native' {
 }
 
 Step 'blueprint' {
+    # -Name="value" arguments go to the editor verbatim (FParse::Value reads a quoted value whole, so a path with a space
+    # works); the standard argument mode would escape the quotes.
+    $PSNativeCommandArgumentPassing = 'Legacy'
     $editor   = Join-Path $Engine 'Engine\Binaries\Win64\UnrealEditor-Cmd.exe'
     $buildBat = Join-Path $Engine 'Engine\Build\BatchFiles\Build.bat'
     if (-not (Test-Path $editor)) { throw "UE 5.6 not found at $Engine (pass -Engine)" }
@@ -164,7 +172,7 @@ Step 'blueprint' {
     Remove-Item (Join-Path $proj 'Content\Mods') -Recurse -Force -ErrorAction SilentlyContinue
     $layoutGen = Join-Path $logs 'layout-generated.txt'
     Remove-Item $layoutGen -ErrorAction SilentlyContinue
-    Run 'bp-generate.log' $editor @($uproj, '-run=CoreGen', "-CoreName=$name", "-Layout=$layoutGen", '-unattended', '-nopause', '-nosplash', '-stdout', '-NoLogTimes')
+    Run 'bp-generate.log' $editor @($uproj, '-run=CoreGen', "-CoreName=$name", "-Layout=`"$layoutGen`"", '-unattended', '-nopause', '-nosplash', '-stdout', '-NoLogTimes')
     Select-String -Path (Join-Path $logs 'bp-generate.log') -Pattern 'MARKER .*(enum|markers and)' -CaseSensitive | ForEach-Object { Write-Host "   $($_.Line -replace '^.*?MARKER', 'MARKER')" }
     $mapSrc = Join-Path $proj "Content\Mods\$name\Map"
     $want = @($mapAssets | ForEach-Object { "$_.uasset" } | Sort-Object)
@@ -194,7 +202,7 @@ Step 'blueprint' {
     try {
         Remove-Item (Join-Path $mapSrc '*') -Force
         Copy-Item (Join-Path $mapDst '*.uasset') $mapSrc
-        Run 'bp-layout-template.log' $editor @($uproj, '-run=CoreGen', "-CoreName=$name", '-LayoutOnly', "-Layout=$layoutTpl", '-unattended', '-nopause', '-nosplash', '-stdout', '-NoLogTimes')
+        Run 'bp-layout-template.log' $editor @($uproj, '-run=CoreGen', "-CoreName=$name", '-LayoutOnly', "-Layout=`"$layoutTpl`"", '-unattended', '-nopause', '-nosplash', '-stdout', '-NoLogTimes')
     } finally {
         Remove-Item (Join-Path $mapSrc '*') -Force -ErrorAction SilentlyContinue
         Copy-Item (Join-Path $keep '*') $mapSrc

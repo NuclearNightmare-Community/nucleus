@@ -8,322 +8,322 @@
 
 BP_Marker_Start parent /Script/Engine.Actor
 BP_Marker_Start component 0 DefaultSceneRoot SceneComponent parent=None editoronly=0
-BP_Marker_Start component 1 Preview_S0 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Start component 2 Preview_S1 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Start component 3 Preview_S2 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Start component 4 Preview_S3 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Start component 5 Preview_S4 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Start component 6 Preview_S5 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Start component 7 Preview_S6 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Start component 8 Preview_S7 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Start component 9 Preview_K0 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Start component 10 Preview_K1 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Start component 11 Icon BillboardComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Start member 0 UberGraphFrame StructProperty</Script/Engine.PointerToUberGraphFrame> edit=0 transient=1
-BP_Marker_Start member 1 Icon ObjectProperty</Script/Engine.BillboardComponent> edit=0 transient=0
-BP_Marker_Start member 2 Preview_K1 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0
-BP_Marker_Start member 3 Preview_K0 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0
-BP_Marker_Start member 4 Preview_S7 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Start member 5 Preview_S6 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Start member 6 Preview_S5 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Start member 7 Preview_S4 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Start member 8 Preview_S3 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Start member 9 Preview_S2 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Start member 10 Preview_S1 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Start member 11 Preview_S0 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Start member 12 DefaultSceneRoot ObjectProperty</Script/Engine.SceneComponent> edit=0 transient=0
+BP_Marker_Start component 1 Preview_S0 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Start component 2 Preview_S1 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Start component 3 Preview_S2 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Start component 4 Preview_S3 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Start component 5 Preview_S4 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Start component 6 Preview_S5 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Start component 7 Preview_S6 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Start component 8 Preview_S7 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Start component 9 Preview_K0 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0
+BP_Marker_Start component 10 Preview_K1 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0
+BP_Marker_Start component 11 Icon BillboardComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 sprite=/Engine/EditorResources/S_Player.S_Player
+BP_Marker_Start member 0 UberGraphFrame StructProperty</Script/Engine.PointerToUberGraphFrame> edit=0 transient=1 default="()"
+BP_Marker_Start member 1 Icon ObjectProperty</Script/Engine.BillboardComponent> edit=0 transient=0 default="None"
+BP_Marker_Start member 2 Preview_K1 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Start member 3 Preview_K0 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Start member 4 Preview_S7 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Start member 5 Preview_S6 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Start member 6 Preview_S5 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Start member 7 Preview_S4 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Start member 8 Preview_S3 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Start member 9 Preview_S2 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Start member 10 Preview_S1 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Start member 11 Preview_S0 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Start member 12 DefaultSceneRoot ObjectProperty</Script/Engine.SceneComponent> edit=0 transient=0 default="None"
 BP_Marker_Start function ExecuteUbergraph_<Self>
 BP_Marker_Start function ReceiveBeginPlay
 BP_Marker_Item parent /Script/Engine.Actor
 BP_Marker_Item component 0 DefaultSceneRoot SceneComponent parent=None editoronly=0
-BP_Marker_Item component 1 Preview_S0 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Item component 2 Preview_S1 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Item component 3 Preview_S2 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Item component 4 Preview_S3 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Item component 5 Preview_S4 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Item component 6 Preview_S5 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Item component 7 Preview_S6 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Item component 8 Preview_S7 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Item component 9 Preview_K0 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Item component 10 Preview_K1 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Item component 11 Icon BillboardComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Item member 0 Icon ObjectProperty</Script/Engine.BillboardComponent> edit=0 transient=0
-BP_Marker_Item member 1 Preview_K1 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0
-BP_Marker_Item member 2 Preview_K0 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0
-BP_Marker_Item member 3 Preview_S7 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Item member 4 Preview_S6 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Item member 5 Preview_S5 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Item member 6 Preview_S4 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Item member 7 Preview_S3 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Item member 8 Preview_S2 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Item member 9 Preview_S1 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Item member 10 Preview_S0 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Item member 11 DefaultSceneRoot ObjectProperty</Script/Engine.SceneComponent> edit=0 transient=0
-BP_Marker_Item member 12 Item ByteProperty</Game/Mods/<Core>/Map/E_MarkerItem.E_MarkerItem> edit=1 transient=0
+BP_Marker_Item component 1 Preview_S0 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=/Engine/BasicShapes/Cube.Cube
+BP_Marker_Item component 2 Preview_S1 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Item component 3 Preview_S2 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Item component 4 Preview_S3 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Item component 5 Preview_S4 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Item component 6 Preview_S5 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Item component 7 Preview_S6 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Item component 8 Preview_S7 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Item component 9 Preview_K0 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0
+BP_Marker_Item component 10 Preview_K1 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0
+BP_Marker_Item component 11 Icon BillboardComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 sprite=/Engine/EditorResources/S_Actor.S_Actor
+BP_Marker_Item member 0 Icon ObjectProperty</Script/Engine.BillboardComponent> edit=0 transient=0 default="None"
+BP_Marker_Item member 1 Preview_K1 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Item member 2 Preview_K0 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Item member 3 Preview_S7 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Item member 4 Preview_S6 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Item member 5 Preview_S5 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Item member 6 Preview_S4 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Item member 7 Preview_S3 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Item member 8 Preview_S2 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Item member 9 Preview_S1 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Item member 10 Preview_S0 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Item member 11 DefaultSceneRoot ObjectProperty</Script/Engine.SceneComponent> edit=0 transient=0 default="None"
+BP_Marker_Item member 12 Item ByteProperty</Game/Mods/<Core>/Map/E_MarkerItem.E_MarkerItem> edit=1 transient=0 default="NewEnumerator0"
 BP_Marker_Intel parent /Script/Engine.Actor
 BP_Marker_Intel component 0 DefaultSceneRoot SceneComponent parent=None editoronly=0
-BP_Marker_Intel component 1 Preview_S0 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Intel component 2 Preview_S1 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Intel component 3 Preview_S2 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Intel component 4 Preview_S3 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Intel component 5 Preview_S4 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Intel component 6 Preview_S5 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Intel component 7 Preview_S6 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Intel component 8 Preview_S7 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Intel component 9 Preview_K0 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Intel component 10 Preview_K1 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Intel component 11 Icon BillboardComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Intel member 0 Icon ObjectProperty</Script/Engine.BillboardComponent> edit=0 transient=0
-BP_Marker_Intel member 1 Preview_K1 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0
-BP_Marker_Intel member 2 Preview_K0 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0
-BP_Marker_Intel member 3 Preview_S7 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Intel member 4 Preview_S6 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Intel member 5 Preview_S5 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Intel member 6 Preview_S4 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Intel member 7 Preview_S3 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Intel member 8 Preview_S2 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Intel member 9 Preview_S1 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Intel member 10 Preview_S0 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Intel member 11 DefaultSceneRoot ObjectProperty</Script/Engine.SceneComponent> edit=0 transient=0
-BP_Marker_Intel member 12 AreaName StrProperty edit=1 transient=0
-BP_Marker_Intel member 13 UniqueIdentifier StrProperty edit=1 transient=0
-BP_Marker_Intel member 14 TaskText StrProperty edit=1 transient=0
+BP_Marker_Intel component 1 Preview_S0 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=/Engine/BasicShapes/Cube.Cube
+BP_Marker_Intel component 2 Preview_S1 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Intel component 3 Preview_S2 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Intel component 4 Preview_S3 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Intel component 5 Preview_S4 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Intel component 6 Preview_S5 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Intel component 7 Preview_S6 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Intel component 8 Preview_S7 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Intel component 9 Preview_K0 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0
+BP_Marker_Intel component 10 Preview_K1 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0
+BP_Marker_Intel component 11 Icon BillboardComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 sprite=/Engine/EditorResources/S_Actor.S_Actor
+BP_Marker_Intel member 0 Icon ObjectProperty</Script/Engine.BillboardComponent> edit=0 transient=0 default="None"
+BP_Marker_Intel member 1 Preview_K1 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Intel member 2 Preview_K0 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Intel member 3 Preview_S7 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Intel member 4 Preview_S6 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Intel member 5 Preview_S5 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Intel member 6 Preview_S4 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Intel member 7 Preview_S3 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Intel member 8 Preview_S2 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Intel member 9 Preview_S1 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Intel member 10 Preview_S0 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Intel member 11 DefaultSceneRoot ObjectProperty</Script/Engine.SceneComponent> edit=0 transient=0 default="None"
+BP_Marker_Intel member 12 AreaName StrProperty edit=1 transient=0 default=""
+BP_Marker_Intel member 13 UniqueIdentifier StrProperty edit=1 transient=0 default=""
+BP_Marker_Intel member 14 TaskText StrProperty edit=1 transient=0 default=""
 BP_Marker_Computer parent /Script/Engine.Actor
 BP_Marker_Computer component 0 DefaultSceneRoot SceneComponent parent=None editoronly=0
-BP_Marker_Computer component 1 Preview_S0 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Computer component 2 Preview_S1 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Computer component 3 Preview_S2 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Computer component 4 Preview_S3 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Computer component 5 Preview_S4 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Computer component 6 Preview_S5 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Computer component 7 Preview_S6 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Computer component 8 Preview_S7 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Computer component 9 Preview_K0 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Computer component 10 Preview_K1 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Computer component 11 Icon BillboardComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Computer member 0 Icon ObjectProperty</Script/Engine.BillboardComponent> edit=0 transient=0
-BP_Marker_Computer member 1 Preview_K1 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0
-BP_Marker_Computer member 2 Preview_K0 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0
-BP_Marker_Computer member 3 Preview_S7 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Computer member 4 Preview_S6 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Computer member 5 Preview_S5 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Computer member 6 Preview_S4 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Computer member 7 Preview_S3 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Computer member 8 Preview_S2 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Computer member 9 Preview_S1 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Computer member 10 Preview_S0 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Computer member 11 DefaultSceneRoot ObjectProperty</Script/Engine.SceneComponent> edit=0 transient=0
-BP_Marker_Computer member 12 LocationName StrProperty edit=1 transient=0
-BP_Marker_Computer member 13 Landing ObjectProperty</Script/Engine.Actor> edit=1 transient=0
-BP_Marker_Computer member 14 ReinforcementStart ObjectProperty</Script/Engine.PlayerStart> edit=1 transient=0
+BP_Marker_Computer component 1 Preview_S0 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=/Engine/BasicShapes/Cube.Cube
+BP_Marker_Computer component 2 Preview_S1 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Computer component 3 Preview_S2 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Computer component 4 Preview_S3 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Computer component 5 Preview_S4 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Computer component 6 Preview_S5 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Computer component 7 Preview_S6 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Computer component 8 Preview_S7 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Computer component 9 Preview_K0 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0
+BP_Marker_Computer component 10 Preview_K1 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0
+BP_Marker_Computer component 11 Icon BillboardComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 sprite=/Engine/EditorResources/S_Actor.S_Actor
+BP_Marker_Computer member 0 Icon ObjectProperty</Script/Engine.BillboardComponent> edit=0 transient=0 default="None"
+BP_Marker_Computer member 1 Preview_K1 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Computer member 2 Preview_K0 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Computer member 3 Preview_S7 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Computer member 4 Preview_S6 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Computer member 5 Preview_S5 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Computer member 6 Preview_S4 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Computer member 7 Preview_S3 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Computer member 8 Preview_S2 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Computer member 9 Preview_S1 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Computer member 10 Preview_S0 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Computer member 11 DefaultSceneRoot ObjectProperty</Script/Engine.SceneComponent> edit=0 transient=0 default="None"
+BP_Marker_Computer member 12 LocationName StrProperty edit=1 transient=0 default=""
+BP_Marker_Computer member 13 Landing ObjectProperty</Script/Engine.Actor> edit=1 transient=0 default="None"
+BP_Marker_Computer member 14 ReinforcementStart ObjectProperty</Script/Engine.PlayerStart> edit=1 transient=0 default="None"
 BP_Marker_Generator parent /Script/Engine.Actor
 BP_Marker_Generator component 0 DefaultSceneRoot SceneComponent parent=None editoronly=0
-BP_Marker_Generator component 1 Preview_S0 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Generator component 2 Preview_S1 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Generator component 3 Preview_S2 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Generator component 4 Preview_S3 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Generator component 5 Preview_S4 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Generator component 6 Preview_S5 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Generator component 7 Preview_S6 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Generator component 8 Preview_S7 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Generator component 9 Preview_K0 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Generator component 10 Preview_K1 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Generator component 11 Icon BillboardComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Generator member 0 Icon ObjectProperty</Script/Engine.BillboardComponent> edit=0 transient=0
-BP_Marker_Generator member 1 Preview_K1 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0
-BP_Marker_Generator member 2 Preview_K0 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0
-BP_Marker_Generator member 3 Preview_S7 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Generator member 4 Preview_S6 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Generator member 5 Preview_S5 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Generator member 6 Preview_S4 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Generator member 7 Preview_S3 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Generator member 8 Preview_S2 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Generator member 9 Preview_S1 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Generator member 10 Preview_S0 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Generator member 11 DefaultSceneRoot ObjectProperty</Script/Engine.SceneComponent> edit=0 transient=0
-BP_Marker_Generator member 12 LocationName StrProperty edit=1 transient=0
-BP_Marker_Generator member 13 Equipment array<ObjectProperty</Script/Engine.Actor>> edit=1 transient=0
+BP_Marker_Generator component 1 Preview_S0 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=/Engine/BasicShapes/Cube.Cube
+BP_Marker_Generator component 2 Preview_S1 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Generator component 3 Preview_S2 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Generator component 4 Preview_S3 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Generator component 5 Preview_S4 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Generator component 6 Preview_S5 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Generator component 7 Preview_S6 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Generator component 8 Preview_S7 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Generator component 9 Preview_K0 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0
+BP_Marker_Generator component 10 Preview_K1 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0
+BP_Marker_Generator component 11 Icon BillboardComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 sprite=/Engine/EditorResources/S_Actor.S_Actor
+BP_Marker_Generator member 0 Icon ObjectProperty</Script/Engine.BillboardComponent> edit=0 transient=0 default="None"
+BP_Marker_Generator member 1 Preview_K1 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Generator member 2 Preview_K0 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Generator member 3 Preview_S7 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Generator member 4 Preview_S6 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Generator member 5 Preview_S5 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Generator member 6 Preview_S4 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Generator member 7 Preview_S3 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Generator member 8 Preview_S2 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Generator member 9 Preview_S1 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Generator member 10 Preview_S0 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Generator member 11 DefaultSceneRoot ObjectProperty</Script/Engine.SceneComponent> edit=0 transient=0 default="None"
+BP_Marker_Generator member 12 LocationName StrProperty edit=1 transient=0 default=""
+BP_Marker_Generator member 13 Equipment array<ObjectProperty</Script/Engine.Actor>> edit=1 transient=0 default=""
 BP_Marker_Lever parent /Script/Engine.Actor
 BP_Marker_Lever component 0 DefaultSceneRoot SceneComponent parent=None editoronly=0
-BP_Marker_Lever component 1 Preview_S0 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Lever component 2 Preview_S1 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Lever component 3 Preview_S2 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Lever component 4 Preview_S3 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Lever component 5 Preview_S4 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Lever component 6 Preview_S5 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Lever component 7 Preview_S6 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Lever component 8 Preview_S7 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Lever component 9 Preview_K0 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Lever component 10 Preview_K1 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Lever component 11 Icon BillboardComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Lever member 0 Icon ObjectProperty</Script/Engine.BillboardComponent> edit=0 transient=0
-BP_Marker_Lever member 1 Preview_K1 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0
-BP_Marker_Lever member 2 Preview_K0 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0
-BP_Marker_Lever member 3 Preview_S7 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Lever member 4 Preview_S6 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Lever member 5 Preview_S5 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Lever member 6 Preview_S4 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Lever member 7 Preview_S3 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Lever member 8 Preview_S2 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Lever member 9 Preview_S1 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Lever member 10 Preview_S0 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Lever member 11 DefaultSceneRoot ObjectProperty</Script/Engine.SceneComponent> edit=0 transient=0
+BP_Marker_Lever component 1 Preview_S0 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=/Engine/BasicShapes/Cube.Cube
+BP_Marker_Lever component 2 Preview_S1 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Lever component 3 Preview_S2 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Lever component 4 Preview_S3 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Lever component 5 Preview_S4 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Lever component 6 Preview_S5 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Lever component 7 Preview_S6 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Lever component 8 Preview_S7 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Lever component 9 Preview_K0 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0
+BP_Marker_Lever component 10 Preview_K1 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0
+BP_Marker_Lever component 11 Icon BillboardComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 sprite=/Engine/EditorResources/S_Trigger.S_Trigger
+BP_Marker_Lever member 0 Icon ObjectProperty</Script/Engine.BillboardComponent> edit=0 transient=0 default="None"
+BP_Marker_Lever member 1 Preview_K1 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Lever member 2 Preview_K0 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Lever member 3 Preview_S7 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Lever member 4 Preview_S6 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Lever member 5 Preview_S5 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Lever member 6 Preview_S4 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Lever member 7 Preview_S3 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Lever member 8 Preview_S2 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Lever member 9 Preview_S1 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Lever member 10 Preview_S0 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Lever member 11 DefaultSceneRoot ObjectProperty</Script/Engine.SceneComponent> edit=0 transient=0 default="None"
 BP_Marker_EnemySpawner parent /Script/Engine.Actor
 BP_Marker_EnemySpawner component 0 DefaultSceneRoot SceneComponent parent=None editoronly=0
-BP_Marker_EnemySpawner component 1 Preview_S0 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_EnemySpawner component 2 Preview_S1 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_EnemySpawner component 3 Preview_S2 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_EnemySpawner component 4 Preview_S3 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_EnemySpawner component 5 Preview_S4 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_EnemySpawner component 6 Preview_S5 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_EnemySpawner component 7 Preview_S6 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_EnemySpawner component 8 Preview_S7 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_EnemySpawner component 9 Preview_K0 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_EnemySpawner component 10 Preview_K1 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_EnemySpawner component 11 Icon BillboardComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_EnemySpawner member 0 Icon ObjectProperty</Script/Engine.BillboardComponent> edit=0 transient=0
-BP_Marker_EnemySpawner member 1 Preview_K1 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0
-BP_Marker_EnemySpawner member 2 Preview_K0 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0
-BP_Marker_EnemySpawner member 3 Preview_S7 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_EnemySpawner member 4 Preview_S6 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_EnemySpawner member 5 Preview_S5 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_EnemySpawner member 6 Preview_S4 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_EnemySpawner member 7 Preview_S3 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_EnemySpawner member 8 Preview_S2 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_EnemySpawner member 9 Preview_S1 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_EnemySpawner member 10 Preview_S0 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_EnemySpawner member 11 DefaultSceneRoot ObjectProperty</Script/Engine.SceneComponent> edit=0 transient=0
+BP_Marker_EnemySpawner component 1 Preview_S0 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_EnemySpawner component 2 Preview_S1 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_EnemySpawner component 3 Preview_S2 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_EnemySpawner component 4 Preview_S3 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_EnemySpawner component 5 Preview_S4 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_EnemySpawner component 6 Preview_S5 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_EnemySpawner component 7 Preview_S6 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_EnemySpawner component 8 Preview_S7 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_EnemySpawner component 9 Preview_K0 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0
+BP_Marker_EnemySpawner component 10 Preview_K1 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0
+BP_Marker_EnemySpawner component 11 Icon BillboardComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 sprite=/Engine/EditorResources/S_Pawn.S_Pawn
+BP_Marker_EnemySpawner member 0 Icon ObjectProperty</Script/Engine.BillboardComponent> edit=0 transient=0 default="None"
+BP_Marker_EnemySpawner member 1 Preview_K1 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_EnemySpawner member 2 Preview_K0 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_EnemySpawner member 3 Preview_S7 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_EnemySpawner member 4 Preview_S6 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_EnemySpawner member 5 Preview_S5 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_EnemySpawner member 6 Preview_S4 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_EnemySpawner member 7 Preview_S3 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_EnemySpawner member 8 Preview_S2 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_EnemySpawner member 9 Preview_S1 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_EnemySpawner member 10 Preview_S0 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_EnemySpawner member 11 DefaultSceneRoot ObjectProperty</Script/Engine.SceneComponent> edit=0 transient=0 default="None"
 BP_Marker_EnemyWaypoint parent /Script/Engine.Actor
 BP_Marker_EnemyWaypoint component 0 DefaultSceneRoot SceneComponent parent=None editoronly=0
-BP_Marker_EnemyWaypoint component 1 Preview_S0 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_EnemyWaypoint component 2 Preview_S1 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_EnemyWaypoint component 3 Preview_S2 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_EnemyWaypoint component 4 Preview_S3 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_EnemyWaypoint component 5 Preview_S4 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_EnemyWaypoint component 6 Preview_S5 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_EnemyWaypoint component 7 Preview_S6 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_EnemyWaypoint component 8 Preview_S7 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_EnemyWaypoint component 9 Preview_K0 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_EnemyWaypoint component 10 Preview_K1 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_EnemyWaypoint component 11 Icon BillboardComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_EnemyWaypoint member 0 Icon ObjectProperty</Script/Engine.BillboardComponent> edit=0 transient=0
-BP_Marker_EnemyWaypoint member 1 Preview_K1 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0
-BP_Marker_EnemyWaypoint member 2 Preview_K0 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0
-BP_Marker_EnemyWaypoint member 3 Preview_S7 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_EnemyWaypoint member 4 Preview_S6 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_EnemyWaypoint member 5 Preview_S5 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_EnemyWaypoint member 6 Preview_S4 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_EnemyWaypoint member 7 Preview_S3 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_EnemyWaypoint member 8 Preview_S2 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_EnemyWaypoint member 9 Preview_S1 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_EnemyWaypoint member 10 Preview_S0 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_EnemyWaypoint member 11 DefaultSceneRoot ObjectProperty</Script/Engine.SceneComponent> edit=0 transient=0
+BP_Marker_EnemyWaypoint component 1 Preview_S0 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_EnemyWaypoint component 2 Preview_S1 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_EnemyWaypoint component 3 Preview_S2 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_EnemyWaypoint component 4 Preview_S3 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_EnemyWaypoint component 5 Preview_S4 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_EnemyWaypoint component 6 Preview_S5 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_EnemyWaypoint component 7 Preview_S6 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_EnemyWaypoint component 8 Preview_S7 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_EnemyWaypoint component 9 Preview_K0 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0
+BP_Marker_EnemyWaypoint component 10 Preview_K1 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0
+BP_Marker_EnemyWaypoint component 11 Icon BillboardComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 sprite=/Engine/EditorResources/S_NavP.S_NavP
+BP_Marker_EnemyWaypoint member 0 Icon ObjectProperty</Script/Engine.BillboardComponent> edit=0 transient=0 default="None"
+BP_Marker_EnemyWaypoint member 1 Preview_K1 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_EnemyWaypoint member 2 Preview_K0 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_EnemyWaypoint member 3 Preview_S7 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_EnemyWaypoint member 4 Preview_S6 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_EnemyWaypoint member 5 Preview_S5 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_EnemyWaypoint member 6 Preview_S4 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_EnemyWaypoint member 7 Preview_S3 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_EnemyWaypoint member 8 Preview_S2 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_EnemyWaypoint member 9 Preview_S1 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_EnemyWaypoint member 10 Preview_S0 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_EnemyWaypoint member 11 DefaultSceneRoot ObjectProperty</Script/Engine.SceneComponent> edit=0 transient=0 default="None"
 BP_Marker_Landing parent /Script/Engine.Actor
 BP_Marker_Landing component 0 DefaultSceneRoot SceneComponent parent=None editoronly=0
-BP_Marker_Landing component 1 Preview_S0 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Landing component 2 Preview_S1 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Landing component 3 Preview_S2 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Landing component 4 Preview_S3 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Landing component 5 Preview_S4 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Landing component 6 Preview_S5 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Landing component 7 Preview_S6 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Landing component 8 Preview_S7 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Landing component 9 Preview_K0 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Landing component 10 Preview_K1 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Landing component 11 Icon BillboardComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Landing member 0 Icon ObjectProperty</Script/Engine.BillboardComponent> edit=0 transient=0
-BP_Marker_Landing member 1 Preview_K1 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0
-BP_Marker_Landing member 2 Preview_K0 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0
-BP_Marker_Landing member 3 Preview_S7 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Landing member 4 Preview_S6 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Landing member 5 Preview_S5 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Landing member 6 Preview_S4 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Landing member 7 Preview_S3 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Landing member 8 Preview_S2 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Landing member 9 Preview_S1 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Landing member 10 Preview_S0 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Landing member 11 DefaultSceneRoot ObjectProperty</Script/Engine.SceneComponent> edit=0 transient=0
+BP_Marker_Landing component 1 Preview_S0 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Landing component 2 Preview_S1 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Landing component 3 Preview_S2 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Landing component 4 Preview_S3 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Landing component 5 Preview_S4 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Landing component 6 Preview_S5 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Landing component 7 Preview_S6 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Landing component 8 Preview_S7 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Landing component 9 Preview_K0 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0
+BP_Marker_Landing component 10 Preview_K1 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0
+BP_Marker_Landing component 11 Icon BillboardComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 sprite=/Engine/EditorResources/S_TargetPoint.S_TargetPoint
+BP_Marker_Landing member 0 Icon ObjectProperty</Script/Engine.BillboardComponent> edit=0 transient=0 default="None"
+BP_Marker_Landing member 1 Preview_K1 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Landing member 2 Preview_K0 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Landing member 3 Preview_S7 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Landing member 4 Preview_S6 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Landing member 5 Preview_S5 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Landing member 6 Preview_S4 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Landing member 7 Preview_S3 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Landing member 8 Preview_S2 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Landing member 9 Preview_S1 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Landing member 10 Preview_S0 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Landing member 11 DefaultSceneRoot ObjectProperty</Script/Engine.SceneComponent> edit=0 transient=0 default="None"
 BP_Marker_Map parent /Script/Engine.Actor
 BP_Marker_Map component 0 DefaultSceneRoot SceneComponent parent=None editoronly=0
-BP_Marker_Map component 1 Preview_S0 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Map component 2 Preview_S1 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Map component 3 Preview_S2 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Map component 4 Preview_S3 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Map component 5 Preview_S4 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Map component 6 Preview_S5 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Map component 7 Preview_S6 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Map component 8 Preview_S7 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Map component 9 Preview_K0 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Map component 10 Preview_K1 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Map component 11 Icon BillboardComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Map member 0 Icon ObjectProperty</Script/Engine.BillboardComponent> edit=0 transient=0
-BP_Marker_Map member 1 Preview_K1 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0
-BP_Marker_Map member 2 Preview_K0 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0
-BP_Marker_Map member 3 Preview_S7 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Map member 4 Preview_S6 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Map member 5 Preview_S5 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Map member 6 Preview_S4 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Map member 7 Preview_S3 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Map member 8 Preview_S2 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Map member 9 Preview_S1 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Map member 10 Preview_S0 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Map member 11 DefaultSceneRoot ObjectProperty</Script/Engine.SceneComponent> edit=0 transient=0
-BP_Marker_Map member 12 Picture StrProperty edit=1 transient=0
-BP_Marker_Map member 13 RectMin StructProperty</Script/CoreUObject.Vector> edit=1 transient=0
-BP_Marker_Map member 14 RectMax StructProperty</Script/CoreUObject.Vector> edit=1 transient=0
-BP_Marker_Map member 15 KeepPicture ObjectProperty</Script/Engine.Texture2D> edit=0 transient=1
+BP_Marker_Map component 1 Preview_S0 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Map component 2 Preview_S1 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Map component 3 Preview_S2 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Map component 4 Preview_S3 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Map component 5 Preview_S4 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Map component 6 Preview_S5 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Map component 7 Preview_S6 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Map component 8 Preview_S7 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Map component 9 Preview_K0 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0
+BP_Marker_Map component 10 Preview_K1 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0
+BP_Marker_Map component 11 Icon BillboardComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 sprite=/Engine/EditorResources/S_Note.S_Note
+BP_Marker_Map member 0 Icon ObjectProperty</Script/Engine.BillboardComponent> edit=0 transient=0 default="None"
+BP_Marker_Map member 1 Preview_K1 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Map member 2 Preview_K0 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Map member 3 Preview_S7 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Map member 4 Preview_S6 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Map member 5 Preview_S5 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Map member 6 Preview_S4 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Map member 7 Preview_S3 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Map member 8 Preview_S2 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Map member 9 Preview_S1 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Map member 10 Preview_S0 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Map member 11 DefaultSceneRoot ObjectProperty</Script/Engine.SceneComponent> edit=0 transient=0 default="None"
+BP_Marker_Map member 12 Picture StrProperty edit=1 transient=0 default=""
+BP_Marker_Map member 13 RectMin StructProperty</Script/CoreUObject.Vector> edit=1 transient=0 default="(X=0.000000,Y=0.000000,Z=0.000000)"
+BP_Marker_Map member 14 RectMax StructProperty</Script/CoreUObject.Vector> edit=1 transient=0 default="(X=0.000000,Y=0.000000,Z=0.000000)"
+BP_Marker_Map member 15 KeepPicture ObjectProperty</Script/Engine.Texture2D> edit=0 transient=1 default="None"
 BP_Marker_Location parent /Script/Engine.Actor
 BP_Marker_Location component 0 DefaultSceneRoot SceneComponent parent=None editoronly=0
-BP_Marker_Location component 1 Preview_S0 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Location component 2 Preview_S1 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Location component 3 Preview_S2 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Location component 4 Preview_S3 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Location component 5 Preview_S4 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Location component 6 Preview_S5 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Location component 7 Preview_S6 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Location component 8 Preview_S7 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Location component 9 Preview_K0 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Location component 10 Preview_K1 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Location component 11 Icon BillboardComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Location member 0 Icon ObjectProperty</Script/Engine.BillboardComponent> edit=0 transient=0
-BP_Marker_Location member 1 Preview_K1 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0
-BP_Marker_Location member 2 Preview_K0 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0
-BP_Marker_Location member 3 Preview_S7 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Location member 4 Preview_S6 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Location member 5 Preview_S5 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Location member 6 Preview_S4 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Location member 7 Preview_S3 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Location member 8 Preview_S2 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Location member 9 Preview_S1 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Location member 10 Preview_S0 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Location member 11 DefaultSceneRoot ObjectProperty</Script/Engine.SceneComponent> edit=0 transient=0
-BP_Marker_Location member 12 LocationName StrProperty edit=1 transient=0
+BP_Marker_Location component 1 Preview_S0 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Location component 2 Preview_S1 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Location component 3 Preview_S2 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Location component 4 Preview_S3 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Location component 5 Preview_S4 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Location component 6 Preview_S5 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Location component 7 Preview_S6 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Location component 8 Preview_S7 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Location component 9 Preview_K0 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0
+BP_Marker_Location component 10 Preview_K1 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0
+BP_Marker_Location component 11 Icon BillboardComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 sprite=/Engine/EditorResources/S_TextRenderActorIcon.S_TextRenderActorIcon
+BP_Marker_Location member 0 Icon ObjectProperty</Script/Engine.BillboardComponent> edit=0 transient=0 default="None"
+BP_Marker_Location member 1 Preview_K1 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Location member 2 Preview_K0 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Location member 3 Preview_S7 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Location member 4 Preview_S6 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Location member 5 Preview_S5 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Location member 6 Preview_S4 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Location member 7 Preview_S3 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Location member 8 Preview_S2 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Location member 9 Preview_S1 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Location member 10 Preview_S0 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Location member 11 DefaultSceneRoot ObjectProperty</Script/Engine.SceneComponent> edit=0 transient=0 default="None"
+BP_Marker_Location member 12 LocationName StrProperty edit=1 transient=0 default=""
 BP_Marker_Sky parent /Script/Engine.Actor
 BP_Marker_Sky component 0 DefaultSceneRoot SceneComponent parent=None editoronly=0
-BP_Marker_Sky component 1 Preview_S0 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Sky component 2 Preview_S1 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Sky component 3 Preview_S2 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Sky component 4 Preview_S3 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Sky component 5 Preview_S4 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Sky component 6 Preview_S5 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Sky component 7 Preview_S6 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Sky component 8 Preview_S7 StaticMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Sky component 9 Preview_K0 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Sky component 10 Preview_K1 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Sky component 11 Icon BillboardComponent parent=DefaultSceneRoot editoronly=1
-BP_Marker_Sky member 0 Icon ObjectProperty</Script/Engine.BillboardComponent> edit=0 transient=0
-BP_Marker_Sky member 1 Preview_K1 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0
-BP_Marker_Sky member 2 Preview_K0 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0
-BP_Marker_Sky member 3 Preview_S7 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Sky member 4 Preview_S6 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Sky member 5 Preview_S5 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Sky member 6 Preview_S4 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Sky member 7 Preview_S3 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Sky member 8 Preview_S2 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Sky member 9 Preview_S1 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Sky member 10 Preview_S0 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0
-BP_Marker_Sky member 11 DefaultSceneRoot ObjectProperty</Script/Engine.SceneComponent> edit=0 transient=0
-BP_Marker_Sky member 12 StartHour DoubleProperty edit=1 transient=0
+BP_Marker_Sky component 1 Preview_S0 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Sky component 2 Preview_S1 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Sky component 3 Preview_S2 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Sky component 4 Preview_S3 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Sky component 5 Preview_S4 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Sky component 6 Preview_S5 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Sky component 7 Preview_S6 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Sky component 8 Preview_S7 StaticMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 mesh=None
+BP_Marker_Sky component 9 Preview_K0 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0
+BP_Marker_Sky component 10 Preview_K1 SkeletalMeshComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0
+BP_Marker_Sky component 11 Icon BillboardComponent parent=DefaultSceneRoot editoronly=1 collision=ECollisionEnabled::NoCollision nav=0 shadow=0 sprite=/Engine/EditorResources/S_SkyAtmosphere.S_SkyAtmosphere
+BP_Marker_Sky member 0 Icon ObjectProperty</Script/Engine.BillboardComponent> edit=0 transient=0 default="None"
+BP_Marker_Sky member 1 Preview_K1 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Sky member 2 Preview_K0 ObjectProperty</Script/Engine.SkeletalMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Sky member 3 Preview_S7 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Sky member 4 Preview_S6 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Sky member 5 Preview_S5 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Sky member 6 Preview_S4 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Sky member 7 Preview_S3 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Sky member 8 Preview_S2 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Sky member 9 Preview_S1 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Sky member 10 Preview_S0 ObjectProperty</Script/Engine.StaticMeshComponent> edit=0 transient=0 default="None"
+BP_Marker_Sky member 11 DefaultSceneRoot ObjectProperty</Script/Engine.SceneComponent> edit=0 transient=0 default="None"
+BP_Marker_Sky member 12 StartHour DoubleProperty edit=1 transient=0 ClampMin=0.0 ClampMax=24.0 default="0.000000"
 E_MarkerItem entry 0 NewEnumerator0 0 "Painkillers"
 E_MarkerItem entry 1 NewEnumerator1 1 "Flashlight"
 E_MarkerItem entry 2 E_MAX 2 "-"

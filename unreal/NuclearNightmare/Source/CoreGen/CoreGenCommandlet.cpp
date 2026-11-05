@@ -996,14 +996,41 @@ namespace
 				FName ParentName = NAME_None;
 				for (USCS_Node* P : BP->SimpleConstructionScript->GetAllNodes()) if (P->GetChildNodes().Contains(N)) ParentName = P->GetVariableName();
 				const UActorComponent* T = N->ComponentTemplate;
-				Out.Add(FString::Printf(TEXT("%s component %d %s %s parent=%s editoronly=%d"), *Name, I++, *N->GetVariableName().ToString(),
-					N->ComponentClass ? *N->ComponentClass->GetName() : TEXT("?"), *ParentName.ToString(), T && T->bIsEditorOnly ? 1 : 0));
+				// The template's settings the spec fixes: collision, navigation, shadow, the box mesh, the icon's sprite.
+				FString Extra;
+				if (const UPrimitiveComponent* Prim = Cast<UPrimitiveComponent>(T))
+				{
+					Extra += FString::Printf(TEXT(" collision=%s nav=%d shadow=%d"), *UEnum::GetValueAsString(Prim->GetCollisionEnabled()),
+						Prim->CanEverAffectNavigation() ? 1 : 0, Prim->CastShadow ? 1 : 0);
+				}
+				if (const UStaticMeshComponent* SM = Cast<UStaticMeshComponent>(T))
+				{
+					Extra += FString::Printf(TEXT(" mesh=%s"), SM->GetStaticMesh() ? *SM->GetStaticMesh()->GetPathName() : TEXT("None"));
+				}
+				if (const UBillboardComponent* BB = Cast<UBillboardComponent>(T))
+				{
+					Extra += FString::Printf(TEXT(" sprite=%s"), BB->Sprite ? *BB->Sprite->GetPathName() : TEXT("None"));
+				}
+				Out.Add(FString::Printf(TEXT("%s component %d %s %s parent=%s editoronly=%d%s"), *Name, I++, *N->GetVariableName().ToString(),
+					N->ComponentClass ? *N->ComponentClass->GetName() : TEXT("?"), *ParentName.ToString(), T && T->bIsEditorOnly ? 1 : 0, *Extra));
 			}
 			I = 0;
 			for (TFieldIterator<FProperty> It(C, EFieldIteratorFlags::ExcludeSuper); It; ++It)
 			{
 				const bool bEdit = It->HasAnyPropertyFlags(CPF_Edit) && !It->HasAnyPropertyFlags(CPF_DisableEditOnInstance);
-				Out.Add(FString::Printf(TEXT("%s member %d %s %s edit=%d transient=%d"), *Name, I++, *It->GetName(), *LayoutType(*It, Dir), bEdit ? 1 : 0, It->HasAnyPropertyFlags(CPF_Transient) ? 1 : 0));
+				FString Extra;
+				for (const TCHAR* Key : { TEXT("ClampMin"), TEXT("ClampMax") })
+				{
+					if (It->HasMetaData(Key)) Extra += FString::Printf(TEXT(" %s=%s"), Key, *It->GetMetaData(Key));
+				}
+				// The class default (exported text, the core folder as <Core>): what an unset placed marker reads.
+				FString Default;
+				It->ExportTextItem_InContainer(Default, C->GetDefaultObject(), nullptr, nullptr, PPF_None);
+				Default.ReplaceInline(TEXT("\r"), TEXT(" "));
+				Default.ReplaceInline(TEXT("\n"), TEXT(" "));
+				Default.ReplaceInline(*(Dir + TEXT("/")), TEXT("/Game/Mods/<Core>/"), ESearchCase::CaseSensitive);
+				Out.Add(FString::Printf(TEXT("%s member %d %s %s edit=%d transient=%d%s default=\"%s\""), *Name, I++, *It->GetName(), *LayoutType(*It, Dir),
+					bEdit ? 1 : 0, It->HasAnyPropertyFlags(CPF_Transient) ? 1 : 0, *Extra, *Default));
 			}
 			TArray<FString> Fns;
 			for (TFieldIterator<UFunction> It(C, EFieldIteratorFlags::ExcludeSuper); It; ++It) Fns.Add(It->GetName());
