@@ -8,6 +8,20 @@
                never packaged). Then mods/cpp-spike/abi-check.ps1 must report no missing imports for both.
     blueprint  UE 5.6 (-Engine): compile the editor-only generator, run -run=CoreGen -CoreName=<name>, cook,
                repak pack --version V11 (uncompressed) /Game/Mods/<name>/ as <name>.pak.
+               Map markers (map service story 4): CoreGen also writes /Game/Mods/<name>/Map/ (the twelve
+               BP_Marker_<Kind> and E_MarkerItem) and their layout (-Layout=build/logs/layout-generated.txt): per
+               marker its components, its properties in order with their types, its functions, and the enum's
+               entries. That layout must equal the committed golden file unreal/map-markers.layout line for line: the
+               layout is frozen (cooked levels store a placed marker's values by position), so any difference fails.
+               Author template (-Template, default the workspace's mods/map-spike/unreal/NuclearNightmare): it carries
+               committed copies of the 13 uncooked files at Content/Mods/<name>/Map/. -RefreshTemplate rewrites them
+               from this build; without it they are left alone. Either way their layout is read back (CoreGen
+               -LayoutOnly on the copies, swapped in for the generated files and swapped back) and must equal the
+               golden file too; uncooked packages aren't byte-identical across runs, so layout, not bytes.
+               Pack guard: the pak may hold only Content/Mods/<name>/ and must hold all 13; no staged file may name a
+               /Game path outside /Game/Mods/<name>/, and no cooked marker may name BasicShapes, _Preview,
+               EditorResources or a component template <Name>_GEN_VARIABLE other than DefaultSceneRoot's (the one
+               component that isn't editor-only): its editor-only preview slots and icon must be stripped.
     lua        Stage lua/main.lua and lua/pkg/ (with lua/pkg/ui/) as Scripts/main.lua and Scripts/<lowercase name>/, plus a generated
                Scripts/<lowercase name>/version.lua.
     package    build/package/Mods/<name>/{mod.json,dlls/main.dll,Scripts/} and build/package/LogicMods/<name>.pak.
@@ -23,6 +37,10 @@ param(
     [string[]] $Steps = @('native', 'blueprint', 'lua', 'package'),
     [string] $Ue4ssSrc,
     [string] $Engine = 'C:\Program Files\Epic Games\UE_5.6',
+    # The author template project (an Unreal project folder) whose committed Content/Mods/<name>/Map/ copies are checked.
+    [string] $Template,
+    # Rewrite the template's 13 map files (12 markers and E_MarkerItem) from this build.
+    [switch] $RefreshTemplate,
     [switch] $Clean
 )
 $ErrorActionPreference = 'Stop'
@@ -52,6 +70,31 @@ if (-not (Test-Path $repak)) {
     $repak = Join-Path $mainWs 'tools\repak\repak.exe'
 }
 $abiCheck = Join-Path $root 'mods\cpp-spike\abi-check.ps1'
+if (-not $Template) { $Template = Join-Path $root 'mods\map-spike\unreal\NuclearNightmare' }
+# The map markers' kinds (CoreGenCommandlet.cpp BuildMarkers) and the Item enum: the assets under /Game/Mods/<name>/Map/.
+$markerKinds = 'Start', 'Item', 'Intel', 'Computer', 'Generator', 'Lever', 'EnemySpawner', 'EnemyWaypoint', 'Landing', 'Map', 'Location', 'Sky'
+$mapAssets   = @($markerKinds | ForEach-Object { "BP_Marker_$_" }) + 'E_MarkerItem'
+$golden      = Join-Path $here 'unreal\map-markers.layout'
+
+# The layout lines of a CoreGen -Layout= file, or of the golden file: every line but blanks and # comments.
+function Get-Layout([string] $file) { @(Get-Content $file | Where-Object { $_.Trim() -and -not $_.StartsWith('#') }) }
+# Throws when $file's layout differs from the golden file's, naming the first differing lines and $hint.
+function Assert-Layout([string] $file, [string] $what, [string] $hint) {
+    if (-not (Test-Path $golden)) { throw "No golden layout file at $golden" }
+    if (-not (Test-Path $file)) { throw "No layout written for $what ($file)" }
+    $want = Get-Layout $golden
+    $have = Get-Layout $file
+    $diff = @()
+    for ($i = 0; $i -lt [math]::Max($want.Count, $have.Count); $i++) {
+        $w = if ($i -lt $want.Count) { $want[$i] } else { '(nothing)' }
+        $h = if ($i -lt $have.Count) { $have[$i] } else { '(nothing)' }
+        if ($w -cne $h) { $diff += "line $($i + 1): want '$w', have '$h'" }
+    }
+    if ($diff) {
+        throw "The layout of $what differs from the golden file $golden ($($diff.Count) lines; full layout: $file):`n  $(($diff | Select-Object -First 12) -join "`n  ")`n$hint"
+    }
+    Write-Host "   layout of $what = golden ($($want.Count) lines): OK"
+}
 
 if ($Clean) { Remove-Item $out -Recurse -Force -ErrorAction SilentlyContinue }
 New-Item -ItemType Directory -Force $logs | Out-Null
@@ -119,7 +162,44 @@ Step 'blueprint' {
     if ($uproj.Length -gt 140) { Write-Warning "Unreal project path is $($uproj.Length) characters; UBT may hit the 260-character limit" }
     Run 'bp-compile.log' $buildBat @('NuclearNightmareEditor', 'Win64', 'Development', "-Project=$uproj", '-WaitMutex')
     Remove-Item (Join-Path $proj 'Content\Mods') -Recurse -Force -ErrorAction SilentlyContinue
-    Run 'bp-generate.log' $editor @($uproj, '-run=CoreGen', "-CoreName=$name", '-unattended', '-nopause', '-nosplash', '-stdout', '-NoLogTimes')
+    $layoutGen = Join-Path $logs 'layout-generated.txt'
+    Remove-Item $layoutGen -ErrorAction SilentlyContinue
+    Run 'bp-generate.log' $editor @($uproj, '-run=CoreGen', "-CoreName=$name", "-Layout=$layoutGen", '-unattended', '-nopause', '-nosplash', '-stdout', '-NoLogTimes')
+    Select-String -Path (Join-Path $logs 'bp-generate.log') -Pattern 'MARKER .*(enum|markers and)' -CaseSensitive | ForEach-Object { Write-Host "   $($_.Line -replace '^.*?MARKER', 'MARKER')" }
+    $mapSrc = Join-Path $proj "Content\Mods\$name\Map"
+    $want = @($mapAssets | ForEach-Object { "$_.uasset" } | Sort-Object)
+    $have = @(Get-ChildItem $mapSrc -File -ErrorAction SilentlyContinue | ForEach-Object Name | Sort-Object)
+    if (($have -join '|') -cne ($want -join '|')) { throw "CoreGen wrote $($have -join ', ') under $mapSrc; want exactly $($want -join ', ')" }
+    Assert-Layout $layoutGen "the generated markers (/Game/Mods/$name/Map/)" ("The markers' layout is frozen once released (map service story 4): restore it in CoreGenCommandlet.cpp BuildMarkers. " +
+        "Only before the first release, and only for an intended change, copy $layoutGen over the golden file, then rebuild with -RefreshTemplate.")
+
+    # The author template's committed copies (never generated a second time there): rewritten only with -RefreshTemplate.
+    $tplHint = "Rewrite them with: build.ps1 -Steps blueprint -RefreshTemplate -Template <the template project>, then commit them in the workspace."
+    if (-not (Test-Path (Join-Path $Template 'NuclearNightmare.uproject'))) { throw "No template project at $Template (pass -Template <Unreal project folder>)" }
+    $mapDst = Join-Path $Template "Content\Mods\$name\Map"
+    if ($RefreshTemplate) {
+        Remove-Item $mapDst -Recurse -Force -ErrorAction SilentlyContinue
+        New-Item -ItemType Directory -Force $mapDst | Out-Null
+        Copy-Item (Join-Path $mapSrc '*.uasset') $mapDst
+        Write-Host "   template: -RefreshTemplate wrote the $($want.Count) map files to $mapDst"
+    }
+    $dstNames = @(Get-ChildItem $mapDst -File -ErrorAction SilentlyContinue | ForEach-Object Name | Sort-Object)
+    if (($dstNames -join '|') -cne ($want -join '|')) { throw "The template's $mapDst holds $(if ($dstNames) { $dstNames -join ', ' } else { 'nothing' }); want exactly $($want -join ', '). $tplHint" }
+    # Read the copies' layout back in this project: swap them in for the generated files, then swap those back.
+    $keep = Join-Path $out 'map-generated'
+    Remove-Item $keep -Recurse -Force -ErrorAction SilentlyContinue
+    Copy-Item $mapSrc $keep -Recurse
+    $layoutTpl = Join-Path $logs 'layout-template.txt'
+    Remove-Item $layoutTpl -ErrorAction SilentlyContinue
+    try {
+        Remove-Item (Join-Path $mapSrc '*') -Force
+        Copy-Item (Join-Path $mapDst '*.uasset') $mapSrc
+        Run 'bp-layout-template.log' $editor @($uproj, '-run=CoreGen', "-CoreName=$name", '-LayoutOnly', "-Layout=$layoutTpl", '-unattended', '-nopause', '-nosplash', '-stdout', '-NoLogTimes')
+    } finally {
+        Remove-Item (Join-Path $mapSrc '*') -Force -ErrorAction SilentlyContinue
+        Copy-Item (Join-Path $keep '*') $mapSrc
+    }
+    Assert-Layout $layoutTpl "the template's copies ($mapDst)" $tplHint
     $cookedRoot = Join-Path $proj 'Saved\Cooked\Windows\NuclearNightmare\Content\Mods'
     Remove-Item $cookedRoot -Recurse -Force -ErrorAction SilentlyContinue
     Run 'bp-cook.log' $editor @($uproj, '-run=cook', '-targetplatform=Windows', '-unversioned', '-unattended', '-nopause', '-nosplash', '-stdout', '-NoLogTimes')
@@ -131,10 +211,33 @@ Step 'blueprint' {
     $dest = Join-Path $stage "NuclearNightmare\Content\Mods\$name"
     New-Item -ItemType Directory -Force $dest | Out-Null
     Copy-Item "$cooked\*" $dest -Recurse
+    # Pack guard: no staged file names a /Game path outside our own folder, and the cooked markers carry no preview.
+    function Text($f) { [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($f.FullName)) }
+    foreach ($f in Get-ChildItem $stage -Recurse -File) {
+        $g = @([regex]::Matches((Text $f), '/Game/[A-Za-z0-9_/\-]+') | ForEach-Object Value | Where-Object { $_ -notlike "/Game/Mods/$name/*" } | Sort-Object -Unique)
+        if ($g) { throw "Refusing: the cooked $($f.Name) names /Game paths outside /Game/Mods/$($name): $($g -join ', ')" }
+    }
+    $cookedMap = Join-Path $dest 'Map'
+    foreach ($a in $mapAssets) {
+        $files = @(Get-ChildItem $cookedMap -File -Filter "$a.*" -ErrorAction SilentlyContinue)
+        if (-not ($files | Where-Object Extension -eq '.uasset')) { throw "$a was not cooked (no $a.uasset under $cookedMap)" }
+        if ($a -like 'BP_Marker_*') {
+            $t = ($files | ForEach-Object { Text $_ }) -join ''
+            # The root (not editor-only) keeps its template DefaultSceneRoot_GEN_VARIABLE; any other template is a slot or the icon.
+            $hit = [regex]::Match($t, 'BasicShapes|_Preview|EditorResources|\w*(?<!DefaultSceneRoot)_GEN_VARIABLE', 'IgnoreCase')
+            if ($hit.Success) { throw "Refusing: the cooked $a names $($hit.Value) (its editor-only preview slots or icon were not stripped)" }
+        }
+    }
+    Write-Host "   $($mapAssets.Count) map assets cooked; no preview or icon, no foreign /Game path: OK"
     $pak = Join-Path $out "$name.pak"
     & $repak pack --version V11 -q $stage $pak
     if ($LASTEXITCODE) { throw 'repak pack failed' }
-    Write-Host "   $name.pak:"; & $repak list $pak | ForEach-Object { Write-Host "     $_" }
+    $list = @(& $repak list $pak)
+    $foreign = @($list | Where-Object { $_ -notlike "NuclearNightmare/Content/Mods/$name/*" })
+    if ($foreign) { Remove-Item $pak; throw "Refusing: $name.pak would hold files outside Content/Mods/$($name): $($foreign -join ', ')" }
+    $missing = @($mapAssets | Where-Object { $list -notcontains "NuclearNightmare/Content/Mods/$name/Map/$_.uasset" })
+    if ($missing) { Remove-Item $pak; throw "Refusing: $name.pak lacks $($missing -join ', ')" }
+    Write-Host "   $name.pak:"; $list | ForEach-Object { Write-Host "     $_" }
 }
 
 Step 'lua' {
