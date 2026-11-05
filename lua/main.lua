@@ -7,6 +7,8 @@ local NAME = scriptDir:match("([^/\\]+)[/\\][Ss]cripts$")
 local LOWER = NAME:lower()
 local V = require(LOWER .. ".version")
 local log = require(LOWER .. ".log").new(NAME)
+-- The map service's host setup (lua/pkg/map/setup.lua, map service story 5); loaded here, started in start().
+local okMap, MAP = pcall(require, LOWER .. ".map.setup")
 
 local CLASS_PKG = "/Game/Mods/" .. NAME .. "/ModActor"
 local CLASS = CLASS_PKG .. ".ModActor_C"
@@ -20,6 +22,8 @@ local function setState(s)
     ModRef:SetSharedVariable(LOWER .. ".state", s)
 end
 setState("loading")
+-- <core>.map: "ready" once the map service's setup is installed (DemoMapLoader then skips its own), else why not.
+ModRef:SetSharedVariable(LOWER .. ".map", "loading")
 local boot = (tonumber(ModRef:GetSharedVariable(LOWER .. ".boot")) or 0) + 1
 ModRef:SetSharedVariable(LOWER .. ".boot", boot)
 ModRef:SetSharedVariable(LOWER .. ".version", V.version)
@@ -117,6 +121,21 @@ local function start()
         log.error("objectives natives missing from the native part (%s); intel task lists can't be filled. Reinstall %s.", table.concat(missingNatives, ", "), NAME)
     end
 
+    -- The map service: the Start marker's and the game state's BeginPlay hooks (InitGameState post-hook); the setup's
+    -- LoadMap part runs from core's one LoadMap post-hook below.
+    local mapReady = false
+    if not okMap then
+        log.error("map service did not load (%s); no map setup on this machine", tostring(MAP):match("^[^\n]*"))
+        ModRef:SetSharedVariable(LOWER .. ".map", "failed: did not load")
+    else
+        local okI, errI = pcall(function() MAP.init({ log = log }) MAP.install() end)
+        if okI then mapReady = true
+        else
+            log.error("map service could not start: %s", tostring(errI):match("^[^\n]*"))
+            ModRef:SetSharedVariable(LOWER .. ".map", "failed: could not start")
+        end
+    end
+
     NotifyOnNewObject(CLASS, function()
         local okN, errN = pcall(hookChannel, "NotifyOnNewObject")
         if not okN then log.error("channel hook from NotifyOnNewObject failed: %s", tostring(errN)) end
@@ -128,7 +147,11 @@ local function start()
     -- The LoadMap hook runs on the game thread, so the delayed check is scheduled from there and runs there. Not
     -- ExecuteWithDelay + ExecuteInGameThread: an ExecuteInGameThread from the async thread can lose its callback while
     -- this state's Lua runs on the game thread (the channel hook, for one); lua/pkg/ui/hud.lua explains the race.
-    RegisterLoadMapPostHook(function()
+    RegisterLoadMapPostHook(function(_, world)
+        if mapReady then
+            local okM, errM = pcall(function() MAP.onLoadMap(world and world:get()) end)
+            if not okM then log.error("map service LoadMap part failed: %s", tostring(errM):match("^[^\n]*")) end
+        end
         local okL, errL = pcall(ExecuteInGameThreadWithDelay, 3000, function()
             local ok, err = pcall(ensureClass)
             if not ok then log.error("class check failed: %s", tostring(err)) end
@@ -137,10 +160,12 @@ local function start()
     end)
 
     ModRef.OnUnload = function()
+        pcall(function() ModRef:SetSharedVariable(LOWER .. ".map", "stopped") end)
         local okU, errU = pcall(setState, "stopped")
         log.info("STOPPED%s", okU and "" or (" (state not published: " .. tostring(errU) .. ")"))
     end
 
+    if mapReady then ModRef:SetSharedVariable(LOWER .. ".map", "ready") end
     setState("ready")
     log.info("READY version=%s native=%s ue4ss=%s boot=%d", V.version, tostring(nv), tostring(nue), boot)
 end
