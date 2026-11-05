@@ -107,6 +107,15 @@ local function start()
         log.error("native part %s does not match Lua part %s; reinstall %s. %s does nothing.", tostring(nv), V.version, NAME, NAME)
         return
     end
+    -- The objectives natives (native/src/objectives.cpp; the map service fills intel task lists through them). Checked
+    -- once; core still starts without them, only task lists can't be filled.
+    local missingNatives = {}
+    for _, suffix in ipairs({ "_SetObjectives", "_DescribeObjectives", "_SetTraitorTaskState" }) do
+        if type(_G[NAME .. suffix]) ~= "function" then missingNatives[#missingNatives + 1] = NAME .. suffix end
+    end
+    if #missingNatives > 0 then
+        log.error("objectives natives missing from the native part (%s); intel task lists can't be filled. Reinstall %s.", table.concat(missingNatives, ", "), NAME)
+    end
 
     NotifyOnNewObject(CLASS, function()
         local okN, errN = pcall(hookChannel, "NotifyOnNewObject")

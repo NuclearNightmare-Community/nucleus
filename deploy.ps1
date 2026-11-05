@@ -8,6 +8,8 @@
   Refuses unless the installed UE4SS.dll is byte-identical to the pinned zip's, and BPModLoaderMod is present.
   -Test also installs the walking-skeleton test dependent (test/SkelTest, installed as Mods/<name>SkelTest) above Keybinds,
   and for scenario ui the second test dependent (test/SkelPeer, as Mods/<name>SkelPeer; story 15: a button of another mod).
+  For scenario bad-input it also installs core's test-only C++ part (test/SkelNative, built by build.ps1 as
+  build/native-out/test/main.dll, never packaged) as Mods/<name>SkelNative: the forced missing struct member case.
   -Scenario breaks one part on purpose: skeleton (all parts), no-native (no dlls/main.dll), no-pak (no LogicMods pak);
   bad-input, ui, journal, soak and manual install all parts like skeleton. The scenario goes to the test dependent's Scripts/scenario.txt.
   manual is for hand testing: the test dependent never travels or presses keys, and keeps a text widget in the live
@@ -33,6 +35,7 @@ $here      = $PSScriptRoot
 $name      = (Get-Content (Join-Path $here 'mod.json') -Raw | ConvertFrom-Json).name
 $testName  = "${name}SkelTest"
 $peerName  = "${name}SkelPeer"
+$nativeTestName = "${name}SkelNative"
 $inst      = (Resolve-Path $Instance).Path
 $root      = Split-Path (Split-Path $inst)
 $win64     = Join-Path $inst 'NuclearNightmare\Binaries\Win64'
@@ -47,14 +50,14 @@ if (-not (Test-Path (Join-Path $ue4ss 'UE4SS.dll'))) { throw "UE4SS is not insta
 if (-not $Staged -and (Get-Process -Name 'NuclearNightmare*' -ErrorAction SilentlyContinue)) { throw 'Nuclear Nightmare is running; close it first (the DLL is locked while it runs).' }
 
 # Clean slate: no core or test files, no core or test lines.
-Remove-Item (Join-Path $modsDir $name), (Join-Path $modsDir $testName), (Join-Path $modsDir $peerName) -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $modsDir $name), (Join-Path $modsDir $testName), (Join-Path $modsDir $peerName), (Join-Path $modsDir $nativeTestName) -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $logicMods "$name.pak") -ErrorAction SilentlyContinue
-$pattern = '^\s*(' + [regex]::Escape($name) + '|' + [regex]::Escape($testName) + '|' + [regex]::Escape($peerName) + ')\s*:'
+$pattern = '^\s*(' + [regex]::Escape($name) + '|' + [regex]::Escape($testName) + '|' + [regex]::Escape($peerName) + '|' + [regex]::Escape($nativeTestName) + ')\s*:'
 $lines = @(Get-Content $modsTxt | Where-Object { $_ -notmatch $pattern })
 
 if ($Remove) {
     Set-Content $modsTxt $lines
-    Write-Host "$name removed (and $testName and $peerName, if they were installed)."
+    Write-Host "$name removed (and $testName, $peerName and $nativeTestName, if they were installed)."
     return
 }
 
@@ -100,11 +103,19 @@ if ($Test) {
         $i = [Array]::FindIndex([string[]]$lines, [Predicate[string]]{ param($l) $l -match '^\s*Keybinds\s*:' })
         $lines = if ($i -ge 0) { @($lines[0..($i-1)]) + "$peerName : 1" + @($lines[$i..($lines.Count-1)]) } else { @($lines) + "$peerName : 1" }
     }
+    if ($Scenario -eq 'bad-input') {
+        $testDll = Join-Path $here 'build\native-out\test\main.dll'
+        if (-not (Test-Path $testDll)) { throw "build/native-out/test/main.dll is missing; run build.ps1 first (its native step builds core's test-only DLL)" }
+        New-Item -ItemType Directory -Force (Join-Path $modsDir "$nativeTestName\dlls") | Out-Null
+        Copy-Item $testDll (Join-Path $modsDir "$nativeTestName\dlls\main.dll") -Force
+        $i = [Array]::FindIndex([string[]]$lines, [Predicate[string]]{ param($l) $l -match '^\s*Keybinds\s*:' })
+        $lines = if ($i -ge 0) { @($lines[0..($i-1)]) + "$nativeTestName : 1" + @($lines[$i..($lines.Count-1)]) } else { @($lines) + "$nativeTestName : 1" }
+    }
 }
 Set-Content $modsTxt $lines
 
 Write-Host "$name deployed (scenario $Scenario) on the shipped UE4SS.dll (sha256 $($installedHash.Substring(0,12))...):"
 Get-ChildItem (Join-Path $modsDir $name) -Recurse -File | ForEach-Object { Write-Host "  Mods/$name/$($_.FullName.Substring((Join-Path $modsDir $name).Length + 1)) ($($_.Length) bytes)" }
 Get-ChildItem $logicMods -Filter "$name.pak" | ForEach-Object { Write-Host "  LogicMods/$($_.Name) ($($_.Length) bytes)" }
-if ($Test) { Write-Host "  Mods/$testName (test dependent)$(if ($Scenario -eq 'ui') { " and Mods/$peerName (second test dependent)" })" }
+if ($Test) { Write-Host "  Mods/$testName (test dependent)$(if ($Scenario -eq 'ui') { " and Mods/$peerName (second test dependent)" })$(if ($Scenario -eq 'bad-input') { " and Mods/$nativeTestName (core's test-only DLL)" })" }
 Write-Host "mods.txt: $(($lines | Where-Object { $_ -match '^\s*\w+\s*:\s*1' }) -join ', ')"

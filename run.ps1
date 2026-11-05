@@ -51,7 +51,7 @@ if ($Target -eq 'vm') {
     Assert-NNBSpScenario -Scenario $Scenario -HostOnly 'soak'
     $kept = Join-Path $outDir "$Scenario.vm.log"
     Remove-Item $kept -ErrorAction SilentlyContinue
-    $run = Invoke-NNBSpRun -Instance $inst -TestMod $testName -Mods $name, $testName, "${name}SkelPeer" -Paks "$name.pak" `
+    $run = Invoke-NNBSpRun -Instance $inst -TestMod $testName -Mods $name, $testName, "${name}SkelPeer", "${name}SkelNative" -Paks "$name.pak" `
         -EndPattern "\[$testName\] END result=" -TimeoutSec (Get-NNBSpTimeout $hostTimeout $TimeoutSec) -LogOut $kept -Prepare {
             param($stage)
             & (Join-Path $here 'deploy.ps1') -Instance $stage -Test -Scenario $Scenario -Staged

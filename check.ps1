@@ -180,6 +180,52 @@ foreach ($p in 'menu1', 'match1') {
 }
 foreach ($id in 'pre-create', 'pre-watch', 'pre-find', 'pre-elements', 'pre-overlaps', 'pre-journal-watch', 'pre-journal-isopen', 'pre-panel-create', 'pre-panel-move', 'pre-button-create') { $badInput += "\[$T\] OK CASE $id " }
 $badInput += "\[$T\] OK CASES before-connect recorded=10"
+# Map service story 3: the objectives natives. Their bad values in both worlds and off the game thread; the writers
+# refused in the standalone menu; in the match a manager of the test's own filled, read back, refused a second fill,
+# and one task's TraitorState set and cleared; the forced missing struct member through core's test-only DLL
+# (<name>SkelNative); a destroyed manager; and the three called during main.lua, before the first engine tick.
+foreach ($p in 'menu1', 'match1') {
+    foreach ($id in 'obj-set-noargs', 'obj-set-one', 'obj-set-0tasks', 'obj-set-odd', 'obj-set-65', 'obj-set-64', 'obj-set-path-num',
+                    'obj-set-path-float', 'obj-set-area-nil', 'obj-set-id-num', 'obj-set-text-table', 'obj-set-text-bool', 'obj-set-text-func',
+                    'obj-set-path-obj', 'obj-set-path-empty', 'obj-set-path-513', 'obj-set-path-512', 'obj-set-path-noslash', 'obj-set-path-utf8',
+                    'obj-set-path-ctrl', 'obj-set-area-empty', 'obj-set-area-129', 'obj-set-area-128', 'obj-set-area-utf8', 'obj-set-area-tab',
+                    'obj-set-text-empty', 'obj-set-text-257', 'obj-set-text-256', 'obj-set-text-utf8', 'obj-set-id-empty', 'obj-set-id-65',
+                    'obj-set-id-64', 'obj-set-id-space', 'obj-set-id-slash', 'obj-set-id-utf8', 'obj-set-dup', 'obj-set-dup-later',
+                    'obj-set-missing', 'obj-set-nonmanager', 'obj-set-class', 'obj-set-cdo',
+                    'obj-desc-noargs', 'obj-desc-two', 'obj-desc-num', 'obj-desc-nil', 'obj-desc-table', 'obj-desc-empty-path', 'obj-desc-513',
+                    'obj-desc-noslash', 'obj-desc-utf8', 'obj-desc-missing', 'obj-desc-nonmanager', 'obj-desc-cdo',
+                    'obj-trait-noargs', 'obj-trait-two', 'obj-trait-four', 'obj-trait-path-num', 'obj-trait-id-num', 'obj-trait-id-nil',
+                    'obj-trait-state-str', 'obj-trait-state-int', 'obj-trait-state-nil', 'obj-trait-state-table', 'obj-trait-noslash',
+                    'obj-trait-id-empty', 'obj-trait-id-65', 'obj-trait-id-space', 'obj-trait-missing', 'obj-trait-nonmanager', 'obj-trait-cdo',
+                    'off-obj-set', 'off-obj-set-bad', 'off-obj-desc', 'off-obj-desc-bad', 'off-obj-trait', 'off-obj-trait-bad') {
+        $badInput += "\[$T\] OK CASE $p\.$id "
+    }
+}
+foreach ($id in 'obj-set-standalone', 'obj-trait-standalone', 'obj-desc-standalone') { $badInput += "\[$T\] OK CASE menu1\.$id " }
+foreach ($id in 'obj-desc-empty', 'obj-trait-unfilled', 'obj-set-ok', 'obj-desc-filled', 'obj-set-second', 'obj-desc-unchanged', 'obj-trait-unknown',
+                'obj-desc-after-unknown', 'obj-trait-ok', 'obj-desc-trait', 'obj-trait-off', 'obj-desc-trait-off', 'obj-game-tick', 'obj-desc-game-tick',
+                'obj-missing-Actors', 'obj-missing-Tasks', 'obj-missing-State', 'obj-missing-Description', 'obj-missing-UniqueIdentifier',
+                'obj-missing-TraitorDescription', 'obj-missing-TraitorState', 'obj-missing-key', 'obj-missing-nowrite', 'obj-missing-control',
+                'obj-set-destroyed', 'obj-desc-destroyed', 'obj-trait-destroyed') {
+    $badInput += "\[$T\] OK CASE match1\.$id "
+}
+foreach ($id in 'pre-obj-set', 'pre-obj-desc', 'pre-obj-trait') { $badInput += "\[$T\] OK CASE $id " }
+$NT = [regex]::Escape("${name}SkelNative")
+$badInput += @(
+    "\[$T\] OK CASES main\.lua objectives recorded=3"
+    "\[$NT\] native: loaded \(test only\)"
+    "!\[$NT\] native: (ERROR|FAULT)"
+    "#1|\[$N\] native: SET .* area='NN Area' objectives=1 tasks=2 \(Objectives replicates=1\)"
+    "\[$N\] native: TRAITOR .* task 'nn_b' TraitorState=1 \(1 task\)"
+    # A bad manager is one log line, besides the Lua error (story 3's matrix).
+    "\[$N\] native: REFUSED ${N}_SetObjectives: .* isn't an ObjectiveManager_C"
+    "\[$N\] native: REFUSED ${N}_SetObjectives: no object at /Game/NoSuch/NNNoManager\.NNNoManager"
+    "\[$N\] native: REFUSED ${N}_SetObjectives: \S*Default__ObjectiveManager_C is a class default object or archetype"
+    "\[$N\] native: REFUSED ${N}_SetObjectives: \S*ObjectiveManager_C_\d+ is being destroyed \(flagged Garbage\)"
+    "\[$N\] native: REFUSED ${N}_DescribeObjectives: (\S*ObjectiveManager_C_\d+ is being destroyed|no object at \S*ObjectiveManager_C_\d+)"
+    "\[$NT\] native: REFUSED ${N}_SetObjectives: member Description \(name prefix 'Description_'\) is missing from STaskProperties"
+    "\[$N\] native: REFUSED ${N}_SetObjectives: .* isn't in the host's world \(net mode: standalone\)"
+)
 # UI helpers in game (stories 7-10): what run.ps1 -Scenario ui proves unattended. END result=PASS already means every
 # check the test made passed; these name the ones the stories' acceptance criteria rest on, plus core's own lines.
 $ui = $started + @(

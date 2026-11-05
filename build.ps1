@@ -3,8 +3,9 @@
   Builds core's three parts and stages them as one package: C++ DLL, Lua, LogicMods pak.
 .DESCRIPTION
   Every name-bearing identifier comes from mod.json "name" (and "version"). Steps, each timed, logs in build/logs/:
-    native     VS 2026 + CMake + Ninja against the pinned UE4SS source (-Ue4ssSrc), Game__Shipping__Win64, target
-               CoreNative only. Then mods/cpp-spike/abi-check.ps1 must report no missing imports.
+    native     VS 2026 + CMake + Ninja against the pinned UE4SS source (-Ue4ssSrc), Game__Shipping__Win64, targets
+               CoreNative (main.dll) and CoreNativeTest (core's test-only DLL, test/SkelNative; build/native-out/test/,
+               never packaged). Then mods/cpp-spike/abi-check.ps1 must report no missing imports for both.
     blueprint  UE 5.6 (-Engine): compile the editor-only generator, run -run=CoreGen -CoreName=<name>, cook,
                repak pack --version V11 (uncompressed) /Game/Mods/<name>/ as <name>.pak.
     lua        Stage lua/main.lua and lua/pkg/ (with lua/pkg/ui/) as Scripts/main.lua and Scripts/<lowercase name>/, plus a generated
@@ -95,15 +96,19 @@ Step 'native' {
     $src = Join-Path $here 'native'
     Run 'native-configure.log' cmake @('-S', $src, '-B', $nativeB, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Game__Shipping__Win64',
         "-DUE4SS_SRC=$($Ue4ssSrc -replace '\\', '/')", "-DCORE_NAME=$name", "-DCORE_VERSION=$version")
-    Run 'native-build.log' cmake @('--build', $nativeB, '--target', 'CoreNative')
-    $dll = Get-ChildItem $nativeB -Recurse -Filter 'CoreNative.dll' | Where-Object { $_.FullName -notlike '*\_deps\*' } | Select-Object -First 1
-    if (-not $dll) { throw 'CoreNative.dll was not produced' }
+    Run 'native-build.log' cmake @('--build', $nativeB, '--target', 'CoreNative', 'CoreNativeTest')
     $staged = Join-Path $out 'native-out'
-    New-Item -ItemType Directory -Force $staged | Out-Null
-    Copy-Item $dll.FullName (Join-Path $staged 'main.dll') -Force
-    Write-Host ("   main.dll {0:N0} bytes" -f $dll.Length)
-    & $abiCheck -Dll (Join-Path $staged 'main.dll')
-    if ($LASTEXITCODE) { throw 'abi-check.ps1 reports imports the shipped UE4SS.dll lacks' }
+    # Core's DLL (shipped) and core's test-only DLL (test/SkelNative; deploy.ps1 -Test installs it, never packaged).
+    foreach ($t in @(@{ Name = 'CoreNative'; Out = 'main.dll' }, @{ Name = 'CoreNativeTest'; Out = 'test\main.dll' })) {
+        $dll = Get-ChildItem $nativeB -Recurse -Filter "$($t.Name).dll" | Where-Object { $_.FullName -notlike '*\_deps\*' } | Select-Object -First 1
+        if (-not $dll) { throw "$($t.Name).dll was not produced" }
+        $dest = Join-Path $staged $t.Out
+        New-Item -ItemType Directory -Force (Split-Path $dest) | Out-Null
+        Copy-Item $dll.FullName $dest -Force
+        Write-Host ("   {0} {1:N0} bytes ({2})" -f $t.Out, $dll.Length, $t.Name)
+        & $abiCheck -Dll $dest
+        if ($LASTEXITCODE) { throw "abi-check.ps1 reports imports the shipped UE4SS.dll lacks ($($t.Name))" }
+    }
 }
 
 Step 'blueprint' {
