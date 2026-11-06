@@ -256,7 +256,8 @@ dataCase("a level outside /Game/Mods/", { goodMap() }, "picture", { path = "/Gam
 -- map service story 9's sweep: a missing (nil) rectangle in the world, each corner
 dataCase("a missing (nil) rectangle", { { fields = { Picture = PIC } } }, "rectangle")
 dataCase("a missing (nil) RectMax", { { fields = { Picture = PIC, RectMin = V(0, 0) } } }, "rectangle")
-dataCase("a NaN rectangle",{ { fields = { Picture = PIC, RectMin = V(0 / 0, 0), RectMax = V(1e4, 1e4) } } }, "rectangle")
+dataCase("a missing (nil) RectMin", { { fields = { Picture = PIC, RectMax = V(1e4, 1e4) } } }, "rectangle")
+dataCase("a NaN rectangle", {{ fields = { Picture = PIC, RectMin = V(0 / 0, 0), RectMax = V(1e4, 1e4) } } }, "rectangle")
 dataCase("an oversized rectangle", { { fields = { Picture = PIC, RectMin = V(-2e9, 0), RectMax = V(1e4, 1e4) } } }, "rectangle")
 dataCase("an under-1 m rectangle", { { fields = { Picture = PIC, RectMin = V(0, 0), RectMax = V(50, 50) } } }, "rectangle")
 dataCase("a reversed rectangle", { { fields = { Picture = PIC, RectMin = V(1e4, 1e4), RectMax = V(0, 0) } } }, "rectangle")

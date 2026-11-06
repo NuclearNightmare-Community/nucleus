@@ -133,8 +133,8 @@ On the host it turns `pending` at the Start marker's BeginPlay and `done`/`faile
 ```lua
 local v = ModRef:GetSharedVariable("nucleus.map.setup")
 local status, rest = tostring(v):match("^(%a+) ?(.*)$")
-local n, world = rest:match("^(%d+) (.+)$") -- failed only; else world = rest
-if status == "done" or status == "failed" then --[[ compare world with your own world's path ]] end
+local n, world = nil, rest -- none: world == ""; done/pending: world = rest
+if status == "failed" then n, world = rest:match("^(%d+) (.+)$") end -- then compare world with your own world's path
 ```
 
 **The sky** (map service story 8, ported from the Journal map follow-up; CAP-10): host only, in the LoadMap post-hook of a world holding the Start marker, once per world. The Start marker's BeginPlay never spawns it and never lists it as deferred: spawning the sky there hung the game (the follow-up's first `demo-solo` run, with the class resident). The class `/Game/UltraDynamicSky/Blueprints/Ultra_Dynamic_Sky.Ultra_Dynamic_Sky_C` is preloaded with the others; one that doesn't load is the usual `FAIL WIRE sky: class ... did not load` line. Checked in this order:

@@ -532,7 +532,7 @@ spawnedCount = 0
 load(stock, nil)
 ok(spawnedCount == 0 and count("WIRE") == 0 and count("ORDER") == 0, "stock map: nothing spawned, no WIRE or ORDER")
 -- (story 9: besides the signal's own line when it changes to none)
-ok(count("^DEBUG") <= 1 and count("^[^DW]") - count("^MAPSETUP signal none$") == 0, "stock map: one DEBUG line at most", table.concat(logs, " | "))
+ok(count("^DEBUG") <= 1 and count("^[^DW]") - count("^MAPSETUP signal none$") == 0 and count("^MAPSETUP signal none$") <= 1, "stock map: one DEBUG line at most", table.concat(logs, " | "))
 ok(MS.signal() == "none", "stock map: the signal is none", MS.signal())
 
 logs = {}
@@ -545,6 +545,7 @@ ok(#logs == 1, "failed travel: an invalid world is one line too")
 local w9 = demoLevel("/Game/Mods/DemoMap/Maps/L_Missed.L_Missed")
 load(w9, nil)
 ok(count("^FAIL WIRE the start marker's BeginPlay never ran") == 1 and count("^OK WIRE GameStartService_C") == 1, "missed BeginPlay: one FAIL line, then set up after the map load")
+ok(MS.signal() == "failed 1 /Game/Mods/DemoMap/Maps/L_Missed.L_Missed", "missed BeginPlay: the signal is failed 1 <world>", MS.signal())
 
 -- the hook bodies: a throwing callback inside the registered hook stays inside it
 local okH = pcall(hooks[1].fn, { get = function() error("boom") end })
