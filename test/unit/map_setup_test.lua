@@ -587,8 +587,8 @@ ok(count("^OK WIRE intel BP_CM_V4_C ") == 2, "fill: the skipped markers spawn no
 
 -- ---------------------------------------------------------------- the loop: registered from the LoadMap hook (main.lua calls MS.start)
 loops = {}
-ok(MS.start() == true and #loops == 1 and loops[1].ms == 1000, "loop: registered at 1 s", #loops)
-ok(MS.start() == true and #loops == 1, "loop: start again registers nothing new")
+ok(MS.start(wf) == true and #loops == 1 and loops[1].ms == 1000, "loop: registered at 1 s", #loops)
+ok(MS.start(wf) == true and #loops == 1, "loop: start again registers nothing new")
 logs = {}
 loops[1].fn() -- the registered body runs M.tick under pcall
 ok(count("TRAITOR") == 0, "mirror: nothing changed, no TRAITOR line")
@@ -647,7 +647,7 @@ ok(#MS.state().filled == 0, "refused fill: nothing for the mirror")
 for _, c in ipairs({ 0, 2 }) do
     local w, s = demoLevel("/Game/Mods/DemoMap/Maps/L_Cab" .. c .. ".L_Cab" .. c, { corrective = c })
     load(w, s)
-    MS.start()
+    MS.start(w)
     logs = {}
     local before = #sounds
     tick(4)
@@ -670,7 +670,7 @@ end
 NET.server, NET.standalone = false, false
 local wc, scl = demoLevel("/Game/Mods/DemoMap/Maps/L_Client.L_Client")
 load(wc, scl)
-ok(MS.state().host == false and MS.start() == true, "client: the loop runs on a client too")
+ok(MS.state().host == false and MS.start(wc) == true, "client: the loop runs on a client too")
 local function clientManager(name, ids, raw)
     local m = place(wc, name, MGR_CLASS, { 0, 0, 0 })
     m["Area Name"] = FText("")
@@ -704,7 +704,7 @@ end
 -- hostile replicated ids: each manager left alone, one FAIL line, no Lua error
 local wh, sh = demoLevel("/Game/Mods/DemoMap/Maps/L_Hostile.L_Hostile")
 load(wh, sh)
-MS.start()
+MS.start(wh)
 wc = wh
 local hostile = {
     { "H_Long", nil, "manager\t1\t0\t1\t\ntask\t0\t0\t0\t" .. string.rep("A", 200) .. "\tx\t0\tx", "200 characters, cap 64" },
@@ -732,18 +732,18 @@ NET.server, NET.standalone = true, false
 do
     load(stock, nil)
     local c0 = cancelled
-    ok(MS.start() == false and cancelled == c0 + 1 and not MS.looping(), "stock map: the loop is cancelled")
+    ok(MS.start(stock) == false and cancelled == c0 + 1 and not MS.looping(), "stock map: the loop is cancelled")
     logs = {}
     tick(3)
     ok(#logs == 0, "stock map: no OBJECTIVES, TRAITOR, AREANAME or CABIN line", table.concat(logs, " | "))
-    ok(MS.start() == false and cancelled == c0 + 1, "stock map: stop is idempotent")
+    ok(MS.start(stock) == false and cancelled == c0 + 1, "stock map: stop is idempotent")
 end
 
 -- a loop part that throws: one FAIL line per part and world
 do
     local w, s = demoLevel("/Game/Mods/DemoMap/Maps/L_Throw.L_Throw")
     load(w, s)
-    MS.start()
+    MS.start(w)
     local realFind = FindAllOf
     FindAllOf = function() error("boom") end
     logs = {}
@@ -752,6 +752,54 @@ do
     ok(okT and count("^FAIL CABIN loop part threw: ") == 1, "loop: a throwing part is one FAIL line", table.concat(logs, " | "))
     MS.stop()
     ok(not MS.looping(), "loop: stop cancels it")
+end
+
+-- the loop follows the LoadMap's world: none (travel failed) or another world's stops it
+do
+    local w, s = demoLevel("/Game/Mods/DemoMap/Maps/L_World.L_World")
+    load(w, s)
+    ok(MS.start(w) == true and MS.looping(), "loop: started for the world that holds the Start marker")
+    local c0 = cancelled
+    ok(MS.start(nil) == false and not MS.looping() and cancelled == c0 + 1, "loop: a LoadMap without a world stops it")
+    ok(MS.start(stock) == false and not MS.looping(), "loop: another world stops it")
+end
+
+-- the fill natives missing (native part without them): one FAIL line per area, the rest goes on; no mirror
+do
+    local realSet, realTraitor = Nucleus_SetObjectives, Nucleus_SetTraitorTaskState
+    Nucleus_SetObjectives = nil
+    local w, s = demoLevel("/Game/Mods/DemoMap/Maps/L_NoNative.L_NoNative")
+    local okN, errN = pcall(load, w, s)
+    Nucleus_SetObjectives = realSet
+    ok(okN, "missing native: no Lua error escapes", errN)
+    ok(count('^FAIL OBJECTIVES "Demo North": Nucleus_SetObjectives is missing %(native part%); no tasks filled') == 1 and count("^FAIL") == 2, "missing native: one FAIL OBJECTIVES line per area", table.concat(lines("^FAIL"), " | "))
+    ok(count("^OK WIRE AISpawner_C") == 1 and count("^OK WIRE intel BP_CM_V4_C ") == 2 and #MS.state().filled == 0, "missing native: the rest of the setup goes on")
+    -- the mirror native missing: one FAIL TRAITOR line per world, no call
+    local w2, s2 = demoLevel("/Game/Mods/DemoMap/Maps/L_NoTraitor.L_NoTraitor")
+    load(w2, s2)
+    MS.start(w2)
+    Nucleus_SetTraitorTaskState = nil
+    logs = {}
+    pickup("DemoIntelNorth")
+    tick(3)
+    Nucleus_SetTraitorTaskState = realTraitor
+    ok(count("^FAIL TRAITOR Nucleus_SetTraitorTaskState is missing") == 1 and count("TRAITOR") == 1, "missing native: one FAIL TRAITOR line per world", table.concat(logs, " | "))
+end
+
+-- a readback that differs from the fill: one FAIL OBJECTIVES line, the manager still mirrored
+do
+    local realD = Nucleus_DescribeObjectives
+    Nucleus_DescribeObjectives = function(p)
+        local t = realD(p)
+        -- after the fill, the imposter's TraitorState reads true (field 7 of each task line)
+        if OBJ[p] then return (t:gsub("(\ntask\t[^\t]*\t[^\t]*\t[^\t]*\t[^\t]*\t[^\t]*\t)0", "%11")) end
+        return t
+    end
+    local w, s = demoLevel("/Game/Mods/DemoMap/Maps/L_Mismatch.L_Mismatch")
+    load(w, s)
+    Nucleus_DescribeObjectives = realD
+    ok(count('^FAIL OBJECTIVES "Demo North" read back: task 1 reads') == 1 and count('^FAIL OBJECTIVES "Demo South" read back: task 1 reads') == 1, "readback mismatch: one FAIL OBJECTIVES line per area", table.concat(lines("OBJECTIVES"), " | "))
+    ok(count("^OK OBJECTIVES .* filled by") == 2 and #MS.state().filled == 2, "readback mismatch: the fill stands, the managers are mirrored")
 end
 
 print(string.format("map_setup_test: %d passed, %d failed", pass, failN))

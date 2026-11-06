@@ -166,7 +166,7 @@ local function start()
             if not okM then log.error("map service LoadMap part failed: %s", tostring(errM):match("^[^\n]*")) end
             -- Story 6: the 1 s loop (traitor mirror, client Area Name, cabin sound), registered here on the game thread
             -- in a level with the Start marker, cancelled in any other.
-            local okS, errS = pcall(MAP.start)
+            local okS, errS = pcall(function() return MAP.start(world and world:get()) end)
             if not okS then log.error("map service loop could not start: %s", tostring(errS):match("^[^\n]*")) end
         end
         if jmapReady then

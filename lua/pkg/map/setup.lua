@@ -828,10 +828,12 @@ function M.tick()
     end
 end
 -- The loop: registered from core's LoadMap post-hook (the game thread; never from an async callback) while the
--- world holds the Start marker, cancelled otherwise and on unload.
+-- world holds the Start marker, cancelled otherwise and on unload. world: the LoadMap's world (nil when travel failed:
+-- then the per-world state may still be the previous world's, and the loop stops).
 local loopHandle
-function M.start()
-    if not W.started then M.stop() return false end
+function M.start(world)
+    local wp = alive(world) and try(function() return pathOf(world) end) or nil
+    if not W.started or not wp or wp ~= W.world then M.stop() return false end
     if loopHandle then return true end
     local okL, h = pcall(LoopInGameThreadWithDelay, M.TICK_MS, function()
         local okT, err = pcall(M.tick)
