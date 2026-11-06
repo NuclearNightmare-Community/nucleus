@@ -18,8 +18,13 @@
 -- <Core>_DescribeObjectives. A 1 s game-thread loop (M.start/M.stop, registered from core's LoadMap post-hook in a level
 -- with the Start marker) then mirrors each task's State into TraitorState on the host (<Core>_SetTraitorTaskState, only
 -- for the managers core filled), sets Area Name on a client from the replicated task ids matched against the local
--- Intel markers (untrusted: lookup keys only), and plays the cabin sound on every machine. The Journal map, flags, the
--- sky and the dependent signal are later stories (7-9).
+-- Intel markers (untrusted: lookup keys only), and plays the cabin sound on every machine. The Journal map and flags are
+-- journalmap.lua (story 7); the dependent signal is story 9.
+-- Story 8: the sky. In the LoadMap post-hook only (a LoadMap-only section: never during the Start marker's BeginPlay,
+-- where spawning it hung the game, and never listed as deferred there), the host spawns the game's Ultra_Dynamic_Sky_C
+-- at the level's one Sky marker, rotation 0, and sets its Time of Day to StartHour * 100 (then one Update Replicated
+-- Time); unless the level already has a live sky, which is left alone. Clients get it by replication; the game sets its
+-- speed from the lobby's night cycle (Time Speed and Animate Time of Day are never touched here).
 local BASE = (...):gsub("%.map%.setup$", "")
 local V = require(BASE .. ".version")
 local REF = require(BASE .. ".ref")
@@ -41,8 +46,9 @@ M.GAME = {
     lever = { "/Game/Models/lever/Lever_Actor", "Lever_Actor_C" },
     spawner = { "/Game/Gameplay/AISpawner", "AISpawner_C" },
     waypoint = { "/Game/AI/EnemyWaypointSystem/EnemyWaypointActor", "EnemyWaypointActor_C" },
+    sky = { "/Game/UltraDynamicSky/Blueprints/Ultra_Dynamic_Sky", "Ultra_Dynamic_Sky_C" },
 }
-M.GAME_ORDER = { "service", "Painkillers", "Flashlight", "manager", "intel", "radio", "generator", "lever", "spawner", "waypoint" }
+M.GAME_ORDER = { "service", "Painkillers", "Flashlight", "manager", "intel", "radio", "generator", "lever", "spawner", "waypoint", "sky" }
 -- E_MarkerItem (core's golden layout, add-only): value -> GAME key.
 M.ITEM = { [0] = "Painkillers", [1] = "Flashlight" }
 -- GameStartService_C's ten start arrays; all ten must be filled.
@@ -317,9 +323,9 @@ local function kindOf(a)
     return k
 end
 
--- Spawns cls at the marker's own transform; nil (and one FAIL line) when it fails.
-local function spawnAt(world, cls, m, what)
-    local at, r = xyz(m:K2_GetActorLocation()), rot(m:K2_GetActorRotation())
+-- Spawns cls at the marker's own transform (or at its location with rotation r0); nil (and one FAIL line) when it fails.
+local function spawnAt(world, cls, m, what, r0)
+    local at, r = xyz(m:K2_GetActorLocation()), r0 or rot(m:K2_GetActorRotation())
     local okS, a = pcall(function() return world:SpawnActor(cls, at, r) end)
     if not okS or not alive(a) then
         fail("WIRE %s marker=%s: spawn at %s failed (%s)", what, fname(m), vec(at), okS and "no actor" or firstLine(a))
@@ -386,8 +392,9 @@ end
 
 -- ---------------------------------------------------------------- the sections (host)
 -- Each runs once per world when its classes are available: during the Start marker's BeginPlay only classes still in
--- memory are used (phase "beginplay"; the rest is deferred), after the map load they are loaded (phase "loadmap").
-local SECTIONS = {} -- { name, keys, fn }
+-- memory are used (phase "beginplay"; the rest is deferred), after the map load they are loaded (phase "loadmap"). A
+-- section whose 4th element is "loadmap" runs in the LoadMap phase only: the BeginPlay phase skips it without deferring.
+local SECTIONS = {} -- { name, keys, fn [, "loadmap"] }
 local KIND_SECTION = { Item = "items", Intel = "intel", Computer = "computer", Lever = "lever", EnemySpawner = "spawner", EnemyWaypoint = "waypoints", Generator = "generator" }
 
 SECTIONS[#SECTIONS + 1] = { "service", { "service" }, function(world, cls)
@@ -625,10 +632,54 @@ SECTIONS[#SECTIONS + 1] = { "generator", { "generator" }, function(world, cls, p
     end
 end }
 
+-- Story 8: the sky (LoadMap phase only). Checked in this order: a live sky already in this world (left alone, whatever
+-- the Sky markers), exactly one Sky marker, a StartHour in 0..24.
+local function fmtv(v)
+    if type(v) ~= "number" then return tostring(v) end
+    if v ~= v then return "nan" end -- not the C library's spelling ("-nan(ind)" on Windows)
+    return string.format("%g", v)
+end
+function M.checkHour(h)
+    if type(h) ~= "number" or h ~= h or h == math.huge or h == -math.huge then return false end
+    return h >= 0 and h < 24
+end
+SECTIONS[#SECTIONS + 1] = { "sky", { "sky" }, function(world, cls)
+    for _, a in ipairs(FindAllOf(M.GAME.sky[2]) or {}) do
+        if alive(a) and worldOf(a) == W.world then
+            return ok("WIRE sky: the level already has %s %s; not spawning another", M.GAME.sky[2], pathOf(a))
+        end
+    end
+    local ms = markersOf("Sky", W.world)
+    if #ms ~= 1 then return fail("WIRE sky: %d Sky markers in the level (need 1)", #ms) end
+    local m = ms[1]
+    local h = try(function() return m.StartHour end)
+    if not M.checkHour(h) then return fail("WIRE sky marker=%s: StartHour %s isn't 0..24", fname(m), quote(fmtv(h))) end
+    local sky, at, r = spawnAt(world, cls.sky, m, M.GAME.sky[2], { Pitch = 0, Yaw = 0, Roll = 0 })
+    if not sky then return end
+    W.spawned[pathOf(m)] = pathOf(sky)
+    local want = h * 100
+    local okT, errT = pcall(function() sky["Time of Day"] = want end)
+    local okU, errU = pcall(function() sky["Update Replicated Time"](sky) end)
+    if not okU then log.warn("MAPSETUP sky: Update Replicated Time failed (%s); the clients follow at its next replication", firstLine(errU)) end
+    local got = try(function() return sky["Time of Day"] end)
+    if not okT then
+        fail("WIRE sky marker=%s: Time of Day couldn't be set to %s (%s); the sky keeps %s", fname(m), fmtv(want), firstLine(errT), fmtv(got))
+    elseif type(got) ~= "number" or math.abs(got - want) > M.EPS then
+        fail("WIRE sky marker=%s: Time of Day reads %s after setting %s; the sky stays", fname(m), fmtv(got), fmtv(want))
+    else
+        ok("WIRE %s at the sky marker: StartHour=%s Time of Day=%s bReplicates=%s Animate Time of Day=%s Time Speed=%s", M.GAME.sky[2], fmtv(h), fmtv(got),
+            fmtv(try(function() return sky.bReplicates end)), fmtv(try(function() return sky["Animate Time of Day"] end)), fmtv(try(function() return sky["Time Speed"] end)))
+    end
+    -- Open (story 8, V8.1.5): on a marker that stands on a floor this reads distance=90. The class grounds itself in its
+    -- construction script (Ground UDS Actor: a trace from 50 above to 150 below, then hit + 90 Z), and its root
+    -- (SkyRoot) is Static, so K2_SetActorLocation and K2_TeleportTo can't move it back at run time.
+    posCheck(sky, at, r, M.GAME.sky[2], m)
+end, "loadmap" }
+
 local function runSections(world, phase)
     for _, s in ipairs(SECTIONS) do
         local name, keys, fn = s[1], s[2], s[3]
-        if not W.done[name] then
+        if not W.done[name] and not (s[4] == "loadmap" and phase == "beginplay") then
             local cls, missing = {}, nil
             for _, k in ipairs(keys) do
                 local c, why = loadClass(k, phase ~= "beginplay")

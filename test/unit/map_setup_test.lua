@@ -1,4 +1,4 @@
--- Unit tests for the map service's host setup (lua/pkg/map/setup.lua, map service story 5), outside the game: UE4SS
+-- Unit tests for the map service's host setup (lua/pkg/map/setup.lua, map service stories 5, 6 and 8), outside the game: UE4SS
 -- globals, the level's markers, PlayerStarts and the spawned game classes are fake Lua tables. Checks the marker value
 -- checks, the Corrective count, the host gate, the deferral to the map load and the per-object lines; the in-game proof
 -- is mods/map-spike's demo-solo. Run from the repo root with any standalone Lua 5.3 or 5.4:
@@ -101,6 +101,7 @@ local GAMECLASSES = {
     { "/Game/Models/lever/Lever_Actor", "Lever_Actor_C" },
     { "/Game/Gameplay/AISpawner", "AISpawner_C" },
     { "/Game/AI/EnemyWaypointSystem/EnemyWaypointActor", "EnemyWaypointActor_C" },
+    { "/Game/UltraDynamicSky/Blueprints/Ultra_Dynamic_Sky", "Ultra_Dynamic_Sky_C" },
 }
 local unloadable = {}  -- class name -> true: GetAsset fails
 local getAssets = 0
@@ -138,6 +139,8 @@ end
 local NET = { server = true, standalone = false }
 local spawnedCount = 0
 local spawnOffset = nil -- { X } to test a failing position check
+-- the sky's fakes (story 8): Time of Day writes (or a throwing write, or a readback that differs), Update Replicated Time
+local SKY = { calls = 0, throwWrite = false, readOffset = 0, failSpawn = false }
 newObj("/Script/Engine.Default__KismetSystemLibrary", "/Script/Engine.KismetSystemLibrary", {
     IsServer = function() return NET.server end,
     IsStandalone = function() return NET.standalone end,
@@ -147,9 +150,10 @@ local function newWorld(path)
     local w = newObj(path, "/Script/Engine.World")
     local seq = 0
     w.SpawnActor = function(self, cls, at, r)
+        local name = cls.__meta.GetFName():ToString()
+        if name == "Ultra_Dynamic_Sky_C" and SKY.failSpawn then error("SpawnActor refused (test)", 0) end
         seq = seq + 1
         spawnedCount = spawnedCount + 1
-        local name = cls.__meta.GetFName():ToString()
         local a = newObj(path .. ":PersistentLevel." .. name .. "_" .. seq, cls.__meta.__path)
         local loc = { X = at.X + (spawnOffset or 0), Y = at.Y, Z = at.Z }
         local rr = { Pitch = r.Pitch, Yaw = r.Yaw, Roll = r.Roll }
@@ -158,6 +162,19 @@ local function newWorld(path)
         a.__meta.GetWorld = function() return self end
         a.__meta.SetReplicates = function(o, v) o.bReplicates = v end
         a.bReplicates = name ~= "Lever_Actor_C"
+        if name == "Ultra_Dynamic_Sky_C" then
+            local tod = 600
+            a["Animate Time of Day"], a["Time Speed"] = false, 0.0
+            a["Update Replicated Time"] = function(self) SKY.calls = SKY.calls + 1 end
+            -- Time of Day through the metatable: a write may throw, a read may be off
+            local mt = getmetatable(a)
+            local idx, nidx = mt.__index, mt.__newindex
+            mt.__index = function(t, k) if k == "Time of Day" then return tod + SKY.readOffset end return idx(t, k) end
+            mt.__newindex = function(t, k, v)
+                if k == "Time of Day" then if SKY.throwWrite then error("Time of Day: write refused (test)", 0) end tod = v return end
+                nidx(t, k, v)
+            end
+        end
         return a
     end
     WORLDS[#WORLDS + 1] = w
@@ -193,6 +210,8 @@ local function demoLevel(path, opts)
     marker(w, "Lever", "DM_Lever", { 1500, -1500, 0 }, 30)
     marker(w, "EnemySpawner", "DM_Spawner", { 4500, 0, 0 })
     for i = 1, 8 do marker(w, "EnemyWaypoint", "DM_Waypoint_" .. i, { i * 500, 2000, 0 }) end
+    -- story 8: the Sky marker (turned 30 degrees: the sky spawns with rotation 0 anyway)
+    for i = 1, (opts.skies or 1) do marker(w, "Sky", "DM_Sky" .. (i > 1 and ("_" .. i) or ""), { 0, 0, 2000 }, 30, { StartHour = not opts.hourNil and (opts.startHour or 10) or nil }) end
     return w, start
 end
 
@@ -381,7 +400,7 @@ ok(count('^OK WIRE BP_Radio_C "Demo Computer" HelicopterLocation=%(%-1000,3500,0
 ok(count('^OK WIRE BP_GeneratorGameplayNew_C "Demo Generator" Equipment=1 %(BP_Radio_C%)') == 1, "solo: the generator's Equipment is the radio")
 ok(count('^OK WIRE Lever_Actor_C .* bReplicates=true %(spawned with false%)') == 1, "solo: the lever replicates")
 ok(count('^OK WIRE AISpawner_C ') == 1 and count('^OK WIRE 8 EnemyWaypointActor_C') == 1 and count('^OK WIRE waypoint marker=') == 8, "solo: spawner and 8 waypoints")
-ok(count("^OK POS ") == spawnedCount and spawnedCount == 1 + 2 + 2 + 2 + 1 + 1 + 1 + 1 + 8, "solo: a position check per spawned object", spawnedCount .. " spawned, " .. count("^OK POS "))
+ok(count("^OK POS ") == spawnedCount and spawnedCount == 1 + 2 + 2 + 2 + 1 + 1 + 1 + 1 + 8 + 1, "solo: a position check per spawned object", spawnedCount .. " spawned, " .. count("^OK POS "))
 ok(count("^OK POS BP_Radio_C marker=DM_Computer distance=0%.000 yaw=0%.000") == 1, "solo: POS line shape")
 ok(count("^ORDER game state BeginPlay: start marker began first=true GameStartService_C present=true") == 1, "solo: ORDER present=true")
 ok(count("everything spawned") == 1, "solo: everything at BeginPlay")
@@ -841,6 +860,146 @@ do
     Nucleus_DescribeObjectives = realD
     ok(count('^FAIL OBJECTIVES "Demo North" read back: task 1 reads') == 1 and count('^FAIL OBJECTIVES "Demo South" read back: task 1 reads') == 1, "readback mismatch: one FAIL OBJECTIVES line per area", table.concat(lines("OBJECTIVES"), " | "))
     ok(count("^OK OBJECTIVES .* filled by") == 2 and #MS.state().filled == 2, "readback mismatch: the fill stands, the managers are mirrored")
+end
+
+-- ================================================================ story 8: the sky (LoadMap phase only)
+NET.server, NET.standalone = true, false
+SKY.calls = 0
+local SKYLINE = "^OK WIRE Ultra_Dynamic_Sky_C at the sky marker: StartHour=10 Time of Day=1000 bReplicates=true Animate Time of Day=false Time Speed=0$"
+local function skyLoad(path, opts)
+    local w, s = demoLevel(path, opts)
+    local before
+    local okL, errL = pcall(load, w, s, { beforeLoadMap = function() before = ofClass(w, "Ultra_Dynamic_Sky_C") end })
+    return w, okL, errL, before
+end
+
+-- the happy path: nothing at BeginPlay (not deferred either), one sky after the map load, its line and position check
+do
+    local w, okL, errL, before = skyLoad("/Game/Mods/DemoMap/Maps/L_Sky.L_Sky")
+    ok(okL, "sky: no Lua error escapes", errL)
+    ok(before == 0, "sky: nothing spawned during the Start marker's BeginPlay (class resident)", before)
+    ok(count("everything spawned") == 1 and count("deferred") == 0, "sky: the BeginPlay phase neither spawns nor defers it", table.concat(lines("MAPSETUP"), " | "))
+    ok(count("^FAIL") == 0, "sky: no FAIL line", table.concat(lines("^FAIL"), " | "))
+    ok(ofClass(w, "Ultra_Dynamic_Sky_C") == 1, "sky: exactly one sky after the map load")
+    ok(count(SKYLINE) == 1, "sky: the WIRE line", table.concat(lines("Sky"), " | "))
+    ok(count("^OK POS Ultra_Dynamic_Sky_C marker=DM_Sky distance=0%.000 yaw=0%.000$") == 1, "sky: the position check at the marker, yaw 0 (the marker is turned 30 degrees)")
+    ok(SKY.calls == 1, "sky: one Update Replicated Time", SKY.calls)
+    local sp = MS.state().spawned["/Game/Mods/DemoMap/Maps/L_Sky.L_Sky:PersistentLevel.DM_Sky"]
+    local sky = sp and objects[sp]
+    ok(type(sp) == "string" and sky and sky["Time of Day"] == 1000, "sky: W.spawned keeps the sky's path; Time of Day = StartHour * 100")
+    ok(sky and sky["Animate Time of Day"] == false and sky["Time Speed"] == 0.0, "sky: Time Speed and Animate Time of Day not touched")
+    ok(count("^OK WIRE ") == count("^OK POS ") + 1, "sky: every OK WIRE has an OK POS (but the waypoint count line)", count("^OK WIRE ") .. "/" .. count("^OK POS "))
+    -- a doubled LoadMap for the same world: still one sky, no second line
+    local c0 = SKY.calls
+    MS.onLoadMap(w)
+    MS.onLoadMap(w)
+    ok(ofClass(w, "Ultra_Dynamic_Sky_C") == 1 and count(SKYLINE) == 1 and SKY.calls == c0, "sky: a doubled LoadMap spawns no second sky")
+end
+
+-- the level already has a sky: one OK line, nothing spawned, no time set, whatever its Sky markers
+for _, c in ipairs({ { 1, "one Sky marker" }, { 0, "no Sky marker" }, { 2, "two Sky markers" } }) do
+    local w, s = demoLevel("/Game/Mods/DemoMap/Maps/L_HasSky" .. c[1] .. ".L_HasSky" .. c[1], { skies = c[1] })
+    local own = place(w, "LevelSky", SHORT.Ultra_Dynamic_Sky_C, { 0, 0, 0 }, 0, { ["Time of Day"] = 2200 })
+    local calls = SKY.calls
+    load(w, s)
+    ok(count("^OK WIRE sky: the level already has Ultra_Dynamic_Sky_C " .. own.__meta.__path:gsub("%p", "%%%0") .. "; not spawning another$") == 1 and count("^FAIL") == 0,
+        "already a sky (" .. c[2] .. "): one OK line, no FAIL", table.concat(lines("sky"), " | "))
+    ok(ofClass(w, "Ultra_Dynamic_Sky_C") == 1 and own["Time of Day"] == 2200 and SKY.calls == calls, "already a sky (" .. c[2] .. "): nothing spawned, its time untouched")
+end
+-- a sky in another world doesn't count
+do
+    local other = newWorld("/Game/Maps/Other.Other")
+    local stray = place(other, "OtherSky", SHORT.Ultra_Dynamic_Sky_C, { 0, 0, 0 })
+    local w = skyLoad("/Game/Mods/DemoMap/Maps/L_OtherSky.L_OtherSky")
+    ok(ofClass(w, "Ultra_Dynamic_Sky_C") == 1 and count(SKYLINE) == 1, "sky: another world's sky doesn't count")
+    kill(stray)
+end
+
+-- bad markers: one FAIL line each, no sky, the rest of the setup goes on
+local badSky = {
+    { "0 markers", { skies = 0 }, "^FAIL WIRE sky: 0 Sky markers in the level %(need 1%)$" },
+    { "2 markers", { skies = 2 }, "^FAIL WIRE sky: 2 Sky markers in the level %(need 1%)$" },
+    { "nil hour", { hourNil = true }, "^FAIL WIRE sky marker=DM_Sky: StartHour nil isn't 0%.%.24$" },
+    { "NaN hour", { startHour = 0 / 0 }, "^FAIL WIRE sky marker=DM_Sky: StartHour nan isn't 0%.%.24$" },
+    { "-1", { startHour = -1 }, "^FAIL WIRE sky marker=DM_Sky: StartHour %-1 isn't 0%.%.24$" },
+    { "24", { startHour = 24 }, "^FAIL WIRE sky marker=DM_Sky: StartHour 24 isn't 0%.%.24$" },
+    { "1e12", { startHour = 1e12 }, "^FAIL WIRE sky marker=DM_Sky: StartHour 1e%+12 isn't 0%.%.24$" },
+    { "inf", { startHour = math.huge }, "^FAIL WIRE sky marker=DM_Sky: StartHour inf isn't 0%.%.24$" },
+    { "a string", { startHour = "10" }, "^FAIL WIRE sky marker=DM_Sky: StartHour 10 isn't 0%.%.24$" },
+}
+for i, c in ipairs(badSky) do
+    local w, okL, errL = skyLoad("/Game/Mods/DemoMap/Maps/L_BadSky" .. i .. ".L_BadSky" .. i, c[2])
+    ok(okL, "bad sky marker " .. c[1] .. ": no Lua error escapes", errL)
+    ok(count(c[3]) == 1 and count("^FAIL") == 1, "bad sky marker " .. c[1] .. ": one FAIL line", table.concat(lines("^FAIL"), " | "))
+    ok(ofClass(w, "Ultra_Dynamic_Sky_C") == 0 and count("^OK WIRE AISpawner_C") == 1 and count("^OK WIRE 8 EnemyWaypointActor_C") == 1, "bad sky marker " .. c[1] .. ": no sky, the rest wired")
+end
+ok(MS.checkHour(0) and MS.checkHour(23.99) and not MS.checkHour(24) and not MS.checkHour(-0.01), "sky: StartHour 0 <= h < 24")
+
+-- bad sky: the spawn fails (spawnAt's FAIL line, no sky); the Time of Day write throws or reads back otherwise (one FAIL
+-- line, the sky stays, its position still checked)
+do
+    SKY.failSpawn = true
+    local w, okL = skyLoad("/Game/Mods/DemoMap/Maps/L_SkySpawn.L_SkySpawn")
+    SKY.failSpawn = false
+    ok(okL and count("^FAIL WIRE Ultra_Dynamic_Sky_C marker=DM_Sky: spawn at %(0,0,2000%) failed %(SpawnActor refused %(test%)%)$") == 1 and count("^FAIL") == 1, "bad sky: a failed spawn is one FAIL line", table.concat(lines("^FAIL"), " | "))
+    ok(ofClass(w, "Ultra_Dynamic_Sky_C") == 0 and count("Ultra_Dynamic_Sky_C at the sky marker") == 0, "bad sky: a failed spawn, no sky, no OK line")
+
+    SKY.throwWrite = true
+    w, okL = skyLoad("/Game/Mods/DemoMap/Maps/L_SkyWrite.L_SkyWrite")
+    SKY.throwWrite = false
+    ok(okL and count("^FAIL WIRE sky marker=DM_Sky: Time of Day couldn't be set to 1000 %(Time of Day: write refused %(test%)%); the sky keeps 600$") == 1 and count("^FAIL") == 1, "bad sky: a throwing Time of Day write is one FAIL line", table.concat(lines("^FAIL"), " | "))
+    ok(ofClass(w, "Ultra_Dynamic_Sky_C") == 1 and count("^OK POS Ultra_Dynamic_Sky_C marker=DM_Sky ") == 1 and count(SKYLINE) == 0, "bad sky: after a failed write the sky stays")
+
+    SKY.readOffset = 5
+    w, okL = skyLoad("/Game/Mods/DemoMap/Maps/L_SkyRead.L_SkyRead")
+    SKY.readOffset = 0
+    ok(okL and count("^FAIL WIRE sky marker=DM_Sky: Time of Day reads 1005 after setting 1000; the sky stays$") == 1 and count("^FAIL") == 1, "bad sky: a readback that differs is one FAIL line", table.concat(lines("^FAIL"), " | "))
+    ok(ofClass(w, "Ultra_Dynamic_Sky_C") == 1, "bad sky: after a readback mismatch the sky stays")
+
+    -- Update Replicated Time throws: one WARN line, the sky's line as usual
+    local s
+    w, s = demoLevel("/Game/Mods/DemoMap/Maps/L_SkyUpd.L_SkyUpd")
+    local realSpawn = w.SpawnActor
+    w.SpawnActor = function(self, cls, at, r)
+        local a = realSpawn(self, cls, at, r)
+        if cls.__meta.GetFName():ToString() == "Ultra_Dynamic_Sky_C" then a["Update Replicated Time"] = function() error("no (test)", 0) end end
+        return a
+    end
+    load(w, s)
+    ok(count("^WARN MAPSETUP sky: Update Replicated Time failed %(no %(test%)%)") == 1 and count(SKYLINE) == 1 and count("^FAIL") == 0, "bad sky: a failed Update Replicated Time is one WARN line", table.concat(lines("sky"), " | "))
+end
+
+-- the sky's class doesn't load: the existing one FAIL line
+do
+    dropClass("Ultra_Dynamic_Sky_C") unloadable.Ultra_Dynamic_Sky_C = true
+    local w, okL = skyLoad("/Game/Mods/DemoMap/Maps/L_SkyClass.L_SkyClass")
+    unloadable.Ultra_Dynamic_Sky_C = nil
+    ok(okL and count("^FAIL WIRE sky: class /Game/UltraDynamicSky/Blueprints/Ultra_Dynamic_Sky%.Ultra_Dynamic_Sky_C did not load") == 1 and count("^FAIL") == 1, "sky class missing: one FAIL line", table.concat(lines("^FAIL"), " | "))
+    ok(ofClass(w, "Ultra_Dynamic_Sky_C") == 0 and count("^OK WIRE AISpawner_C") == 1, "sky class missing: no sky, the rest wired")
+    ok(count("MAPSETUP preload: 10 of 11 game classes; missing: Ultra_Dynamic_Sky_C") == 1, "sky class missing: the preload names it", table.concat(lines("preload"), " | "))
+end
+
+-- a client and a standalone game: no sky
+for _, net in ipairs({ { false, false, "client" }, { true, true, "standalone" } }) do
+    NET.server, NET.standalone = net[1], net[2]
+    local w, okL = skyLoad("/Game/Mods/DemoMap/Maps/L_Net" .. net[3] .. ".L_Net" .. net[3])
+    MS.onLoadMap(w)
+    ok(okL and ofClass(w, "Ultra_Dynamic_Sky_C") == 0 and count("[Ss]ky") == 0, net[3] .. ": no sky spawned", table.concat(logs, " | "))
+end
+NET.server, NET.standalone = true, false
+
+-- a stock map: no sky line, nothing spawned (the sky class resident)
+do
+    spawnedCount = 0
+    load(stock, nil)
+    ok(spawnedCount == 0 and ofClass(stock, "Ultra_Dynamic_Sky_C") == 0 and count("[Ss]ky") == 0 and count("WIRE") == 0, "stock map: no sky, no WIRE line")
+end
+
+-- a missed BeginPlay: the LoadMap phase spawns the sky too
+do
+    local w = demoLevel("/Game/Mods/DemoMap/Maps/L_SkyMissed.L_SkyMissed")
+    load(w, nil)
+    ok(ofClass(w, "Ultra_Dynamic_Sky_C") == 1 and count(SKYLINE) == 1, "missed BeginPlay: the sky spawned after the map load")
 end
 
 print(string.format("map_setup_test: %d passed, %d failed", pass, failN))
