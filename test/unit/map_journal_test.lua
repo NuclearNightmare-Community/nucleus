@@ -457,6 +457,34 @@ local okL = pcall(runLoop, 2)
 FindAllOf = realFind
 ok(okL and count("^ERROR MAP flags failed") == 1, "a throwing loop part: caught, one ERROR line per part and world", table.concat(logs, " | "))
 
+-- ---------------------------------------------------------------- a rectangle whose min corner is world (0, 0)
+-- Image's slot then sits at the projection's origin (352, 220): the picture isn't an icon and keeps alignment (0, 0).
+local wZero = level({ { fields = { Picture = PIC, RectMin = V(0, 0), RectMax = V(6200, 6200) } } }, {})
+enter(wZero)
+runLoop(1)
+local img = icon(352, 220, 0, 0, "/Engine/Transient.GameInstance:MapUI_Zero.WidgetTree.Image")
+img.SetBrushFromTexture = function(self, t) self.brush = t end
+img.Slot.SetSize = function() end
+img.Slot.SetPosition = function() end
+local arrowZ = icon(352, 220, 0, 0)
+local uiZ = mapUI(wZero, { img, arrowZ }, {})
+uiZ.Image = img
+logs = {}
+construct("MapUI", uiZ)
+ok(img.brush == tex and img.align.X == 0 and img.align.Y == 0, "min corner (0, 0): the picture (Image at the origin) keeps alignment (0, 0)", table.concat(logs, " | "))
+ok(arrowZ.align.X == 0.5 and arrowZ.align.Y == 0.5 and count("icons centred 1, already 0, other 0") == 1, "min corner (0, 0): the icons are still centred", table.concat(logs, " | "))
+runLoop(2)
+ok(img.align.X == 0 and count("^MAP centred") == 0, "min corner (0, 0): the loop doesn't centre the picture either")
+
+-- ---------------------------------------------------------------- the Construct function never found: one FAIL line
+local fnUI = objects["/Game/Graphics/Journal/MapUI.MapUI_C:Construct"]
+objects[fnUI.__path] = nil
+local wNoFn = level({ goodMap() }, {})
+enter(wNoFn)
+runLoop(JM.TRIES + 5)
+ok(count("^FAIL MAP the Construct post%-hooks couldn't be registered in 30 s") == 1 and count("^ERROR") == 0, "Construct function missing: one FAIL line after 30 s, then no retries", table.concat(logs, " | "))
+objects[fnUI.__path] = fnUI
+
 -- stop
 JM.stop()
 ok(not JM.running(), "stop: the loop is cancelled")

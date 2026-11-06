@@ -262,15 +262,18 @@ end
 -- a box down-right of its spot (likely a game bug; docs/custom-maps.md). On a map smaller than the game's rectangle
 -- each icon whose alignment still reads (0, 0) gets (0.5, 0.5). An icon is a child of CanvasPanel_15 or CanvasPanel_52
 -- whose slot position is the projection's origin (352, 220): the player arrow, the waypoint, every icon MapUI_C adds.
--- One the game already centred is left alone, logged once per world (the fix isn't needed for it).
+-- One the game already centred is left alone, logged once per world (the fix isn't needed for it). MapUI.Image (the
+-- picture) is never an icon: its slot sits at the origin when the rectangle's min corner is world (0, 0).
 function M.centreIcons(ui)
     local r = { fixed = 0, already = 0, other = 0, failed = 0 }
+    local imagePath = try(function() return pathOf(ui.Image) end)
     for _, cn in ipairs({ "CanvasPanel_15", "CanvasPanel_52" }) do
         local c = try(function() return ui[cn] end)
         local n = (alive(c) and try(function() return c:GetChildrenCount() end)) or 0
         if type(n) ~= "number" then n = 0 end
         for i = 0, n - 1 do
             local ch = try(function() return c:GetChildAt(i) end)
+            if imagePath and alive(ch) and try(function() return pathOf(ch) end) == imagePath then ch = nil end
             local slot = alive(ch) and try(function() return ch.Slot end)
             local ok, p, a = pcall(function() local q = slot:GetPosition() local al = slot:GetAlignment() return { X = q.X, Y = q.Y }, { X = al.X, Y = al.Y } end)
             if ok and near(p.X, M.PROJ.ox) and near(p.Y, M.PROJ.oy) then
@@ -376,7 +379,7 @@ local function hookOnce(cls, what, body)
         end
     end)
     if okH then hooked[fnPath] = key log.debug("MAP hooked %s", fnPath)
-    else log.error("MAP could not hook %s: %s", fnPath, firstLine(e)) end
+    elseif not W.fails["hook " .. fnPath] then W.fails["hook " .. fnPath] = true log.error("MAP could not hook %s: %s", fnPath, firstLine(e)) end
     return okH
 end
 function M.hooksTick()
@@ -393,6 +396,10 @@ function M.hooksTick()
     local h1 = hookOnce(M.CLASS.mapUI, "MapUI_C", M.onMapUIConstruct)
     local h2 = hookOnce(M.CLASS.mapWidget, "MapWidget_C", M.onMapWidgetConstruct)
     W.hooked = (h1 and h2) or nil
+    if not W.hooked and W.tries.hooks >= M.TRIES then
+        W.hooked = "failed"
+        failOnce("hooks", "the Construct post-hooks couldn't be registered in %d s (MapUI_C %s, MapWidget_C %s); the Journal map stays stock", M.TRIES, tostring(h1), tostring(h2))
+    end
 end
 
 -- Flags: one LevelLocationMap_C per Location marker, spawned on this machine only (the class doesn't replicate). Name
