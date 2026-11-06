@@ -230,7 +230,7 @@ function M.pictureTick()
     if not d then return end
     local t, why = getAsset(d.pkg, d.name)
     local cls = t and try(function() return t:GetClass():GetFName():ToString() end)
-    if not t or cls ~= "Texture2D" then return missingPicture(d, "didn't load (" .. tostring(t and cls or why) .. ")") end
+    if not t or cls ~= "Texture2D" then return missingPicture(d, "didn't load (" .. tostring(t and (cls or "class unreadable") or why) .. ")") end
     local m = StaticFindObject(d.marker)
     local okK = alive(m) and pcall(function() m.KeepPicture = t end)
     if not (okK and alive(try(function() return m.KeepPicture end))) then return missingPicture(d, "couldn't be kept from GC (the Map marker's KeepPicture)") end
@@ -259,7 +259,7 @@ local function applyView(ui, L)
 end
 
 -- MapUI_C attaches every icon by the top-left corner of its box (canvas slot alignment (0, 0)), so each is drawn half
--- a box down-right of its spot (likely a game bug; docs/custom-maps.md). On a map smaller than the game's rectangle
+-- a box down-right of its spot (likely a game bug; docs/custom-maps.md). On a map whose rectangle isn't the game's own
 -- each icon whose alignment still reads (0, 0) gets (0.5, 0.5). An icon is a child of CanvasPanel_15 or CanvasPanel_52
 -- whose slot position is the projection's origin (352, 220): the player arrow, the waypoint, every icon MapUI_C adds.
 -- One the game already centred is left alone, logged once per world (the fix isn't needed for it). MapUI.Image (the

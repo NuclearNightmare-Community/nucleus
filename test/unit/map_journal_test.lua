@@ -321,7 +321,6 @@ local elsewhere = icon(10, 10, 0, 0)
 local ui1 = mapUI(wDemo, { arrow }, { flagA, pre, odd, elsewhere })
 logs = {}
 before = getAssets
-local sfoBefore = 0
 local realSFO = StaticFindObject
 local misses = 0
 StaticFindObject = function(p) local o = objects[p] if not o then misses = misses + 1 end return o or INVALID end
@@ -352,6 +351,11 @@ ok(count("already centred") == 0, "centreTick: 'already centred' is logged once 
 runLoop(1)
 ok(count("^MAP centred") == 1, "centreTick: nothing new, no line")
 -- a second open of the same widget is remembered once; four maps at most
+local nMaps = #JM.state().mapUIs
+local again = mapUI(wDemo, {}, {})
+construct("MapUI", again)
+construct("MapUI", again)
+ok(#JM.state().mapUIs == nMaps + 1, "centreTick: the same widget opened twice is remembered once", #JM.state().mapUIs)
 for _ = 1, 6 do construct("MapUI", mapUI(wDemo, {}, {})) end
 ok(#JM.state().mapUIs == 4, "centreTick: four maps at most", #JM.state().mapUIs)
 ok(count("^MAP MapUI_C Construct") <= 3 + 1, "Construct lines: at most three per class and world (plus the earlier one)")
@@ -484,6 +488,19 @@ enter(wNoFn)
 runLoop(JM.TRIES + 5)
 ok(count("^FAIL MAP the Construct post%-hooks couldn't be registered in 30 s") == 1 and count("^ERROR") == 0, "Construct function missing: one FAIL line after 30 s, then no retries", table.concat(logs, " | "))
 objects[fnUI.__path] = fnUI
+
+-- ---------------------------------------------------------------- a class reloaded: its new Construct is hooked again
+local nHooks = #hooks[fnUI.__path]
+newObj(fnUI.__path, "/Script/CoreUObject.Function") -- a new function object at a new address
+local wReload = level({ goodMap() }, {})
+enter(wReload)
+runLoop(2)
+ok(#hooks[fnUI.__path] == nHooks + 1, "class reloaded: the new Construct function is hooked once more", #hooks[fnUI.__path])
+local uiR = mapUI(wReload, {}, {})
+construct("MapUI", uiR)
+ok(uiR.Image.brush == tex, "class reloaded: a Construct in the new world swaps the picture", table.concat(logs, " | "))
+runLoop(2)
+ok(#hooks[fnUI.__path] == nHooks + 1, "class reloaded: hooked once, not again every tick")
 
 -- stop
 JM.stop()
