@@ -11,7 +11,10 @@
 --            (ui/debug.lua) must find no drawn widget under the top-right widget.
 -- bad-input: menu -> SmallMap?listen; calls every public native, the channel and every core.ui function with bad
 --            values (bad-input cases below), on and off the game thread and before connect, and checks each answer
---            against the contract.
+--            against the contract. The objectives natives (map service story 3) also run for real on a manager the
+--            test spawns on the host, and the forced missing struct member through core's test-only DLL
+--            (test/SkelNative). The map setup signal (<core>.map.setup, map service story 9) is read during main.lua,
+--            in the menu and in the stock match: "none" each time.
 -- ui:        the UI helpers (stories 7-10) unattended: menu -> match -> (RemoveAllWidgets and re-add) -> menu -> match,
 --            with elements created before the first match, same id twice, set and its no-op, long text, remove, style,
 --            setVisible, all four corners and gaps, offset, absolute, a three-element stack, near the crosshair with
@@ -88,6 +91,33 @@ if SCENARIO == "bad-input" then
     try("pre-panel-move", "ui.panel.move({}, {}, 1) [before connect]", "panel", "move", {}, {}, 1)
     try("pre-button-create", "ui.button.create{ id = 'early' } [before connect]", "button", "create", { id = "early" })
 end
+
+-- 4. The objectives natives called during main.lua, before the first engine tick (bad-input): allowed, so each must
+-- get as far as the lookup and fail there cleanly ("no object at ..."). Reported as cases once the scenario runs.
+local PRE_NATIVE = {}
+if SCENARIO == "bad-input" then
+    local missing = "/Game/NoSuch/NNNoManager.NNNoManager"
+    local function try(id, desc, suffix, ...)
+        local fn = _G[CORE .. suffix]
+        if type(fn) ~= "function" then PRE_NATIVE[#PRE_NATIVE + 1] = { id = id, desc = desc, ok = false, err = CORE .. suffix .. " is missing" } return end
+        local r = table.pack(pcall(fn, ...))
+        PRE_NATIVE[#PRE_NATIVE + 1] = { id = id, desc = desc, ok = r[1], err = r[2], name = CORE .. suffix }
+    end
+    try("pre-obj-set", CORE .. "_SetObjectives(<missing>, area, id, text) [main.lua]", "_SetObjectives", missing, "A", "a", "t")
+    try("pre-obj-desc", CORE .. "_DescribeObjectives(<missing>) [main.lua]", "_DescribeObjectives", missing)
+    try("pre-obj-trait", CORE .. "_SetTraitorTaskState(<missing>, id, true) [main.lua]", "_SetTraitorTaskState", missing, "a", true)
+end
+
+-- 5. The map setup signal (map service story 9) read during main.lua: core's main.lua (first in mods.txt) publishes
+-- "none" before any world exists. Read-only: the signal takes no input. Reported as a case once the scenario runs.
+local SETUP_KEY = CORE:lower() .. ".map.setup"
+local function readSignal()
+    local okS, v = pcall(function() return ModRef:GetSharedVariable(SETUP_KEY) end)
+    if not okS then error("GetSharedVariable(" .. SETUP_KEY .. ") threw: " .. tostring(v):match("^[^\n]*"), 0) end
+    return v
+end
+local PRE_SIGNAL
+if SCENARIO == "bad-input" then PRE_SIGNAL = table.pack(pcall(readSignal)) end
 
 local REQ, DONE = scriptDir .. "\\request.txt", scriptDir .. "\\done.txt"
 os.remove(REQ); os.remove(DONE)
@@ -384,6 +414,8 @@ E.nilret = { what = "nil", test = function(ok, r) return ok and r.n == 1 and r[1
 function E.ret(what, pred) return { what = what, test = function(ok, r) return ok and pred(r) end } end
 -- A channel reply (the call returns a string) that starts with prefix.
 function E.reply(prefix) return { what = "reply starting '" .. prefix .. "'", test = function(ok, r) return ok and type(r[1]) == "string" and r[1]:sub(1, #prefix) == prefix end } end
+-- The map setup signal (map service story 9) outside a map with core's Start marker: exactly the string "none".
+E.signalNone = { what = "exactly the string 'none'", test = function(ok, r) return ok and r.n == 1 and type(r[1]) == "string" and r[1] == "none" end }
 -- client.call: false plus a reply starting with prefix.
 function E.callErr(prefix) return { what = "false, '" .. prefix .. "...'", test = function(ok, r) return ok and r[1] == false and type(r[2]) == "string" and r[2]:sub(1, #prefix) == prefix end } end
 
@@ -391,6 +423,7 @@ local cases = { total = 0, passed = 0 }
 local uiOffThreadCases -- defined with the UI cases below
 local panelCases -- story 14, defined with the UI cases below
 local buttonCases -- story 15, defined with the UI cases below
+local objectivesOffThreadCases -- map service story 3, defined with the objectives cases below
 local function case(id, desc, fn, expect)
     local r = table.pack(pcall(fn))
     local ok = table.remove(r, 1); r.n = r.n - 1
@@ -581,6 +614,7 @@ local function offThreadCases(phase)
                 if h then case(P .. "off-free", nFREE .. "(" .. h .. ") [off thread, allowed]", function() return FREE(h) end, E.none) end
                 case(P .. "off-free-bad", nFREE .. "(\"x\") [off thread]", function() return FREE("x") end, E.err(nFREE .. ": argument 1 (handle) must be an integer, got a string"))
                 if S.uiOffHandle then uiOffThreadCases(P, S.uiOffHandle) end
+                objectivesOffThreadCases(P)
             end)
             if not ok then check(false, "CASE %s off-thread block threw: %s", P .. "off", firstLine(err)) end
             doneOff = true
@@ -1020,13 +1054,288 @@ local function preConnectCases()
                 E.err(UI .. ": " .. tostring(want[r.id] or want[r.fn]) .. " called before connect"))
         end
         check(#PRE_CONNECT == 10, "CASES before-connect recorded=%d (expected 10)", #PRE_CONNECT)
+        for _, r in ipairs(PRE_NATIVE) do
+            case(r.id, r.desc, function() if not r.ok then error(r.err, 0) end return "no error" end,
+                E.err(tostring(r.name) .. ": no object at /Game/NoSuch/NNNoManager.NNNoManager"))
+        end
+        check(#PRE_NATIVE == 3, "CASES main.lua objectives recorded=%d (expected 3)", #PRE_NATIVE)
+        case("pre-map-signal", "GetSharedVariable(\"" .. SETUP_KEY .. "\") [main.lua]", function()
+            if not PRE_SIGNAL then error("not recorded during main.lua", 0) end
+            if not PRE_SIGNAL[1] then error(PRE_SIGNAL[2], 0) end
+            return PRE_SIGNAL[2]
+        end, E.signalNone)
     end)
+end
+
+-- ---------------------------------------------------------------- objectives natives (map service story 3)
+-- <Core>_SetObjectives, _DescribeObjectives and _SetTraitorTaskState with bad values (map-setup.md "bad-input cases",
+-- Natives), and in the match the real thing on a manager this test spawned itself on the host: fill, read back, a
+-- second fill refused, one task's TraitorState set and cleared. The forced missing struct member goes through core's
+-- test-only DLL (test/SkelNative, <Core>SkelNative_SetObjectivesMissing), never through a public native. Every manager
+-- spawned here is destroyed again in the same step; only paths are kept.
+local OBJ_PKG, OBJ_SHORT = "/Game/Gameplay/ClassifiedMaterials/ObjectiveManager", "ObjectiveManager_C"
+local OBJ_CLASS = OBJ_PKG .. "." .. OBJ_SHORT
+local OBJ_CDO = OBJ_PKG .. ".Default__" .. OBJ_SHORT
+local OBJ_MISSING = "/Game/NoSuch/NNNoManager.NNNoManager"
+local OBJ_KEYS = { "Actors", "Tasks", "State", "Description", "UniqueIdentifier", "TraitorDescription", "TraitorState" }
+
+local function objClass()
+    local cls = found(OBJ_CLASS)
+    if cls then return cls end
+    local helpers = StaticFindObject("/Script/AssetRegistry.Default__AssetRegistryHelpers")
+    cls = helpers:GetAsset({ PackageName = FName(OBJ_PKG), AssetName = FName(OBJ_SHORT) })
+    return valid(cls) and cls or nil
+end
+local function spawnManager(z)
+    local cls = objClass()
+    if not cls then return nil end
+    local a = pc():GetWorld():SpawnActor(cls, { X = 0, Y = 0, Z = z or -50000 }, { Pitch = 0, Yaw = 0, Roll = 0 })
+    return valid(a) and a or nil
+end
+-- <Core>_DescribeObjectives' text as { objectives, selected, net, area, tasks = { ... }, byId }.
+local function parseObjectives(text)
+    local d = { tasks = {}, byId = {} }
+    for line in (tostring(text) .. "\n"):gmatch("([^\n]*)\n") do
+        local f = {}
+        for v in (line .. "\t"):gmatch("([^\t]*)\t") do f[#f + 1] = v end
+        if f[1] == "manager" then
+            d.objectives, d.selected, d.net, d.area = tonumber(f[2]), tonumber(f[3]), f[4], f[5]
+        elseif f[1] == "task" then
+            local t = { objective = tonumber(f[2]), index = tonumber(f[3]), state = f[4], id = f[5], text = f[6], traitorState = f[7], traitorText = f[8] }
+            d.tasks[#d.tasks + 1] = t
+            d.byId[t.id or ""] = t
+        end
+    end
+    return d
+end
+local function taskArgs(n, prefix)
+    local a = {}
+    for i = 1, n do a[#a + 1] = (prefix or "t") .. i; a[#a + 1] = "Task " .. i end
+    return a
+end
+local function described(pred, what)
+    return E.ret(what, function(r) return r.n == 1 and type(r[1]) == "string" and pred(parseObjectives(r[1])) end)
+end
+
+local function objectivesCases(phase)
+    local P = phase .. "."
+    local SET, DESC, TRAIT = native("_SetObjectives"), native("_DescribeObjectives"), native("_SetTraitorTaskState")
+    local nSET, nDESC, nTRAIT = CORE .. "_SetObjectives", CORE .. "_DescribeObjectives", CORE .. "_SetTraitorTaskState"
+    if not check(type(SET) == "function" and type(DESC) == "function" and type(TRAIT) == "function",
+        "CASE %sobj-natives %s, %s and %s exist", P, nSET, nDESC, nTRAIT) then return end
+    local fs, fd, ft = intFn(SET), intFn(DESC), intFn(TRAIT)
+    local M = OBJ_MISSING
+    local okCls = check(objClass() ~= nil, "CASE %sobj-class %s loaded for the CDO and spawn cases", P, OBJ_CLASS)
+
+    -- SetObjectives: counts, types, sizes, characters, duplicates. A path that names nothing comes last, so a check
+    -- that let a bad value through ends in "no object at" instead of the expected error.
+    local eS = function(t) return E.err(nSET .. ": " .. t) end
+    case(P .. "obj-set-noargs", nSET .. "()", fs(), eS("expected (managerPath, areaName, id1, text1, ...), got 0 arguments"))
+    case(P .. "obj-set-one", nSET .. "(path)", fs(M), eS("expected (managerPath, areaName, id1, text1, ...), got 1 argument"))
+    case(P .. "obj-set-0tasks", nSET .. "(path, area) [0 tasks]", fs(M, "A"), eS("1..64 tasks, got 0"))
+    case(P .. "obj-set-odd", nSET .. "(path, area, id) [no text]", fs(M, "A", "a"), eS("each task is an id and a text; got 3 arguments (an odd count)"))
+    case(P .. "obj-set-65", nSET .. "(path, area, <65 tasks>)", fs(M, "A", table.unpack(taskArgs(65))), eS("1..64 tasks, got 65"))
+    case(P .. "obj-set-64", nSET .. "(<missing>, area, <64 tasks>) [64 is allowed]", fs(M, "A", table.unpack(taskArgs(64))), eS("no object at " .. M))
+    case(P .. "obj-set-path-num", nSET .. "(42, area, id, text)", fs(42, "A", "a", "t"), eS("argument 1 (managerPath) must be a string, got an integer"))
+    case(P .. "obj-set-path-float", nSET .. "(1.5, area, id, text)", fs(1.5, "A", "a", "t"), eS("argument 1 (managerPath) must be a string, got a float"))
+    case(P .. "obj-set-area-nil", nSET .. "(path, nil, id, text)", fs(M, nil, "a", "t"), eS("argument 2 (areaName) must be a string, got nil"))
+    case(P .. "obj-set-id-num", nSET .. "(path, area, 7, text)", fs(M, "A", 7, "t"), eS("argument 3 (task id) must be a string, got an integer"))
+    case(P .. "obj-set-text-table", nSET .. "(path, area, id, {})", fs(M, "A", "a", {}), eS("argument 4 (task text) must be a string, got a table"))
+    case(P .. "obj-set-text-bool", nSET .. "(path, area, id, text, id, true)", fs(M, "A", "a", "t", "b", true), eS("argument 6 (task text) must be a string, got a boolean"))
+    case(P .. "obj-set-text-func", nSET .. "(path, area, id, print)", fs(M, "A", "a", print), eS("argument 4 (task text) must be a string, got a function"))
+    local hud = found(S.hudPath)
+    if hud then case(P .. "obj-set-path-obj", nSET .. "(<HUD object itself>, area, id, text)", fs(hud, "A", "a", "t"), eS("argument 1 (managerPath) must be a string, got a userdata")) end
+    case(P .. "obj-set-path-empty", nSET .. "(\"\", ...)", fs("", "A", "a", "t"), eS("manager path must be 1..512 characters, got 0"))
+    case(P .. "obj-set-path-513", nSET .. "(<513 characters>, ...)", fs("/" .. string.rep("a", 512), "A", "a", "t"), eS("manager path must be 1..512 characters, got 513"))
+    case(P .. "obj-set-path-512", nSET .. "(<512 characters>, ...) [allowed]", fs("/" .. string.rep("a", 511), "A", "a", "t"), eS("no object at /aaaa"))
+    case(P .. "obj-set-path-noslash", nSET .. "(\"Game/X.Y\", ...)", fs("Game/X.Y", "A", "a", "t"), eS("manager path must be an object path starting with '/'"))
+    case(P .. "obj-set-path-utf8", nSET .. "(\"/Game/\\xC3\\xA9\", ...)", fs("/Game/\xC3\xA9", "A", "a", "t"), eS("manager path must be printable ASCII"))
+    case(P .. "obj-set-path-ctrl", nSET .. "(\"/Game/a\\nb\", ...)", fs("/Game/a\nb", "A", "a", "t"), eS("manager path must be printable ASCII"))
+    case(P .. "obj-set-area-empty", nSET .. "(path, \"\", ...)", fs(M, "", "a", "t"), eS("area name must be 1..128 characters, got 0"))
+    case(P .. "obj-set-area-129", nSET .. "(path, <129 characters>, ...)", fs(M, string.rep("x", 129), "a", "t"), eS("area name must be 1..128 characters, got 129"))
+    case(P .. "obj-set-area-128", nSET .. "(<missing>, <128 characters>, ...) [allowed]", fs(M, string.rep("x", 128), "a", "t"), eS("no object at " .. M))
+    case(P .. "obj-set-area-utf8", nSET .. "(path, \"\\xFF\", ...)", fs(M, "\xFF", "a", "t"), eS("area name must be printable ASCII"))
+    case(P .. "obj-set-area-tab", nSET .. "(path, \"a\\tb\", ...)", fs(M, "a\tb", "a", "t"), eS("area name must be printable ASCII"))
+    case(P .. "obj-set-text-empty", nSET .. "(path, area, id, \"\")", fs(M, "A", "a", ""), eS("task text must be 1..256 characters, got 0"))
+    case(P .. "obj-set-text-257", nSET .. "(path, area, id, <257 characters>)", fs(M, "A", "a", string.rep("x", 257)), eS("task text must be 1..256 characters, got 257"))
+    case(P .. "obj-set-text-256", nSET .. "(<missing>, area, id, <256 characters>) [allowed]", fs(M, "A", "a", string.rep("x", 256)), eS("no object at " .. M))
+    case(P .. "obj-set-text-utf8", nSET .. "(path, area, id, \"caf\\xC3\\xA9\")", fs(M, "A", "a", "caf\xC3\xA9"), eS("task text must be printable ASCII"))
+    case(P .. "obj-set-id-empty", nSET .. "(path, area, \"\", text)", fs(M, "A", "", "t"), eS("task id must be 1..64 characters, got 0"))
+    case(P .. "obj-set-id-65", nSET .. "(path, area, <65 characters>, text)", fs(M, "A", string.rep("i", 65), "t"), eS("task id must be 1..64 characters, got 65"))
+    case(P .. "obj-set-id-64", nSET .. "(<missing>, area, <64 characters>, text) [allowed]", fs(M, "A", string.rep("i", 64), "t"), eS("no object at " .. M))
+    case(P .. "obj-set-id-space", nSET .. "(path, area, \"a b\", text)", fs(M, "A", "a b", "t"), eS("task id 'a b' may hold only letters, digits, '_', '-' and '.'"))
+    case(P .. "obj-set-id-slash", nSET .. "(path, area, \"a/b\", text)", fs(M, "A", "a/b", "t"), eS("task id 'a/b' may hold only letters"))
+    case(P .. "obj-set-id-utf8", nSET .. "(path, area, \"\\xC3\\xA9\", text)", fs(M, "A", "\xC3\xA9", "t"), eS("task id '??' may hold only letters"))
+    case(P .. "obj-set-dup", nSET .. "(path, area, \"a\", text, \"a\", text)", fs(M, "A", "a", "t", "a", "u"), eS("task id 'a' given twice"))
+    case(P .. "obj-set-dup-later", nSET .. "(path, area, a, b, c, b) [ids 2 and 4 equal]", fs(M, "A", "a", "t", "b", "t", "c", "t", "b", "t"), eS("task id 'b' given twice"))
+    -- The object: missing, not a manager, the class itself, the class default object.
+    case(P .. "obj-set-missing", nSET .. "(<path to nothing>, ...)", fs(M, "A", "a", "t"), eS("no object at " .. M))
+    if S.hudPath then case(P .. "obj-set-nonmanager", nSET .. "(<the HUD's path>, ...)", fs(S.hudPath, "A", "a", "t"), eS(S.hudPath .. " isn't an ObjectiveManager_C")) end
+    if okCls then
+        case(P .. "obj-set-class", nSET .. "(<ObjectiveManager_C's class>, ...)", fs(OBJ_CLASS, "A", "a", "t"), eS(OBJ_CLASS .. " isn't an ObjectiveManager_C"))
+        case(P .. "obj-set-cdo", nSET .. "(<ObjectiveManager_C's CDO>, ...)", fs(OBJ_CDO, "A", "a", "t"), eS(OBJ_CDO .. " is a class default object or archetype"))
+    end
+
+    -- DescribeObjectives.
+    local eD = function(t) return E.err(nDESC .. ": " .. t) end
+    case(P .. "obj-desc-noargs", nDESC .. "()", fd(), eD("expected 1 argument (managerPath), got 0"))
+    case(P .. "obj-desc-two", nDESC .. "(path, path)", fd(M, M), eD("expected 1 argument (managerPath), got 2"))
+    case(P .. "obj-desc-num", nDESC .. "(42)", fd(42), eD("argument 1 (managerPath) must be a string, got an integer"))
+    case(P .. "obj-desc-nil", nDESC .. "(nil)", fd(nil), eD("argument 1 (managerPath) must be a string, got nil"))
+    case(P .. "obj-desc-table", nDESC .. "({})", fd({}), eD("argument 1 (managerPath) must be a string, got a table"))
+    case(P .. "obj-desc-empty-path", nDESC .. "(\"\")", fd(""), eD("manager path must be 1..512 characters, got 0"))
+    case(P .. "obj-desc-513", nDESC .. "(<513 characters>)", fd("/" .. string.rep("a", 512)), eD("manager path must be 1..512 characters, got 513"))
+    case(P .. "obj-desc-noslash", nDESC .. "(\"x\")", fd("x"), eD("manager path must be an object path starting with '/'"))
+    case(P .. "obj-desc-utf8", nDESC .. "(\"/\\xC3\\xA9\")", fd("/\xC3\xA9"), eD("manager path must be printable ASCII"))
+    case(P .. "obj-desc-missing", nDESC .. "(<path to nothing>)", fd(M), eD("no object at " .. M))
+    if S.hudPath then case(P .. "obj-desc-nonmanager", nDESC .. "(<the HUD's path>)", fd(S.hudPath), eD(S.hudPath .. " isn't an ObjectiveManager_C")) end
+    if okCls then case(P .. "obj-desc-cdo", nDESC .. "(<ObjectiveManager_C's CDO>)", fd(OBJ_CDO), eD(OBJ_CDO .. " is a class default object or archetype")) end
+
+    -- SetTraitorTaskState.
+    local eT = function(t) return E.err(nTRAIT .. ": " .. t) end
+    case(P .. "obj-trait-noargs", nTRAIT .. "()", ft(), eT("expected 3 arguments (managerPath, taskId, state), got 0"))
+    case(P .. "obj-trait-two", nTRAIT .. "(path, id)", ft(M, "a"), eT("expected 3 arguments (managerPath, taskId, state), got 2"))
+    case(P .. "obj-trait-four", nTRAIT .. "(path, id, true, 1)", ft(M, "a", true, 1), eT("expected 3 arguments (managerPath, taskId, state), got 4"))
+    case(P .. "obj-trait-path-num", nTRAIT .. "(42, id, true)", ft(42, "a", true), eT("argument 1 (managerPath) must be a string, got an integer"))
+    case(P .. "obj-trait-id-num", nTRAIT .. "(path, 7, true)", ft(M, 7, true), eT("argument 2 (taskId) must be a string, got an integer"))
+    case(P .. "obj-trait-id-nil", nTRAIT .. "(path, nil, true)", ft(M, nil, true), eT("argument 2 (taskId) must be a string, got nil"))
+    case(P .. "obj-trait-state-str", nTRAIT .. "(path, id, \"true\")", ft(M, "a", "true"), eT("argument 3 (state) must be a boolean, got a string"))
+    case(P .. "obj-trait-state-int", nTRAIT .. "(path, id, 1)", ft(M, "a", 1), eT("argument 3 (state) must be a boolean, got an integer"))
+    case(P .. "obj-trait-state-nil", nTRAIT .. "(path, id, nil)", ft(M, "a", nil), eT("argument 3 (state) must be a boolean, got nil"))
+    case(P .. "obj-trait-state-table", nTRAIT .. "(path, id, {})", ft(M, "a", {}), eT("argument 3 (state) must be a boolean, got a table"))
+    case(P .. "obj-trait-noslash", nTRAIT .. "(\"x\", id, true)", ft("x", "a", true), eT("manager path must be an object path starting with '/'"))
+    case(P .. "obj-trait-id-empty", nTRAIT .. "(path, \"\", true)", ft(M, "", true), eT("task id must be 1..64 characters, got 0"))
+    case(P .. "obj-trait-id-65", nTRAIT .. "(path, <65 characters>, true)", ft(M, string.rep("i", 65), true), eT("task id must be 1..64 characters, got 65"))
+    case(P .. "obj-trait-id-space", nTRAIT .. "(path, \"a b\", true)", ft(M, "a b", true), eT("task id 'a b' may hold only letters"))
+    case(P .. "obj-trait-missing", nTRAIT .. "(<path to nothing>, id, true)", ft(M, "a", true), eT("no object at " .. M))
+    if S.hudPath then case(P .. "obj-trait-nonmanager", nTRAIT .. "(<the HUD's path>, id, true)", ft(S.hudPath, "a", true), eT(S.hudPath .. " isn't an ObjectiveManager_C")) end
+    if okCls then case(P .. "obj-trait-cdo", nTRAIT .. "(<ObjectiveManager_C's CDO>, id, true)", ft(OBJ_CDO, "a", true), eT(OBJ_CDO .. " is a class default object or archetype")) end
+
+    if not okCls then return end
+    local onHost = phase:find("^match") ~= nil
+    if not onHost then
+        -- The menu is a standalone world: the writers refuse a manager there; the readback works on any machine.
+        local m = spawnManager()
+        if not check(m ~= nil, "CASE %sobj-spawn-menu spawned an ObjectiveManager_C in the menu", P) then return end
+        local path = pathOf(m)
+        case(P .. "obj-set-standalone", nSET .. "(<manager in the standalone menu>, ...)", fs(path, "A", "a", "t"), eS(path .. " isn't in the host's world (net mode: standalone)"))
+        case(P .. "obj-trait-standalone", nTRAIT .. "(<manager in the standalone menu>, id, true)", ft(path, "a", true), eT(path .. " isn't in the host's world (net mode: standalone)"))
+        case(P .. "obj-desc-standalone", nDESC .. "(<manager in the standalone menu>) [read only: allowed]", fd(path),
+            described(function(d) return d.objectives == 0 and #d.tasks == 0 end, "the readback of an empty manager"))
+        pcall(function() m:K2_DestroyActor() end)
+        return
+    end
+
+    -- On the host (SmallMap?listen): a manager of our own, filled, read back and ticked.
+    local m = spawnManager()
+    if not check(m ~= nil, "CASE %sobj-spawn spawned an ObjectiveManager_C on the host", P) then return end
+    local path = pathOf(m)
+    local ours = { [path] = true } -- every manager this test spawns (the stock readback below skips them)
+    say("OBJECTIVES %s our manager %s", phase, path)
+    case(P .. "obj-desc-empty", nDESC .. "(<our new manager>)", fd(path),
+        described(function(d) return d.objectives == 0 and #d.tasks == 0 and d.net == "1" end, "objectives 0, no tasks, Objectives replicates"))
+    case(P .. "obj-trait-unfilled", nTRAIT .. "(<our unfilled manager>, id, true)", ft(path, "nn_a", true), eT(path .. " has no objectives yet; fill it with " .. nSET .. " first"))
+    case(P .. "obj-set-ok", nSET .. "(<our manager>, \"NN Area\", nn_a, ..., nn_b, ...) [control]", fs(path, "NN Area", "nn_a", "Task A text", "nn_b", "Task B text"),
+        E.ret("2 (the task count)", function(r) return r.n == 1 and r[1] == 2 end))
+    local function filled(d)
+        local a, b = d.byId.nn_a, d.byId.nn_b
+        return d.objectives == 1 and #d.tasks == 2 and d.area == "NN Area" and a ~= nil and b ~= nil and a.objective == 0 and a.index == 0 and b.index == 1
+            and a.text == "Task A text" and a.traitorText == "Task A text" and b.text == "Task B text" and b.traitorText == "Task B text"
+            and a.state == "0" and b.state == "0" and a.traitorState == "0" and b.traitorState == "0"
+    end
+    case(P .. "obj-desc-filled", nDESC .. "(<our filled manager>)", fd(path),
+        described(filled, "1 objective, area 'NN Area', nn_a and nn_b with State and TraitorState 0 and TraitorDescription = Description"))
+    case(P .. "obj-set-second", nSET .. "(<our filled manager>, ...) [second fill]", fs(path, "Other", "x", "y"), eS(path .. " already has 1 objective(s); a manager is filled once only"))
+    case(P .. "obj-desc-unchanged", nDESC .. "(<our manager>) [after the refused second fill]", fd(path), described(filled, "the same as before"))
+    case(P .. "obj-trait-unknown", nTRAIT .. "(<our manager>, \"nn_z\", true) [unknown id]", ft(path, "nn_z", true), eT(path .. " has no task with id 'nn_z'"))
+    case(P .. "obj-desc-after-unknown", nDESC .. "(<our manager>) [after the unknown id]", fd(path), described(filled, "the same as before"))
+    case(P .. "obj-trait-ok", nTRAIT .. "(<our manager>, \"nn_b\", true) [control]", ft(path, "nn_b", true), E.ret("1 (task set)", function(r) return r.n == 1 and r[1] == 1 end))
+    case(P .. "obj-desc-trait", nDESC .. "(<our manager>) [after TraitorState nn_b = true]", fd(path), described(function(d)
+        local a, b = d.byId.nn_a, d.byId.nn_b
+        return a ~= nil and b ~= nil and b.traitorState == "1" and a.traitorState == "0" and a.state == "0" and b.state == "0"
+    end, "nn_b TraitorState 1, nn_a 0, State untouched"))
+    case(P .. "obj-trait-off", nTRAIT .. "(<our manager>, \"nn_b\", false) [control]", ft(path, "nn_b", false), E.ret("1 (task set)", function(r) return r.n == 1 and r[1] == 1 end))
+    case(P .. "obj-desc-trait-off", nDESC .. "(<our manager>) [after TraitorState nn_b = false]", fd(path), described(filled, "back as filled"))
+    -- The game's own tick on our fill: UpdateTaskState finds the task by UniqueIdentifier in Objectives[Selected
+    -- Objective] and ignores TaskNumber when the id isn't empty (decompile V8.1.5, ObjectiveManager_C.cpp).
+    case(P .. "obj-game-tick", "ObjectiveManager_C:UpdateTaskState(0, true, \"nn_a\") [the game's own function]",
+        function() m:UpdateTaskState(0, true, "nn_a") return "called" end, E.ret("the call returns", function(r) return r[1] == "called" end))
+    case(P .. "obj-desc-game-tick", nDESC .. "(<our manager>) [after the game's UpdateTaskState nn_a]", fd(path), described(function(d)
+        local a, b = d.byId.nn_a, d.byId.nn_b
+        return a ~= nil and b ~= nil and a.state == "1" and b.state == "0"
+    end, "nn_a State 1, nn_b State 0"))
+
+    -- The forced missing struct member (core's test-only DLL): each member refused, nothing written.
+    local MISS, nMISS = _G[CORE .. "SkelNative_SetObjectivesMissing"], CORE .. "SkelNative_SetObjectivesMissing"
+    if check(type(MISS) == "function", "CASE %sobj-missing-native %s exists (core's test-only DLL test/SkelNative)", P, nMISS) then
+        local m2 = spawnManager(-50500)
+        if check(m2 ~= nil, "CASE %sobj-spawn-2 spawned a second ObjectiveManager_C", P) then
+            local p2 = pathOf(m2)
+            ours[p2] = true
+            local fm = intFn(MISS)
+            for _, key in ipairs(OBJ_KEYS) do
+                case(P .. "obj-missing-" .. key, nMISS .. "(\"" .. key .. "\", <unfilled manager>, ...)", fm(key, p2, "NN Area", "nn_a", "Task A text"),
+                    eS("member " .. key .. " (name prefix '" .. key .. "_') is missing from "))
+            end
+            case(P .. "obj-missing-key", nMISS .. "(\"Nope\", ...)", fm("Nope", p2, "A", "a", "t"), E.err(nMISS .. ": unknown member key 'Nope'"))
+            case(P .. "obj-missing-nowrite", nDESC .. "(<the manager after the forced misses>)", fd(p2),
+                described(function(d) return d.objectives == 0 and #d.tasks == 0 end, "objectives 0: nothing was written"))
+            case(P .. "obj-missing-control", nSET .. "(<the same manager>, ...) [control: the real fill works]", fs(p2, "NN Area", "nn_a", "Task A text"),
+                E.ret("1", function(r) return r.n == 1 and r[1] == 1 end))
+            pcall(function() m2:K2_DestroyActor() end)
+        end
+    end
+
+    -- A destroyed manager: K2_DestroyActor flags it Garbage; its path may still resolve until the next GC.
+    local m3 = spawnManager(-51000)
+    if check(m3 ~= nil, "CASE %sobj-spawn-3 spawned a third ObjectiveManager_C", P) then
+        local p3 = pathOf(m3)
+        ours[p3] = true
+        m3:K2_DestroyActor()
+        m3 = nil
+        local gone = E.errAny({ p3 .. " is being destroyed", "no object at " .. p3 })
+        case(P .. "obj-set-destroyed", nSET .. "(<manager destroyed just now>, ...)", fs(p3, "A", "a", "t"), gone)
+        case(P .. "obj-desc-destroyed", nDESC .. "(<manager destroyed just now>)", fd(p3), gone)
+        case(P .. "obj-trait-destroyed", nTRAIT .. "(<manager destroyed just now>, id, true)", ft(p3, "a", true), gone)
+    end
+
+    -- The game's own managers in this map: the readback works on them (logged, not judged).
+    for _, a in ipairs(FindAllOf(OBJ_SHORT) or {}) do
+        local okP, ap = pcall(pathOf, a)
+        if okP and not ours[ap] and not ap:find("Default__", 1, true) then
+            local okD, text = pcall(DESC, ap)
+            say("OBJECTIVES %s stock manager %s: %s", phase, ap, okD and (tostring(text):gsub("\n", " | ")) or ("error: " .. firstLine(text)))
+            break
+        end
+    end
+    pcall(function() m:K2_DestroyActor() end)
+end
+
+-- Off the game thread (inside offThreadCases' LoopAsync): every objectives native refuses, whatever it is given.
+objectivesOffThreadCases = function(P)
+    local SET, DESC, TRAIT = native("_SetObjectives"), native("_DescribeObjectives"), native("_SetTraitorTaskState")
+    local nSET, nDESC, nTRAIT = CORE .. "_SetObjectives", CORE .. "_DescribeObjectives", CORE .. "_SetTraitorTaskState"
+    if type(SET) ~= "function" or type(DESC) ~= "function" or type(TRAIT) ~= "function" then
+        check(false, "CASE %soff-obj the objectives natives are missing", P)
+        return
+    end
+    case(P .. "off-obj-set", nSET .. "(path, area, id, text) [off thread]", function() return SET(OBJ_MISSING, "A", "a", "t") end, E.err(nSET .. " refused: called off the game thread"))
+    case(P .. "off-obj-set-bad", nSET .. "(nil) [off thread]", function() return SET(nil) end, E.err(nSET .. " refused: called off the game thread"))
+    case(P .. "off-obj-desc", nDESC .. "(path) [off thread]", function() return DESC(OBJ_MISSING) end, E.err(nDESC .. " refused: called off the game thread"))
+    case(P .. "off-obj-desc-bad", nDESC .. "() [off thread]", function() return DESC() end, E.err(nDESC .. " refused: called off the game thread"))
+    case(P .. "off-obj-trait", nTRAIT .. "(path, id, true) [off thread]", function() return TRAIT(OBJ_MISSING, "a", true) end, E.err(nTRAIT .. " refused: called off the game thread"))
+    case(P .. "off-obj-trait-bad", nTRAIT .. "(1, 2, 3) [off thread]", function() return TRAIT(1, 2, 3) end, E.err(nTRAIT .. " refused: called off the game thread"))
 end
 
 local function badInputCases(phase)
     step(phase .. ": native cases", function() nativeCases(phase) end)
     step(phase .. ": channel cases", function() channelCases(phase) end)
     step(phase .. ": ui cases", function() uiCases(phase) end)
+    step(phase .. ": objectives cases", function() objectivesCases(phase) end)
+    -- Map service story 9: the map setup signal, read from this Lua state (menu1 and the stock SmallMap: none).
+    step(phase .. ": map signal case", function()
+        case(phase .. ".map-signal", "GetSharedVariable(\"" .. SETUP_KEY .. "\") [" .. phase .. "]", readSignal, E.signalNone)
+    end)
     offThreadCases(phase)
 end
 
@@ -2663,6 +2972,12 @@ client.connect{
     end,
     onFail = function(msg)
         -- client.connect has already logged the one-line reason.
+        -- Map service story 9: core's map service doesn't run here (no-native: core stops before starting it; no-pak:
+        -- no level with its Start marker), so its map setup signal must still read "none" (check.ps1).
+        if SCENARIO == "no-native" or SCENARIO == "no-pak" then
+            local okS, v = pcall(readSignal)
+            say("SIGNAL %s=%s", SETUP_KEY, okS and tostring(v) or ("unreadable: " .. firstLine(v)))
+        end
         if SCENARIO ~= "manual" then say("END result=FAIL checks=0 failures=1 reason=connect") end
     end,
 }

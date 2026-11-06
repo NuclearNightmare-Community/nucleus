@@ -7,6 +7,11 @@ local NAME = scriptDir:match("([^/\\]+)[/\\][Ss]cripts$")
 local LOWER = NAME:lower()
 local V = require(LOWER .. ".version")
 local log = require(LOWER .. ".log").new(NAME)
+-- The map service (lua/pkg/map/setup.lua, map service stories 5-9); loaded here, started in start().
+local okMap, MAP = pcall(require, LOWER .. ".map.setup")
+-- The map service's Journal map and area flags (lua/pkg/map/journalmap.lua, map service story 7, every machine);
+-- driven from the same LoadMap post-hook.
+local okJMap, JMAP = pcall(require, LOWER .. ".map.journalmap")
 
 local CLASS_PKG = "/Game/Mods/" .. NAME .. "/ModActor"
 local CLASS = CLASS_PKG .. ".ModActor_C"
@@ -20,6 +25,13 @@ local function setState(s)
     ModRef:SetSharedVariable(LOWER .. ".state", s)
 end
 setState("loading")
+-- <core>.map: "ready" once the map service's setup is installed (DemoMapLoader then skips its own), else why not.
+ModRef:SetSharedVariable(LOWER .. ".map", "loading")
+-- <core>.map.setup (map service story 9, add-only): this machine's map setup, "none" | "pending <world>" | "done <world>"
+-- | "failed <n> <world>"; the map service publishes it from here on (MAP.init's env.publish), and it stays "none" when
+-- that service doesn't run (then <core>.map says why).
+local SETUP_KEY = LOWER .. ".map.setup"
+ModRef:SetSharedVariable(SETUP_KEY, "none")
 local boot = (tonumber(ModRef:GetSharedVariable(LOWER .. ".boot")) or 0) + 1
 ModRef:SetSharedVariable(LOWER .. ".boot", boot)
 ModRef:SetSharedVariable(LOWER .. ".version", V.version)
@@ -107,6 +119,43 @@ local function start()
         log.error("native part %s does not match Lua part %s; reinstall %s. %s does nothing.", tostring(nv), V.version, NAME, NAME)
         return
     end
+    -- The objectives natives (native/src/objectives.cpp; the map service fills intel task lists through them). Checked
+    -- once; core still starts without them, only task lists can't be filled.
+    local missingNatives = {}
+    for _, suffix in ipairs({ "_SetObjectives", "_DescribeObjectives", "_SetTraitorTaskState" }) do
+        if type(_G[NAME .. suffix]) ~= "function" then missingNatives[#missingNatives + 1] = NAME .. suffix end
+    end
+    if #missingNatives > 0 then
+        log.error("objectives natives missing from the native part (%s); intel task lists can't be filled. Reinstall %s.", table.concat(missingNatives, ", "), NAME)
+    end
+
+    -- The map service: the Start marker's and the game state's BeginPlay hooks (InitGameState post-hook); the setup's
+    -- LoadMap part runs from core's one LoadMap post-hook below.
+    local mapReady = false
+    if not okMap then
+        log.error("map service did not load (%s); no map setup on this machine", tostring(MAP):match("^[^\n]*"))
+        ModRef:SetSharedVariable(LOWER .. ".map", "failed: did not load")
+    else
+        local okI, errI = pcall(function()
+            MAP.init({ log = log, publish = function(value) ModRef:SetSharedVariable(SETUP_KEY, value) end })
+            MAP.install()
+        end)
+        if okI then mapReady = true
+        else
+            log.error("map service could not start: %s", tostring(errI):match("^[^\n]*"))
+            ModRef:SetSharedVariable(LOWER .. ".map", "failed: could not start")
+        end
+    end
+
+    -- The Journal map: a loop of its own, started or stopped from the LoadMap post-hook below.
+    local jmapReady = false
+    if not okJMap then
+        log.error("Journal map service did not load (%s); no Journal map or area flags on this machine", tostring(JMAP):match("^[^\n]*"))
+    else
+        local okJ, errJ = pcall(JMAP.init, { log = log })
+        if okJ then jmapReady = true
+        else log.error("Journal map service could not start: %s", tostring(errJ):match("^[^\n]*")) end
+    end
 
     NotifyOnNewObject(CLASS, function()
         local okN, errN = pcall(hookChannel, "NotifyOnNewObject")
@@ -119,7 +168,19 @@ local function start()
     -- The LoadMap hook runs on the game thread, so the delayed check is scheduled from there and runs there. Not
     -- ExecuteWithDelay + ExecuteInGameThread: an ExecuteInGameThread from the async thread can lose its callback while
     -- this state's Lua runs on the game thread (the channel hook, for one); lua/pkg/ui/hud.lua explains the race.
-    RegisterLoadMapPostHook(function()
+    RegisterLoadMapPostHook(function(_, world)
+        if mapReady then
+            local okM, errM = pcall(function() MAP.onLoadMap(world and world:get()) end)
+            if not okM then log.error("map service LoadMap part failed: %s", tostring(errM):match("^[^\n]*")) end
+            -- Story 6: the 1 s loop (traitor mirror, client Area Name, cabin sound), registered here on the game thread
+            -- in a level with the Start marker, cancelled in any other.
+            local okS, errS = pcall(function() return MAP.start(world and world:get()) end)
+            if not okS then log.error("map service loop could not start: %s", tostring(errS):match("^[^\n]*")) end
+        end
+        if jmapReady then
+            local okJ, errJ = pcall(function() JMAP.onLoadMap(world and world:get()) end)
+            if not okJ then log.error("Journal map LoadMap part failed: %s", tostring(errJ):match("^[^\n]*")) end
+        end
         local okL, errL = pcall(ExecuteInGameThreadWithDelay, 3000, function()
             local ok, err = pcall(ensureClass)
             if not ok then log.error("class check failed: %s", tostring(err)) end
@@ -128,10 +189,15 @@ local function start()
     end)
 
     ModRef.OnUnload = function()
+        if mapReady then pcall(MAP.stop) end
+        pcall(function() ModRef:SetSharedVariable(LOWER .. ".map", "stopped") end)
+        pcall(function() ModRef:SetSharedVariable(SETUP_KEY, "none") end)
+        if jmapReady then pcall(JMAP.stop) end
         local okU, errU = pcall(setState, "stopped")
         log.info("STOPPED%s", okU and "" or (" (state not published: " .. tostring(errU) .. ")"))
     end
 
+    if mapReady then ModRef:SetSharedVariable(LOWER .. ".map", "ready") end
     setState("ready")
     log.info("READY version=%s native=%s ue4ss=%s boot=%d", V.version, tostring(nv), tostring(nue), boot)
 end
