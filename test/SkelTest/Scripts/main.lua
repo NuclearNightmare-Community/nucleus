@@ -414,9 +414,9 @@ E.nilret = { what = "nil", test = function(ok, r) return ok and r.n == 1 and r[1
 function E.ret(what, pred) return { what = what, test = function(ok, r) return ok and pred(r) end } end
 -- A channel reply (the call returns a string) that starts with prefix.
 function E.reply(prefix) return { what = "reply starting '" .. prefix .. "'", test = function(ok, r) return ok and type(r[1]) == "string" and r[1]:sub(1, #prefix) == prefix end } end
--- client.call: false plus a reply starting with prefix.
 -- The map setup signal (map service story 9) outside a map with core's Start marker: exactly the string "none".
 E.signalNone = { what = "exactly the string 'none'", test = function(ok, r) return ok and r.n == 1 and type(r[1]) == "string" and r[1] == "none" end }
+-- client.call: false plus a reply starting with prefix.
 function E.callErr(prefix) return { what = "false, '" .. prefix .. "...'", test = function(ok, r) return ok and r[1] == false and type(r[2]) == "string" and r[2]:sub(1, #prefix) == prefix end } end
 
 local cases = { total = 0, passed = 0 }
@@ -2972,6 +2972,12 @@ client.connect{
     end,
     onFail = function(msg)
         -- client.connect has already logged the one-line reason.
+        -- Map service story 9: core's map service doesn't run here (no-native: core stops before starting it; no-pak:
+        -- no level with its Start marker), so its map setup signal must still read "none" (check.ps1).
+        if SCENARIO == "no-native" or SCENARIO == "no-pak" then
+            local okS, v = pcall(readSignal)
+            say("SIGNAL %s=%s", SETUP_KEY, okS and tostring(v) or ("unreadable: " .. firstLine(v)))
+        end
         if SCENARIO ~= "manual" then say("END result=FAIL checks=0 failures=1 reason=connect") end
     end,
 }

@@ -430,6 +430,7 @@ $expect = @{
         "\[$T\] NATIVE main\.lua ${N}_NativeVersion missing"
         "\[$T\] ERROR $N's native part is not loaded .* $T will not run\."
         "!\[$N\] CHANNEL hooked"
+        "\[$T\] SIGNAL $([regex]::Escape($name.ToLower()))\.map\.setup=none\s*$" # map service story 9: the signal stays none
         "\[$T\] END result=FAIL .*reason=connect"
     )
     'no-pak' = @(
@@ -437,6 +438,7 @@ $expect = @{
         "#1|\[$N\] ERROR MISSING $N's Blueprint content is not installed"
         "\[$T\] ERROR $N's Blueprint content is not installed \(Content/Paks/LogicMods/$N\.pak\)\. $T will not run\."
         "!\[$N\] CHANNEL hooked"
+        "\[$T\] SIGNAL $([regex]::Escape($name.ToLower()))\.map\.setup=none\s*$" # map service story 9: the signal stays none
         "\[$T\] END result=FAIL .*reason=connect"
     )
 }
