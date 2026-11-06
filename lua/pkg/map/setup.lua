@@ -12,8 +12,14 @@
 -- isHost is IsServer and not IsStandalone, cached per world; a client spawns nothing here. Every spawned object gets
 -- one "OK|FAIL WIRE" line and one position check against its marker (distance 0, yaw 0); a bad marker value is one
 -- FAIL line and that object is skipped. No UObject is kept between calls (paths, plain values and weak handles only),
--- liveness comes from KismetSystemLibrary:IsValid, every hook body runs under pcall. Objectives, Area Name on clients,
--- the cabin sound, the Journal map, flags and the sky are later stories (6-9).
+-- liveness comes from KismetSystemLibrary:IsValid, every hook body runs under pcall.
+-- Story 6: right after each manager spawns, the host fills it through core's <Core>_SetObjectives (one objective, a
+-- task per valid Intel marker of its area; text = TaskText, else derived from the id) and reads it back with
+-- <Core>_DescribeObjectives. A 1 s game-thread loop (M.start/M.stop, registered from core's LoadMap post-hook in a level
+-- with the Start marker) then mirrors each task's State into TraitorState on the host (<Core>_SetTraitorTaskState, only
+-- for the managers core filled), sets Area Name on a client from the replicated task ids matched against the local
+-- Intel markers (untrusted: lookup keys only), and plays the cabin sound on every machine. The Journal map, flags, the
+-- sky and the dependent signal are later stories (7-9).
 local BASE = (...):gsub("%.map%.setup$", "")
 local V = require(BASE .. ".version")
 local REF = require(BASE .. ".ref")
@@ -46,13 +52,29 @@ M.CORRECTIVE = "Corrective"
 M.MIN_STARTS = 20
 M.NUKE_Z = 12000
 -- Caps on what a level may hold (marker values are checked before use; story 9 adds the full bad-input sweep).
-M.LIMIT = { markers = 256, starts = 1024, equipment = 64, area = 128, id = 64, location = 128 }
+M.LIMIT = { markers = 256, starts = 1024, equipment = 64, area = 128, id = 64, location = 128, text = 256, tasks = 64 }
 -- Position check tolerance: the float round trip of a spawn transform.
 M.EPS = 0.01
+
+-- Story 6: an intel task's text when the marker's TaskText is empty (the demo loader's derivation).
+M.TASK_PREFIX = "Recover the classified material: "
+-- The 1 s loop and the cabin sound: the game's wave and attenuation at the stock spots (SmallMap's AmbientSound_57/58),
+-- offsets from the Corrective PlayerStart; retried once a second for up to 30 s per world.
+M.TICK_MS = 1000
+M.CABIN_TRIES = 30
+M.CABIN = {
+    wave = { "/Game/Sounds/helicopter-loop1", "helicopter-loop1" },
+    attenuation = { "/Game/RealFootsteps/ATT_Footstep", "ATT_Footstep" },
+    spots = {
+        { name = "A", delta = { X = -28.12253, Y = -1452.6485, Z = 578.62 } },
+        { name = "B", delta = { X = -28.12253, Y = 489.3703, Z = 752.874 } },
+    },
+}
 
 local KSL_CDO = "/Script/Engine.Default__KismetSystemLibrary"
 local KSL_ISVALID = "/Script/Engine.KismetSystemLibrary:IsValid"
 local HELPERS = "/Script/AssetRegistry.Default__AssetRegistryHelpers"
+local GSL_CDO = "/Script/Engine.Default__GameplayStatics"
 local GS_CLASS = "/Game/FirstPerson/Blueprints/BP_FirstPersonGameState.BP_FirstPersonGameState_C"
 M.START_FN = M.markerClass("Start") .. ":ReceiveBeginPlay"
 M.GS_FN = GS_CLASS .. ":ReceiveBeginPlay"
@@ -120,6 +142,74 @@ function M.checkEquipment(entries, selfPath, spawned)
     end
     return out
 end
+-- An intel task's text: the marker's TaskText, or when empty "Recover the classified material: " + the id split at
+-- lower->upper case ("DemoIntelNorth" -> "... Demo Intel North"), as the demo loader derives it.
+function M.taskText(id, text)
+    if type(text) == "string" and text ~= "" then return text end
+    return M.TASK_PREFIX .. (tostring(id):gsub("(%l)(%u)", "%1 %2"))
+end
+-- <Core>_DescribeObjectives' text -> { objectives, selected, rep, area, tasks = { { objective, index, state, id, text,
+-- tstate, ttext } }, over }, or nil and why. Extra fields and other line kinds are ignored (the format is add-only);
+-- at most LIMIT.tasks task lines are read (over = true when there are more). On a client the values come from another
+-- player: they are only compared and used as lookup keys.
+function M.parseDescribe(s)
+    if type(s) ~= "string" then return nil, "not a string (" .. type(s) .. ")" end
+    local d = { tasks = {}, over = false }
+    local first = true
+    for line in (s .. "\n"):gmatch("([^\n]*)\n") do
+        if first then
+            first = false
+            local o, sel, rep, area = line:match("^manager\t(%-?%d+)\t(%-?%d+)\t([01])\t([^\t]*)")
+            if not o then return nil, "no manager line" end
+            d.objectives, d.selected, d.rep, d.area = tonumber(o), tonumber(sel), rep == "1", area
+        elseif line:find("^task\t") then
+            if #d.tasks >= M.LIMIT.tasks then d.over = true break end
+            local o, i, st, id, tx, ts, tt = line:match("^task\t(%d+)\t(%d+)\t([01])\t([^\t]*)\t([^\t]*)\t([01])\t([^\t]*)")
+            if not o then return nil, string.format("task line %d is malformed", #d.tasks + 1) end
+            d.tasks[#d.tasks + 1] = { objective = tonumber(o), index = tonumber(i), state = st == "1", id = id, text = tx, tstate = ts == "1", ttext = tt }
+        end
+    end
+    return d
+end
+-- The host's readback against what it filled (tasks { { id, text } }): true, or false and why.
+function M.checkReadback(d, area, tasks)
+    if d.objectives ~= 1 then return false, string.format("%s objectives (want 1)", tostring(d.objectives)) end
+    if d.selected ~= 0 then return false, string.format("selected=%s (want 0)", tostring(d.selected)) end
+    if d.area ~= area then return false, string.format("Area Name %q (want %q)", tostring(d.area), area) end
+    if #d.tasks ~= #tasks or d.over then return false, string.format("%d tasks (want %d)", #d.tasks, #tasks) end
+    for i, want in ipairs(tasks) do
+        local t = d.tasks[i]
+        if t.objective ~= 0 or t.id ~= want.id or t.text ~= want.text or t.ttext ~= want.text or t.state or t.tstate then
+            return false, string.format("task %d reads %s %q imposter %q State=%s TraitorState=%s (want %s %q)", i, quote(t.id), t.text, t.ttext,
+                tostring(t.state), tostring(t.tstate), want.id, want.text)
+        end
+    end
+    return true
+end
+-- One line's worth of a readback.
+function M.describeText(d)
+    local parts = {}
+    for _, t in ipairs(d.tasks) do parts[#parts + 1] = string.format("%s State=%s %q imposter %q TraitorState=%s", quote(t.id), tostring(t.state), t.text, t.ttext, tostring(t.tstate)) end
+    return string.format("objectives=%s selected=%s replicates=%s area=%q tasks=[%s]", tostring(d.objectives), tostring(d.selected), tostring(d.rep), d.area, table.concat(parts, "; "))
+end
+-- A client's manager: the area its replicated task ids name among the local Intel markers (idArea: id -> area), or nil
+-- and why. Untrusted input: every id passes checkId before it is used as a key; more than LIMIT.tasks tasks, a bad or
+-- unknown id, or ids of two areas are refused.
+function M.areaFor(d, idArea)
+    if d.over then return nil, string.format("more than %d tasks", M.LIMIT.tasks) end
+    if #d.tasks == 0 then return nil, "no tasks" end
+    local area
+    for i, t in ipairs(d.tasks) do
+        local okI, why = M.checkId(t.id)
+        if not okI then return nil, string.format("task %d's id %s (%s)", i, why, quote(t.id)) end
+        local a = idArea[t.id]
+        if not a then return nil, string.format("task %d's id %s matches no Intel marker here", i, t.id) end
+        if area and a ~= area then return nil, string.format("its ids name two areas (%q and %q)", area, a) end
+        area = a
+    end
+    return area
+end
+
 -- Yaw difference in degrees, normalized to [-180, 180).
 function M.yawDiff(a, b)
     local d = (a - b) % 360
@@ -155,7 +245,7 @@ local function worldOf(a) return try(function() return pathOf(a:GetWorld()) end)
 
 -- Per-world state: paths and plain values only. Reset in InitGameState (once per world, before any BeginPlay).
 local W = {}
-local function newWorld(wp) W = { world = wp, done = {}, deferred = {}, spawned = {}, objects = 0, fails = 0, poss = 0 } end
+local function newWorld(wp) W = { world = wp, done = {}, deferred = {}, spawned = {}, filled = {}, objects = 0, fails = 0, poss = 0 } end
 local function ok(fmt, ...) W.objects = (W.objects or 0) + 1 log.info("OK " .. fmt, ...) end
 local function fail(fmt, ...) W.fails = (W.fails or 0) + 1 log.info("FAIL " .. fmt, ...) end
 function M.state() return W end
@@ -257,6 +347,43 @@ end
 -- A marker's string setting (FString), or nil.
 local function setting(m, prop) return str(try(function() return m[prop] end)) end
 
+-- ---------------------------------------------------------------- objectives (story 6; core's natives)
+local function native(suffix) local f = _G[NAME .. suffix] if type(f) == "function" then return f end return nil end
+-- A manager read back through <Core>_DescribeObjectives: the parsed table, or nil and why.
+local function describePath(path)
+    local f = native("_DescribeObjectives")
+    if not f then return nil, NAME .. "_DescribeObjectives is missing (native part)" end
+    local okD, s = pcall(f, path)
+    if not okD then return nil, firstLine(s) end
+    return M.parseDescribe(s)
+end
+-- Host, right after a manager spawned: one objective, a task per valid Intel marker of its area (list { { id, text } }),
+-- then the readback. A refusal is one FAIL line and the rest of the setup goes on.
+local function fillManager(mgrPath, area, list)
+    local set = native("_SetObjectives")
+    if not set then return fail("OBJECTIVES %q: %s_SetObjectives is missing (native part); no tasks filled", area, NAME) end
+    local d0, e0 = describePath(mgrPath)
+    log.info("OBJECTIVES %q before the fill: %s", area, d0 and string.format("objectives=%s selected=%s", tostring(d0.objectives), tostring(d0.selected)) or ("unreadable (" .. tostring(e0) .. ")"))
+    local args, tasks, ids = {}, {}, {}
+    for _, e in ipairs(list) do
+        local text = M.taskText(e.id, e.text)
+        tasks[#tasks + 1] = { id = e.id, text = text }
+        ids[#ids + 1] = e.id
+        args[#args + 1] = e.id
+        args[#args + 1] = text
+    end
+    local okS, n = pcall(set, mgrPath, area, table.unpack(args))
+    if not okS then return fail("OBJECTIVES %q fill refused: %s", area, firstLine(n)) end
+    if n ~= #tasks then return fail("OBJECTIVES %q filled by %s_SetObjectives: %s tasks (want %d)", area, NAME, tostring(n), #tasks) end
+    log.info("OK OBJECTIVES %q filled by %s_SetObjectives: objectives=1 tasks=%d (%s)", area, NAME, n, table.concat(ids, ","))
+    W.filled[#W.filled + 1] = { path = mgrPath, area = area, last = {} }
+    local d, e = describePath(mgrPath)
+    if not d then return fail("OBJECTIVES %q read back: %s", area, tostring(e)) end
+    local good, why = M.checkReadback(d, area, tasks)
+    if good then log.info("OK OBJECTIVES %q read back: %s", area, M.describeText(d))
+    else fail("OBJECTIVES %q read back: %s; %s", area, why, M.describeText(d)) end
+end
+
 -- ---------------------------------------------------------------- the sections (host)
 -- Each runs once per world when its classes are available: during the Start marker's BeginPlay only classes still in
 -- memory are used (phase "beginplay"; the rest is deferred), after the map load they are loaded (phase "loadmap").
@@ -316,15 +443,18 @@ SECTIONS[#SECTIONS + 1] = { "intel", { "manager", "intel" }, function(world, cls
     local areas, order, ids = {}, {}, {}
     for _, m in ipairs(markersOf("Intel", W.world)) do
         local area, id = setting(m, "AreaName"), setting(m, "UniqueIdentifier")
+        local text = setting(m, "TaskText") or "" -- empty: the text is derived from the id
         local okA, whyA = M.checkText(area, M.LIMIT.area)
         local okI, whyI = M.checkId(id)
+        local okT, whyT = M.checkText(text, M.LIMIT.text, true)
         if not okA then fail("WIRE intel marker=%s: AreaName %s; skipped", fname(m), whyA)
         elseif not okI then fail("WIRE intel marker=%s: UniqueIdentifier %s; skipped", fname(m), whyI)
+        elseif not okT then fail("WIRE intel marker=%s: TaskText %s; skipped", fname(m), whyT)
         elseif ids[id] then fail("WIRE intel marker=%s: UniqueIdentifier %q is already used by %s; skipped", fname(m), id, ids[id])
         else
             ids[id] = fname(m)
             if not areas[area] then areas[area] = {} order[#order + 1] = area end
-            table.insert(areas[area], { m = m, id = id })
+            table.insert(areas[area], { m = m, id = id, text = text })
         end
     end
     for _, area in ipairs(order) do
@@ -332,12 +462,15 @@ SECTIONS[#SECTIONS + 1] = { "intel", { "manager", "intel" }, function(world, cls
         local first = list[1].m
         local mgr, at, r = spawnAt(world, cls.manager, first, "ObjectiveManager_C")
         if mgr then
-            -- Area Name only; Objectives stays empty (story 6 fills it through core's native, never from Lua).
+            -- Area Name from Lua (an FText property); Objectives only through core's native (a Lua write to the struct
+            -- array crashes the pinned UE4SS), which sets Area Name again.
             pcall(function() mgr["Area Name"] = FText(area) end)
             local got = str(try(function() return mgr["Area Name"] end))
             if got == area then ok("WIRE ObjectiveManager_C %q Area Name=%s at %s (marker=%s)", area, got, vec(at), fname(first))
             else fail("WIRE ObjectiveManager_C %q: Area Name reads %q", area, tostring(got)) end
             posCheck(mgr, at, r, "ObjectiveManager_C", first)
+            local okF, errF = pcall(fillManager, pathOf(mgr), area, list)
+            if not okF then fail("OBJECTIVES %q fill threw: %s", area, firstLine(errF)) end
         end
         for _, e in ipairs(list) do
             local intel, iat, ir = spawnAt(world, cls.intel, e.m, "BP_CM_V4_C")
@@ -527,6 +660,191 @@ local function runSections(world, phase)
     table.sort(def)
     return def
 end
+
+-- ---------------------------------------------------------------- the 1 s loop (story 6; every machine in a level with the Start marker)
+-- Host: each core-filled manager's tasks whose State differs from TraitorState get <Core>_SetTraitorTaskState (one
+-- OK|FAIL TRAITOR line per change; a manager that can no longer be read is dropped with one WARN line).
+local function traitorTick()
+    if #W.filled == 0 then return end
+    local set = native("_SetTraitorTaskState")
+    if not set then
+        if not W.traitorMissing then W.traitorMissing = true fail("TRAITOR %s_SetTraitorTaskState is missing (native part); an imposter's tasks stay unticked", NAME) end
+        return
+    end
+    for i = #W.filled, 1, -1 do
+        local f = W.filled[i]
+        local d, e = describePath(f.path)
+        if not d then
+            table.remove(W.filled, i) -- the path is dropped: no repeated lookup of a gone manager
+            log.warn("TRAITOR %q: the manager can't be read any more (%s); not mirrored from now on", f.area, tostring(e))
+        else
+            for _, t in ipairs(d.tasks) do
+                if t.state ~= t.tstate and f.last[t.id] ~= t.state then
+                    f.last[t.id] = t.state -- one attempt per change
+                    local okS, n = pcall(set, f.path, t.id, t.state)
+                    if okS and math.type(n) == "integer" and n >= 1 then
+                        log.info("OK TRAITOR %q task %s State=%s -> TraitorState=%s (%d task%s)", f.area, t.id, tostring(t.state), tostring(t.state), n, n == 1 and "" or "s")
+                    else
+                        fail("TRAITOR %q task %s State=%s: %s", f.area, quote(t.id), tostring(t.state), okS and (NAME .. "_SetTraitorTaskState set " .. tostring(n) .. " tasks") or firstLine(n))
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- Client: the local Intel markers' id -> AreaName (level actors: the same on every machine), once per world.
+local function localIntel()
+    if W.idArea then return W.idArea, W.areaCount end
+    local map, seen, n = {}, {}, 0
+    for _, m in ipairs(markersOf("Intel", W.world)) do
+        local area, id = setting(m, "AreaName"), setting(m, "UniqueIdentifier")
+        if M.checkText(area, M.LIMIT.area) and M.checkId(id) and map[id] == nil then
+            map[id] = area
+            if not seen[area] then seen[area] = true n = n + 1 end
+        end
+    end
+    W.idArea, W.areaCount = map, n
+    return map, n
+end
+-- Client: each ObjectiveManager_C of this world whose Objectives has arrived gets its Area Name from the local markers
+-- its task ids name (Area Name isn't replicated). One OK|FAIL AREANAME line per manager; a refused one is left alone.
+-- Stops looking once every local area is set or LIMIT.markers managers were handled.
+local function areaNameTick()
+    local idArea, nAreas = localIntel()
+    W.areaDone = W.areaDone or {}
+    W.areaSet = W.areaSet or {}
+    W.areaHandled = W.areaHandled or 0
+    if nAreas == 0 or (W.areaSetCount or 0) >= nAreas or W.areaHandled >= M.LIMIT.markers then return end
+    if not native("_DescribeObjectives") then
+        if not W.areaMissing then W.areaMissing = true fail("AREANAME %s_DescribeObjectives is missing (native part); Area Name stays unset here", NAME) end
+        return
+    end
+    for _, mgr in ipairs(FindAllOf(M.GAME.manager[2]) or {}) do
+        if W.areaHandled >= M.LIMIT.markers then break end
+        local path = alive(mgr) and worldOf(mgr) == W.world and try(function() return pathOf(mgr) end)
+        if path and not W.areaDone[path] then
+            local d, e = describePath(path)
+            if not d then
+                W.areaDone[path], W.areaHandled = true, W.areaHandled + 1
+                fail("AREANAME %s: unreadable (%s); left alone", fname(mgr), tostring(e))
+            elseif (d.objectives or 0) >= 1 or #d.tasks > 0 then
+                W.areaDone[path], W.areaHandled = true, W.areaHandled + 1
+                local area, why = M.areaFor(d, idArea)
+                if not area then
+                    fail("AREANAME %s: %s; left alone", fname(mgr), why)
+                elseif d.area == area then
+                    log.info("OK AREANAME %s Area Name=%q already (tasks %d)", fname(mgr), area, #d.tasks)
+                    if not W.areaSet[area] then W.areaSet[area] = true W.areaSetCount = (W.areaSetCount or 0) + 1 end
+                else
+                    pcall(function() mgr["Area Name"] = FText(area) end)
+                    local d2 = describePath(path)
+                    if d2 and d2.area == area then
+                        log.info("OK AREANAME %s Area Name=%q set locally (replicated %q; tasks %d)", fname(mgr), area, d.area, #d.tasks)
+                        if not W.areaSet[area] then W.areaSet[area] = true W.areaSetCount = (W.areaSetCount or 0) + 1 end
+                    else
+                        fail("AREANAME %s: set %q, reads %q", fname(mgr), area, tostring(d2 and d2.area))
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- Every machine: the cabin sound (a local effect, no actor), once per world, retried once a second for up to
+-- M.CABIN_TRIES s. A failure is a FAIL line on the host and a plain line on a client (not judged there).
+local function cabinLine(fmt, ...)
+    if W.host then fail("CABIN " .. fmt, ...) else log.info("CABIN " .. fmt .. " (not judged on a client)", ...) end
+end
+local function loadAsset(p)
+    local helpers = StaticFindObject(HELPERS)
+    local okG, o = pcall(function() return helpers:GetAsset({ PackageName = FName(p[1]), AssetName = FName(p[2]) }) end)
+    if okG and alive(o) then return o end
+    return nil
+end
+local function cabinTick()
+    local C = W.cabin
+    if not C then C = { tries = 0 } W.cabin = C end
+    if C.done then return end
+    C.tries = C.tries + 1
+    if not C.start then
+        local list = {}
+        for _, ps in ipairs(FindAllOf("PlayerStart") or {}) do
+            if #list >= M.LIMIT.starts then break end
+            if alive(ps) and worldOf(ps) == W.world and str(try(function() return ps.PlayerStartTag end)) == M.CORRECTIVE then list[#list + 1] = pathOf(ps) end
+        end
+        if #list ~= 1 then
+            C.done = true
+            return cabinLine("sound: %d Corrective lobby starts in the level (need exactly 1); no cabin sound in this world", #list)
+        end
+        C.start = list[1]
+    end
+    local st = StaticFindObject(C.start)
+    if not alive(st) then
+        C.done = true -- dropped: not looked up again
+        return cabinLine("sound: the Corrective lobby start %s is gone; no cabin sound in this world", quote(C.start))
+    end
+    local wave, att = loadAsset(M.CABIN.wave), loadAsset(M.CABIN.attenuation)
+    if not (wave and att) then
+        if C.tries >= M.CABIN_TRIES then
+            C.done = true
+            cabinLine("sound: not resolved after %d s (wave %s=%s, attenuation %s=%s); no cabin sound in this world", C.tries,
+                M.CABIN.wave[1], tostring(wave ~= nil), M.CABIN.attenuation[1], tostring(att ~= nil))
+        end
+        return
+    end
+    C.done = true
+    local at = xyz(st:K2_GetActorLocation())
+    local gsl = StaticFindObject(GSL_CDO)
+    for _, sp in ipairs(M.CABIN.spots) do
+        local loc = { X = at.X + sp.delta.X, Y = at.Y + sp.delta.Y, Z = at.Z + sp.delta.Z }
+        local okS, ac = pcall(function() return gsl:SpawnSoundAtLocation(st, wave, loc, { Pitch = 0, Yaw = 0, Roll = 0 }, 1.0, 1.0, 0.0, att, nil, true) end)
+        local where = string.format("(%.2f,%.2f,%.2f)", loc.X, loc.Y, loc.Z)
+        if okS and alive(ac) then
+            log.info("OK CABIN sound %s at %s: %s (%s, %s)", sp.name, where, pathOf(ac), M.CABIN.wave[2], M.CABIN.attenuation[2])
+        else
+            cabinLine("sound %s at %s: SpawnSoundAtLocation gave %s (no audio device?)", sp.name, where, okS and tostring(ac) or firstLine(ac))
+        end
+    end
+end
+
+-- One loop tick: every part under pcall, a fault logged once per part and world.
+local PARTS = {
+    { "TRAITOR", function() return W.host end, traitorTick },
+    { "AREANAME", function() return not W.host end, areaNameTick },
+    { "CABIN", function() return true end, cabinTick },
+}
+function M.tick()
+    if not W.started or not W.world then return end
+    W.ticks = (W.ticks or 0) + 1
+    for _, p in ipairs(PARTS) do
+        if p[2]() then
+            local okP, err = pcall(p[3])
+            if not okP then
+                W.tickErr = W.tickErr or {}
+                if not W.tickErr[p[1]] then W.tickErr[p[1]] = true fail("%s loop part threw: %s", p[1], firstLine(err)) end
+            end
+        end
+    end
+end
+-- The loop: registered from core's LoadMap post-hook (the game thread; never from an async callback) while the
+-- world holds the Start marker, cancelled otherwise and on unload.
+local loopHandle
+function M.start()
+    if not W.started then M.stop() return false end
+    if loopHandle then return true end
+    local okL, h = pcall(LoopInGameThreadWithDelay, M.TICK_MS, function()
+        local okT, err = pcall(M.tick)
+        if not okT and not W.loopErr then W.loopErr = true log.error("MAPSETUP loop tick failed: %s", firstLine(err)) end
+    end)
+    if okL and h ~= nil then loopHandle = h return true end
+    log.error("MAPSETUP the 1 s loop could not be registered: %s", okL and ("LoopInGameThreadWithDelay returned " .. tostring(h)) or firstLine(h))
+    return false
+end
+function M.stop()
+    if loopHandle ~= nil then pcall(CancelDelayedAction, loopHandle) loopHandle = nil end
+end
+function M.looping() return loopHandle ~= nil end
 
 -- ---------------------------------------------------------------- hooks
 -- The Start marker's ReceiveBeginPlay (every machine; only the host spawns).

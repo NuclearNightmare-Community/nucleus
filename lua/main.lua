@@ -7,7 +7,7 @@ local NAME = scriptDir:match("([^/\\]+)[/\\][Ss]cripts$")
 local LOWER = NAME:lower()
 local V = require(LOWER .. ".version")
 local log = require(LOWER .. ".log").new(NAME)
--- The map service's host setup (lua/pkg/map/setup.lua, map service story 5); loaded here, started in start().
+-- The map service (lua/pkg/map/setup.lua, map service stories 5-6); loaded here, started in start().
 local okMap, MAP = pcall(require, LOWER .. ".map.setup")
 -- The map service's Journal map and area flags (lua/pkg/map/journalmap.lua, map service story 7, every machine);
 -- driven from the same LoadMap post-hook.
@@ -164,6 +164,10 @@ local function start()
         if mapReady then
             local okM, errM = pcall(function() MAP.onLoadMap(world and world:get()) end)
             if not okM then log.error("map service LoadMap part failed: %s", tostring(errM):match("^[^\n]*")) end
+            -- Story 6: the 1 s loop (traitor mirror, client Area Name, cabin sound), registered here on the game thread
+            -- in a level with the Start marker, cancelled in any other.
+            local okS, errS = pcall(MAP.start)
+            if not okS then log.error("map service loop could not start: %s", tostring(errS):match("^[^\n]*")) end
         end
         if jmapReady then
             local okJ, errJ = pcall(function() JMAP.onLoadMap(world and world:get()) end)
@@ -177,6 +181,7 @@ local function start()
     end)
 
     ModRef.OnUnload = function()
+        if mapReady then pcall(MAP.stop) end
         pcall(function() ModRef:SetSharedVariable(LOWER .. ".map", "stopped") end)
         if jmapReady then pcall(JMAP.stop) end
         local okU, errU = pcall(setState, "stopped")

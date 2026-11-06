@@ -196,6 +196,76 @@ local function demoLevel(path, opts)
     return w, start
 end
 
+-- ---------------------------------------------------------------- core's objectives natives (story 3), faked
+-- OBJ[path] = { tasks = { { id, text, ttext, state, tstate } } } once filled; RAW[path] = a describe text to return as
+-- is (a hostile host's replicated values on a client). The fakes refuse what the real ones refuse that matters here.
+local OBJ, RAW = {}, {}
+local nativeCalls = { set = 0, describe = 0, traitor = 0 }
+local refuseSet, refuseTraitor = false, false
+local MGR_CLASS = "/Game/Gameplay/ClassifiedMaterials/ObjectiveManager.ObjectiveManager_C"
+local function liveManager(fn, path)
+    local o = objects[path]
+    if not isAlive(o) or o.__meta.__class ~= MGR_CLASS then error(fn .. ": " .. tostring(path) .. " is not a live ObjectiveManager_C", 0) end
+    return o
+end
+function Nucleus_SetObjectives(path, area, ...)
+    nativeCalls.set = nativeCalls.set + 1
+    local o = liveManager("Nucleus_SetObjectives", path)
+    if refuseSet then error("Nucleus_SetObjectives: refused (test)", 0) end
+    if not NET.server or NET.standalone then error("Nucleus_SetObjectives: not the host's world", 0) end
+    if OBJ[path] then error("Nucleus_SetObjectives: " .. path .. " already has 1 objective(s); a manager is filled once only", 0) end
+    local a = { ... }
+    if #a == 0 or #a % 2 ~= 0 or #a > 128 then error("Nucleus_SetObjectives: bad task count", 0) end
+    local t = {}
+    for i = 1, #a, 2 do
+        if type(a[i]) ~= "string" or type(a[i + 1]) ~= "string" or #a[i + 1] > 256 then error("Nucleus_SetObjectives: bad task", 0) end
+        t[#t + 1] = { id = a[i], text = a[i + 1], ttext = a[i + 1], state = false, tstate = false }
+    end
+    OBJ[path] = { tasks = t }
+    o["Area Name"] = FText(area)
+    return math.tointeger(#t)
+end
+function Nucleus_DescribeObjectives(path)
+    nativeCalls.describe = nativeCalls.describe + 1
+    if RAW[path] then return RAW[path] end
+    local o = liveManager("Nucleus_DescribeObjectives", path)
+    local d = OBJ[path]
+    local area = o["Area Name"] and o["Area Name"]:ToString() or ""
+    local out = { string.format("manager\t%d\t0\t1\t%s", d and 1 or 0, area) }
+    for i, t in ipairs(d and d.tasks or {}) do
+        out[#out + 1] = string.format("task\t0\t%d\t%d\t%s\t%s\t%d\t%s", i - 1, t.state and 1 or 0, t.id, t.text, t.tstate and 1 or 0, t.ttext)
+    end
+    return table.concat(out, "\n")
+end
+function Nucleus_SetTraitorTaskState(path, id, state)
+    nativeCalls.traitor = nativeCalls.traitor + 1
+    liveManager("Nucleus_SetTraitorTaskState", path)
+    if refuseTraitor then error("Nucleus_SetTraitorTaskState: refused (test)", 0) end
+    local n = 0
+    for _, t in ipairs(OBJ[path] and OBJ[path].tasks or {}) do if t.id == id then t.tstate = state n = n + 1 end end
+    if n == 0 then error("Nucleus_SetTraitorTaskState: no task with id " .. id, 0) end
+    return math.tointeger(n)
+end
+-- The game's pickup flow on the host: a task's State turns true (RPCUpdateTaskState).
+local function pickup(id)
+    for _, d in pairs(OBJ) do for _, t in ipairs(d.tasks) do if t.id == id then t.state = true end end end
+end
+
+-- the 1 s loop and the cabin sound
+local loops, cancelled = {}, 0
+function LoopInGameThreadWithDelay(ms, fn) loops[#loops + 1] = { ms = ms, fn = fn } return #loops end
+function CancelDelayedAction() cancelled = cancelled + 1 end
+local sounds = {}
+local soundFails = false
+newObj("/Script/Engine.Default__GameplayStatics", "/Script/Engine.GameplayStatics", {
+    SpawnSoundAtLocation = function(_, ctx, wave, loc, rot, vol, pitch, t0, att, conc, auto)
+        if soundFails then return nil end
+        local ac = newObj("/Engine/Transient.AudioComponent_" .. (#sounds + 1), "/Script/Engine.AudioComponent", { Sound = wave, AttenuationSettings = att })
+        sounds[#sounds + 1] = { ac = ac, loc = loc, wave = wave, att = att, ctx = ctx }
+        return ac
+    end,
+})
+
 -- ---------------------------------------------------------------- the module
 local MS = require("nucleus.map.setup")
 MS.alive = isAlive
@@ -324,7 +394,7 @@ do
 end
 do
     local n = 0
-    for _, o in pairs(objects) do if isAlive(o) and o.__meta.__class == SHORT.ObjectiveManager_C then n = n + 1 ok(o["Area Name"]:ToString():find("^Demo "), "solo: Area Name set") ok(o.Objectives == nil, "solo: Objectives left empty (story 6)") end end
+    for _, o in pairs(objects) do if isAlive(o) and o.__meta.__class == SHORT.ObjectiveManager_C then n = n + 1 ok(o["Area Name"]:ToString():find("^Demo "), "solo: Area Name set") ok(o.Objectives == nil, "solo: Objectives never written from Lua") end end
     ok(n == 2, "solo: two managers exist", n)
 end
 
@@ -454,6 +524,235 @@ ok(count("^FAIL WIRE the start marker's BeginPlay never ran") == 1 and count("^O
 -- the hook bodies: a throwing callback inside the registered hook stays inside it
 local okH = pcall(hooks[1].fn, { get = function() error("boom") end })
 ok(okH, "hooks: a failing body doesn't escape")
+
+-- ================================================================ story 6: objectives fill, traitor mirror, client Area Name, cabin sound
+NET.server, NET.standalone = true, false
+local function tick(n) for _ = 1, (n or 1) do MS.tick() end end
+
+-- ---------------------------------------------------------------- pure: text derivation, describe parsing, client area
+ok(MS.taskText("DemoIntelNorth") == "Recover the classified material: Demo Intel North", "text: derived from the id as the demo", MS.taskText("DemoIntelNorth"))
+ok(MS.taskText("DemoIntelNorth", "") == "Recover the classified material: Demo Intel North", "text: an empty TaskText is derived")
+ok(MS.taskText("X", "Find the red folder") == "Find the red folder", "text: TaskText used when set")
+ok(MS.taskText("abc_def.9") == "Recover the classified material: abc_def.9", "text: nothing to split")
+do
+    local d = MS.parseDescribe("manager\t1\t0\t1\tDemo North\textra\ntask\t0\t0\t1\tDemoIntelNorth\tSome text\t0\tImp text\tmore\nother\tline")
+    ok(d and d.objectives == 1 and d.selected == 0 and d.rep == true and d.area == "Demo North", "describe: manager line (extra fields ignored)")
+    ok(d and #d.tasks == 1 and d.tasks[1].state == true and d.tasks[1].id == "DemoIntelNorth" and d.tasks[1].text == "Some text" and d.tasks[1].tstate == false and d.tasks[1].ttext == "Imp text", "describe: task line (extra fields, other line kinds ignored)")
+    local e = MS.parseDescribe("manager\t0\t0\t1\t")
+    ok(e and e.objectives == 0 and #e.tasks == 0 and e.area == "", "describe: an empty manager")
+    ok(MS.parseDescribe("nonsense") == nil and MS.parseDescribe(nil) == nil and MS.parseDescribe("manager\t1\t0\t1\ta\ntask\tx") == nil, "describe: malformed text refused")
+    local many = { "manager\t1\t0\t1\tA" }
+    for i = 1, 70 do many[#many + 1] = string.format("task\t0\t%d\t0\tid%d\tt\t0\tt", i - 1, i) end
+    local m = MS.parseDescribe(table.concat(many, "\n"))
+    ok(m and m.over == true and #m.tasks == 64, "describe: at most 64 tasks read", m and #m.tasks)
+end
+do
+    local idArea = { DemoIntelNorth = "Demo North", DemoIntelSouth = "Demo South", N2 = "Demo North" }
+    local function d(ids, over) local t = {} for _, id in ipairs(ids) do t[#t + 1] = { id = id } end return { tasks = t, over = over } end
+    ok(MS.areaFor(d({ "DemoIntelNorth", "N2" }), idArea) == "Demo North", "client area: ids of one area")
+    local _, why = MS.areaFor(d({ string.rep("x", 65) }), idArea)
+    ok(why and why:find("65 characters", 1, true), "client area: an oversized id refused", why)
+    _, why = MS.areaFor(d({ "../../x" }), idArea)
+    ok(why and why:find("outside", 1, true), "client area: bad characters refused", why)
+    _, why = MS.areaFor(d({ "Unknown" }), idArea)
+    ok(why and why:find("matches no Intel marker", 1, true), "client area: an unknown id refused", why)
+    _, why = MS.areaFor(d({ "DemoIntelNorth", "DemoIntelSouth" }), idArea)
+    ok(why and why:find("two areas", 1, true), "client area: ids of two areas refused", why)
+    _, why = MS.areaFor(d({ "DemoIntelNorth" }, true), idArea)
+    ok(why and why:find("more than 64", 1, true), "client area: more than 64 tasks refused", why)
+    _, why = MS.areaFor(d({}), idArea)
+    ok(why == "no tasks", "client area: no tasks")
+    _, why = MS.areaFor(d({ "__index" }), idArea)
+    ok(why and why:find("matches no Intel marker", 1, true), "client area: a metamethod-like id is only a key", why)
+end
+
+-- ---------------------------------------------------------------- host: the fill and its readback (solo)
+local wf, sf = demoLevel("/Game/Mods/DemoMap/Maps/L_Fill.L_Fill")
+-- a TaskText of its own on North, a bad one (257 characters) and a non-printable one on two extra markers
+objects["/Game/Mods/DemoMap/Maps/L_Fill.L_Fill:PersistentLevel.DM_Intel_North"].TaskText = str("Find the red folder")
+marker(wf, "Intel", "DM_Intel_Long", { 0, 0, 0 }, 0, { AreaName = str("Demo North"), UniqueIdentifier = str("LongText"), TaskText = str(string.rep("a", 257)) })
+marker(wf, "Intel", "DM_Intel_Ctl", { 0, 0, 0 }, 0, { AreaName = str("Demo South"), UniqueIdentifier = str("CtlText"), TaskText = str("bad\ttext") })
+local okFill, errFill = pcall(load, wf, sf)
+ok(okFill, "fill: no Lua error escapes", errFill)
+ok(count("^FAIL WIRE intel marker=DM_Intel_Long: TaskText 257 characters, cap 256; skipped") == 1, "fill: an oversized TaskText is one FAIL WIRE line", table.concat(lines("^FAIL"), " | "))
+ok(count("^FAIL WIRE intel marker=DM_Intel_Ctl: TaskText not printable ASCII; skipped") == 1, "fill: a non-printable TaskText is one FAIL WIRE line")
+ok(count("^FAIL") == 2, "fill: only those two FAIL lines", table.concat(lines("^FAIL"), " | "))
+ok(count('^OBJECTIVES "Demo North" before the fill: objectives=0 selected=0') == 1 and count('^OBJECTIVES "Demo South" before the fill: objectives=0 selected=0') == 1, "fill: selected read before the fill is logged")
+ok(count('^OK OBJECTIVES "Demo North" filled by Nucleus_SetObjectives: objectives=1 tasks=1 %(DemoIntelNorth%)') == 1, "fill: North filled, the skipped marker not in it")
+ok(count('^OK OBJECTIVES "Demo South" filled by Nucleus_SetObjectives: objectives=1 tasks=1 %(DemoIntelSouth%)') == 1, "fill: South filled")
+ok(count('^OK OBJECTIVES "Demo North" read back: objectives=1 selected=0 replicates=true area="Demo North" tasks=%[DemoIntelNorth State=false "Find the red folder" imposter "Find the red folder" TraitorState=false%]') == 1, "fill: North read back with its own TaskText as text and imposter text")
+ok(count('^OK OBJECTIVES "Demo South" read back: .*DemoIntelSouth State=false "Recover the classified material: Demo Intel South" imposter "Recover the classified material: Demo Intel South"') == 1, "fill: South read back with the derived text")
+ok(count("^OK OBJECTIVES") == 4 and #MS.state().filled == 2, "fill: one fill and one readback line per area; two managers registered for the mirror")
+ok(count("^OK WIRE intel BP_CM_V4_C ") == 2, "fill: the skipped markers spawn no intel")
+
+-- ---------------------------------------------------------------- the loop: registered from the LoadMap hook (main.lua calls MS.start)
+loops = {}
+ok(MS.start() == true and #loops == 1 and loops[1].ms == 1000, "loop: registered at 1 s", #loops)
+ok(MS.start() == true and #loops == 1, "loop: start again registers nothing new")
+logs = {}
+loops[1].fn() -- the registered body runs M.tick under pcall
+ok(count("TRAITOR") == 0, "mirror: nothing changed, no TRAITOR line")
+ok(count("^OK CABIN sound A at %(%-28%.12,%-1452%.65,45578%.62%): /Engine/Transient%.AudioComponent_%d+ %(helicopter%-loop1, ATT_Footstep%)") == 1
+    and count("^OK CABIN sound B at %(%-28%.12,489%.37,45752%.87%): ") == 1, "cabin: two sounds at the Corrective start + the stock offsets", table.concat(logs, " | "))
+ok(#sounds == 2 and sounds[1].wave.__meta.__path == "/Game/Sounds/helicopter-loop1.helicopter-loop1" and sounds[1].att.__meta.__path == "/Game/RealFootsteps/ATT_Footstep.ATT_Footstep", "cabin: the game's wave and attenuation")
+ok(sounds[1].ctx.__meta.__path:find("Lobby_1", 1, true) ~= nil, "cabin: the Corrective start is the world context")
+tick(5)
+ok(#sounds == 2 and count("CABIN") == 2, "cabin: once per world")
+
+-- a pickup on the host: TraitorState follows within a tick, one line per change
+logs = {}
+pickup("DemoIntelNorth")
+tick()
+ok(count('^OK TRAITOR "Demo North" task DemoIntelNorth State=true %-> TraitorState=true %(1 task%)') == 1 and count("TRAITOR") == 1, "mirror: the pickup is one OK TRAITOR line", table.concat(logs, " | "))
+do local t = OBJ[MS.state().filled[2].path] or OBJ[MS.state().filled[1].path] ok(t ~= nil, "mirror: the filled managers are known") end
+local calls = nativeCalls.traitor
+tick(3)
+ok(count("TRAITOR") == 1 and nativeCalls.traitor == calls, "mirror: no line or call once TraitorState matches")
+-- a refused mirror: one FAIL line, not repeated each second
+refuseTraitor = true
+pickup("DemoIntelSouth")
+tick(3)
+refuseTraitor = false
+ok(count('^FAIL TRAITOR "Demo South" task DemoIntelSouth State=true: Nucleus_SetTraitorTaskState: refused') == 1, "mirror: a refusal is one FAIL line", table.concat(lines("TRAITOR"), " | "))
+-- only core's managers: a level manager with State ~= TraitorState gets no call
+do
+    local lm = place(wf, "ObjectiveManager_Stock", MGR_CLASS, { 0, 0, 0 })
+    OBJ[lm.__meta.__path] = { tasks = { { id = "StockTask", text = "t", ttext = "", state = true, tstate = false } } }
+    local before = nativeCalls.traitor
+    logs = {}
+    tick(2)
+    ok(nativeCalls.traitor == before and count("StockTask") == 0, "mirror: a manager core didn't fill is never touched")
+end
+-- a manager that disappears: dropped once (no repeated lookup), one WARN line
+do
+    local f = MS.state().filled[1]
+    kill(objects[f.path])
+    logs = {}
+    local before = nativeCalls.describe
+    tick(3)
+    ok(count("^WARN TRAITOR .*can't be read any more") == 1 and #MS.state().filled == 1, "mirror: a gone manager is dropped with one line", table.concat(logs, " | "))
+    ok(nativeCalls.describe - before == 4, "mirror: the gone path is read once, then only the other (2 + 1 + 1)", nativeCalls.describe - before)
+end
+
+-- a refused fill: one FAIL line per area, the rest of the setup goes on
+refuseSet = true
+local wr, sr = demoLevel("/Game/Mods/DemoMap/Maps/L_Refuse.L_Refuse")
+load(wr, sr)
+refuseSet = false
+ok(count('^FAIL OBJECTIVES "Demo North" fill refused: Nucleus_SetObjectives: refused') == 1 and count("^FAIL") == 2, "refused fill: one FAIL line per area", table.concat(lines("^FAIL"), " | "))
+ok(count("^OK OBJECTIVES") == 0 and count("^OK WIRE AISpawner_C") == 1 and count("^OK WIRE BP_GeneratorGameplayNew_C") == 1, "refused fill: no OK OBJECTIVES, the rest wired")
+ok(#MS.state().filled == 0, "refused fill: nothing for the mirror")
+
+-- ---------------------------------------------------------------- cabin: no Corrective start, two, a wave that doesn't load
+for _, c in ipairs({ 0, 2 }) do
+    local w, s = demoLevel("/Game/Mods/DemoMap/Maps/L_Cab" .. c .. ".L_Cab" .. c, { corrective = c })
+    load(w, s)
+    MS.start()
+    logs = {}
+    local before = #sounds
+    tick(4)
+    ok(#sounds == before and count("^FAIL CABIN sound: " .. c .. " Corrective lobby starts in the level %(need exactly 1%); no cabin sound in this world") == 1 and count("CABIN") == 1, "cabin: " .. c .. " Corrective starts is one line per world, no sound", table.concat(logs, " | "))
+end
+do
+    local w, s = demoLevel("/Game/Mods/DemoMap/Maps/L_NoWave.L_NoWave")
+    load(w, s)
+    dropClass("helicopter-loop1") unloadable["helicopter-loop1"] = true
+    logs = {}
+    local before = #sounds
+    tick(MS.CABIN_TRIES - 1)
+    local early = count("CABIN")
+    tick(5)
+    unloadable["helicopter-loop1"] = nil
+    ok(early == 0 and count("^FAIL CABIN sound: not resolved after 30 s %(wave /Game/Sounds/helicopter%-loop1=false") == 1 and count("CABIN") == 1 and #sounds == before, "cabin: retried for 30 s, then one FAIL line", table.concat(logs, " | "))
+end
+
+-- ---------------------------------------------------------------- client: Area Name from the replicated ids, cabin unjudged
+NET.server, NET.standalone = false, false
+local wc, scl = demoLevel("/Game/Mods/DemoMap/Maps/L_Client.L_Client")
+load(wc, scl)
+ok(MS.state().host == false and MS.start() == true, "client: the loop runs on a client too")
+local function clientManager(name, ids, raw)
+    local m = place(wc, name, MGR_CLASS, { 0, 0, 0 })
+    m["Area Name"] = FText("")
+    if raw then RAW[m.__meta.__path] = raw
+    elseif ids then
+        local t = {}
+        for _, id in ipairs(ids) do t[#t + 1] = { id = id, text = "x", ttext = "x", state = false, tstate = false } end
+        OBJ[m.__meta.__path] = { tasks = t }
+    end
+    return m
+end
+soundFails = true
+logs = {}
+local north = clientManager("ObjectiveManager_C_N", { "DemoIntelNorth" })
+local south = clientManager("ObjectiveManager_C_S", nil) -- its Objectives hasn't arrived yet
+tick()
+soundFails = false
+ok(north["Area Name"]:ToString() == "Demo North" and count('^OK AREANAME ObjectiveManager_C_N Area Name="Demo North" set locally %(replicated ""; tasks 1%)') == 1, "client: Area Name set from the local markers", table.concat(logs, " | "))
+ok(south["Area Name"]:ToString() == "" and count("ObjectiveManager_C_S") == 0, "client: a manager whose Objectives hasn't arrived is left for later")
+ok(count("^CABIN sound A at .*SpawnSoundAtLocation gave nil %(no audio device%?%) %(not judged on a client%)") == 1 and count("^FAIL CABIN") == 0, "client: a failed cabin sound is a plain line")
+ok(count("TRAITOR") == 0 and nativeCalls.set >= 0, "client: no traitor mirror on a client")
+OBJ[south.__meta.__path] = { tasks = { { id = "DemoIntelSouth", text = "x", ttext = "x", state = false, tstate = false } } }
+tick(3)
+ok(south["Area Name"]:ToString() == "Demo South" and count("^OK AREANAME ObjectiveManager_C_S ") == 1 and count("^OK AREANAME") == 2, "client: set once it arrives, one line per manager")
+do
+    local before = nativeCalls.describe
+    tick(3)
+    ok(nativeCalls.describe == before, "client: no more reads once every local area is set")
+end
+
+-- hostile replicated ids: each manager left alone, one FAIL line, no Lua error
+local wh, sh = demoLevel("/Game/Mods/DemoMap/Maps/L_Hostile.L_Hostile")
+load(wh, sh)
+MS.start()
+wc = wh
+local hostile = {
+    { "H_Long", nil, "manager\t1\t0\t1\t\ntask\t0\t0\t0\t" .. string.rep("A", 200) .. "\tx\t0\tx", "200 characters, cap 64" },
+    { "H_Chars", nil, "manager\t1\t0\t1\t\ntask\t0\t0\t0\t../../Game/x\tx\t0\tx", "characters outside" },
+    { "H_Unknown", { "NoSuchIntel" }, nil, "matches no Intel marker" },
+    { "H_Two", { "DemoIntelNorth", "DemoIntelSouth" }, nil, "two areas" },
+}
+do
+    local many = { "manager\t1\t0\t1\t" }
+    for i = 1, 100 do many[#many + 1] = "task\t0\t" .. (i - 1) .. "\t0\tDemoIntelNorth\tx\t0\tx" end
+    hostile[#hostile + 1] = { "H_Many", nil, table.concat(many, "\n"), "more than 64 tasks" }
+end
+local hm = {}
+logs = {}
+for _, h in ipairs(hostile) do hm[h[1]] = clientManager(h[1], h[2], h[3]) end
+local okH2, errH2 = pcall(tick, 3)
+ok(okH2, "hostile ids: no Lua error escapes", errH2)
+for _, h in ipairs(hostile) do
+    ok(count("^FAIL AREANAME " .. h[1] .. ": .*" .. h[4]:gsub("%p", "%%%0") .. ".*; left alone") == 1 and hm[h[1]]["Area Name"]:ToString() == "", "hostile ids: " .. h[1] .. " left alone, one FAIL line", table.concat(lines(h[1]), " | "))
+end
+ok(count("^OK AREANAME") == 0, "hostile ids: nothing set")
+NET.server, NET.standalone = true, false
+
+-- ---------------------------------------------------------------- stock map: the loop stops, no line of these kinds
+do
+    load(stock, nil)
+    local c0 = cancelled
+    ok(MS.start() == false and cancelled == c0 + 1 and not MS.looping(), "stock map: the loop is cancelled")
+    logs = {}
+    tick(3)
+    ok(#logs == 0, "stock map: no OBJECTIVES, TRAITOR, AREANAME or CABIN line", table.concat(logs, " | "))
+    ok(MS.start() == false and cancelled == c0 + 1, "stock map: stop is idempotent")
+end
+
+-- a loop part that throws: one FAIL line per part and world
+do
+    local w, s = demoLevel("/Game/Mods/DemoMap/Maps/L_Throw.L_Throw")
+    load(w, s)
+    MS.start()
+    local realFind = FindAllOf
+    FindAllOf = function() error("boom") end
+    logs = {}
+    local okT = pcall(tick, 3)
+    FindAllOf = realFind
+    ok(okT and count("^FAIL CABIN loop part threw: ") == 1, "loop: a throwing part is one FAIL line", table.concat(logs, " | "))
+    MS.stop()
+    ok(not MS.looping(), "loop: stop cancels it")
+end
 
 print(string.format("map_setup_test: %d passed, %d failed", pass, failN))
 os.exit(failN == 0 and 0 or 1)
