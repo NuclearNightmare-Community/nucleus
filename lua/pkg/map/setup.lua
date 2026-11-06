@@ -23,8 +23,10 @@
 -- Story 8: the sky. In the LoadMap post-hook only (a LoadMap-only section: never during the Start marker's BeginPlay,
 -- where spawning it hung the game, and never listed as deferred there), the host spawns the game's Ultra_Dynamic_Sky_C
 -- at the level's one Sky marker, rotation 0, and sets its Time of Day to StartHour * 100 (then one Update Replicated
--- Time); unless the level already has a live sky, which is left alone. Clients get it by replication; the game sets its
--- speed from the lobby's night cycle (Time Speed and Animate Time of Day are never touched here).
+-- Time); unless the level already has a live sky, which is left alone. Its position check is grounded, not 0-distance
+-- (M.groundedCheck: the game's own construction script moves it to a trace hit + 90 Z, and core never moves it back).
+-- Clients get it by replication; the game sets its speed from the lobby's night cycle (Time Speed and Animate Time of
+-- Day are never touched here).
 local BASE = (...):gsub("%.map%.setup$", "")
 local V = require(BASE .. ".version")
 local REF = require(BASE .. ".ref")
@@ -342,6 +344,25 @@ local function posCheck(a, at, r, what, m)
     local good = d <= M.EPS and math.abs(dy) <= M.EPS
     log.info("%s POS %s marker=%s distance=%.3f yaw=%.3f", good and "OK" or "FAIL", what, fname(m), d, dy)
     if not good then W.fails = (W.fails or 0) + 1 end
+end
+-- The sky's position check (story 8): grounded, not 0-distance. The game's Ground UDS Actor moves the sky to the hit of
+-- a trace from 50 above to 150 below it, + 90 Z, so it passes when X and Y are the marker's, yaw is 0, and Z is the
+-- marker's (nothing hit) or in the grounded band, marker Z + M.GROUND_MIN to + M.GROUND_MAX. got and yaw are plain
+-- values read back (nil when unreadable); returns whether it passed.
+M.GROUND_MIN, M.GROUND_MAX = -60, 140
+function M.groundedCheck(got, yaw, at, what, name)
+    W.poss = (W.poss or 0) + 1
+    if type(got) ~= "table" or type(got.X) ~= "number" or type(got.Y) ~= "number" or type(got.Z) ~= "number" or type(yaw) ~= "number" then
+        fail("POS %s marker=%s: unreadable", what, name)
+        return false
+    end
+    local dz, dy = got.Z - at.Z, M.yawDiff(yaw, 0)
+    local good = math.abs(got.X - at.X) <= M.EPS and math.abs(got.Y - at.Y) <= M.EPS and math.abs(dy) <= M.EPS
+        and (math.abs(dz) <= M.EPS or (dz >= M.GROUND_MIN - M.EPS and dz <= M.GROUND_MAX + M.EPS))
+    if good then log.info("OK POS %s marker=%s grounded dz=%.3f yaw=%.3f", what, name, dz, dy)
+    else fail("POS %s marker=%s grounded dz=%.3f yaw=%.3f offX=%.3f offY=%.3f (need X and Y at the marker, yaw 0, dz 0 or %d..%d)",
+        what, name, dz, dy, got.X - at.X, got.Y - at.Y, M.GROUND_MIN, M.GROUND_MAX) end
+    return good
 end
 -- Sets an object array property from a Lua list; returns the resulting length.
 local function setArray(o, prop, list)
@@ -670,10 +691,10 @@ SECTIONS[#SECTIONS + 1] = { "sky", { "sky" }, function(world, cls)
         ok("WIRE %s at the sky marker: StartHour=%s Time of Day=%s bReplicates=%s Animate Time of Day=%s Time Speed=%s", M.GAME.sky[2], fmtv(h), fmtv(got),
             fmtv(try(function() return sky.bReplicates end)), fmtv(try(function() return sky["Animate Time of Day"] end)), fmtv(try(function() return sky["Time Speed"] end)))
     end
-    -- Open (story 8, V8.1.5): on a marker that stands on a floor this reads distance=90. The class grounds itself in its
-    -- construction script (Ground UDS Actor: a trace from 50 above to 150 below, then hit + 90 Z), and its root
-    -- (SkyRoot) is Static, so K2_SetActorLocation and K2_TeleportTo can't move it back at run time.
-    posCheck(sky, at, r, M.GAME.sky[2], m)
+    -- Grounded, not 0-distance (story 8, decided 2026-11-06): the class grounds itself in its construction script
+    -- (Ground UDS Actor, V8.1.5: a trace from 50 above to 150 below, then hit + 90 Z), and its root (SkyRoot) is Static,
+    -- so K2_SetActorLocation and K2_TeleportTo can't move it back at run time. Core never tries to.
+    M.groundedCheck(try(function() return xyz(sky:K2_GetActorLocation()) end), try(function() return sky:K2_GetActorRotation().Yaw end), at, M.GAME.sky[2], fname(m))
 end, "loadmap" }
 
 local function runSections(world, phase)

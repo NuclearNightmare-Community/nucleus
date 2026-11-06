@@ -140,7 +140,9 @@ local NET = { server = true, standalone = false }
 local spawnedCount = 0
 local spawnOffset = nil -- { X } to test a failing position check
 -- the sky's fakes (story 8): Time of Day writes (or a throwing write, or a readback that differs), Update Replicated Time
-local SKY = { calls = 0, throwWrite = false, readOffset = 0, failSpawn = false }
+-- and the game's own grounding (Ground UDS Actor moves a fresh sky to a trace hit + 90 Z: groundDz, and groundDx for a
+-- sky that ends off its marker in X)
+local SKY = { calls = 0, throwWrite = false, readOffset = 0, failSpawn = false, groundDz = 0, groundDx = 0 }
 newObj("/Script/Engine.Default__KismetSystemLibrary", "/Script/Engine.KismetSystemLibrary", {
     IsServer = function() return NET.server end,
     IsStandalone = function() return NET.standalone end,
@@ -156,6 +158,7 @@ local function newWorld(path)
         spawnedCount = spawnedCount + 1
         local a = newObj(path .. ":PersistentLevel." .. name .. "_" .. seq, cls.__meta.__path)
         local loc = { X = at.X + (spawnOffset or 0), Y = at.Y, Z = at.Z }
+        if name == "Ultra_Dynamic_Sky_C" then loc.X, loc.Z = loc.X + SKY.groundDx, loc.Z + SKY.groundDz end
         local rr = { Pitch = r.Pitch, Yaw = r.Yaw, Roll = r.Roll }
         a.__meta.K2_GetActorLocation = function() return loc end
         a.__meta.K2_GetActorRotation = function() return rr end
@@ -874,15 +877,19 @@ local function skyLoad(path, opts)
 end
 
 -- the happy path: nothing at BeginPlay (not deferred either), one sky after the map load, its line and position check
+-- (grounded by the game on a floor: hit + 90 Z, as in demo-solo)
 do
+    SKY.groundDz = 90
     local w, okL, errL, before = skyLoad("/Game/Mods/DemoMap/Maps/L_Sky.L_Sky")
+    SKY.groundDz = 0
     ok(okL, "sky: no Lua error escapes", errL)
     ok(before == 0, "sky: nothing spawned during the Start marker's BeginPlay (class resident)", before)
     ok(count("everything spawned") == 1 and count("deferred") == 0, "sky: the BeginPlay phase neither spawns nor defers it", table.concat(lines("MAPSETUP"), " | "))
     ok(count("^FAIL") == 0, "sky: no FAIL line", table.concat(lines("^FAIL"), " | "))
     ok(ofClass(w, "Ultra_Dynamic_Sky_C") == 1, "sky: exactly one sky after the map load")
     ok(count(SKYLINE) == 1, "sky: the WIRE line", table.concat(lines("Sky"), " | "))
-    ok(count("^OK POS Ultra_Dynamic_Sky_C marker=DM_Sky distance=0%.000 yaw=0%.000$") == 1, "sky: the position check at the marker, yaw 0 (the marker is turned 30 degrees)")
+    ok(count("^OK POS Ultra_Dynamic_Sky_C marker=DM_Sky grounded dz=90%.000 yaw=0%.000$") == 1, "sky: the grounded position check, yaw 0 (the marker is turned 30 degrees)", table.concat(lines("POS Ultra"), " | "))
+    ok(count("^OK POS Ultra_Dynamic_Sky_C .*distance=") == 0, "sky: no 0-distance check for the sky")
     ok(SKY.calls == 1, "sky: one Update Replicated Time", SKY.calls)
     local sp = MS.state().spawned["/Game/Mods/DemoMap/Maps/L_Sky.L_Sky:PersistentLevel.DM_Sky"]
     local sky = sp and objects[sp]
@@ -894,6 +901,30 @@ do
     MS.onLoadMap(w)
     MS.onLoadMap(w)
     ok(ofClass(w, "Ultra_Dynamic_Sky_C") == 1 and count(SKYLINE) == 1 and SKY.calls == c0, "sky: a doubled LoadMap spawns no second sky")
+end
+
+-- grounding: the sky read back at the marker's Z, +90, +140 passes; +141, -61 or X off by 1 is one FAIL POS line (the
+-- sky stays, its WIRE line stands, core never moves it)
+for i, c in ipairs({
+    { "marker Z", 0, 0, true, "0%.000" }, { "+90", 90, 0, true, "90%.000" }, { "+140", 140, 0, true, "140%.000" }, { "-60", -60, 0, true, "%-60%.000" },
+    { "+141", 141, 0, false, "141%.000" }, { "-61", -61, 0, false, "%-61%.000" }, { "X off by 1", 90, 1, false, "90%.000" },
+}) do
+    SKY.groundDz, SKY.groundDx = c[2], c[3]
+    local w, okL, errL = skyLoad("/Game/Mods/DemoMap/Maps/L_SkyGround" .. i .. ".L_SkyGround" .. i)
+    SKY.groundDz, SKY.groundDx = 0, 0
+    ok(okL, "grounding " .. c[1] .. ": no Lua error escapes", errL)
+    local want = (c[4] and "^OK" or "^FAIL") .. " POS Ultra_Dynamic_Sky_C marker=DM_Sky grounded dz=" .. c[5] .. " yaw=0%.000"
+    ok(count(want) == 1 and count("^FAIL") == (c[4] and 0 or 1), "grounding " .. c[1] .. ": " .. (c[4] and "OK POS" or "one FAIL POS line"), table.concat(lines("POS Ultra"), " | "))
+    ok(ofClass(w, "Ultra_Dynamic_Sky_C") == 1 and count(SKYLINE) == 1, "grounding " .. c[1] .. ": one sky, its WIRE line")
+end
+-- an unreadable position or yaw: one FAIL POS line, no Lua error
+do
+    logs = {}
+    local okG, g = pcall(MS.groundedCheck, nil, 0, { X = 0, Y = 0, Z = 0 }, "Ultra_Dynamic_Sky_C", "DM_Sky")
+    local okH, h = pcall(MS.groundedCheck, { X = 0, Y = 0, Z = 90 }, nil, { X = 0, Y = 0, Z = 0 }, "Ultra_Dynamic_Sky_C", "DM_Sky")
+    ok(okG and okH and g == false and h == false and count("^FAIL POS Ultra_Dynamic_Sky_C marker=DM_Sky: unreadable$") == 2, "grounding: an unreadable read-back is one FAIL POS line each", table.concat(logs, " | "))
+    local okY, y = pcall(MS.groundedCheck, { X = 0, Y = 0, Z = 90 }, 30, { X = 0, Y = 0, Z = 0 }, "Ultra_Dynamic_Sky_C", "DM_Sky")
+    ok(okY and y == false and count("^FAIL POS Ultra_Dynamic_Sky_C marker=DM_Sky grounded dz=90%.000 yaw=30%.000") == 1, "grounding: a turned sky fails")
 end
 
 -- the level already has a sky: one OK line, nothing spawned, no time set, whatever its Sky markers
