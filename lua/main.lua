@@ -9,6 +9,9 @@ local V = require(LOWER .. ".version")
 local log = require(LOWER .. ".log").new(NAME)
 -- The map service's host setup (lua/pkg/map/setup.lua, map service story 5); loaded here, started in start().
 local okMap, MAP = pcall(require, LOWER .. ".map.setup")
+-- The map service's Journal map and area flags (lua/pkg/map/journalmap.lua, map service story 7, every machine);
+-- driven from the same LoadMap post-hook.
+local okJMap, JMAP = pcall(require, LOWER .. ".map.journalmap")
 
 local CLASS_PKG = "/Game/Mods/" .. NAME .. "/ModActor"
 local CLASS = CLASS_PKG .. ".ModActor_C"
@@ -136,6 +139,16 @@ local function start()
         end
     end
 
+    -- The Journal map: a loop of its own, started or stopped from the LoadMap post-hook below.
+    local jmapReady = false
+    if not okJMap then
+        log.error("Journal map service did not load (%s); no Journal map or area flags on this machine", tostring(JMAP):match("^[^\n]*"))
+    else
+        local okJ, errJ = pcall(JMAP.init, { log = log })
+        if okJ then jmapReady = true
+        else log.error("Journal map service could not start: %s", tostring(errJ):match("^[^\n]*")) end
+    end
+
     NotifyOnNewObject(CLASS, function()
         local okN, errN = pcall(hookChannel, "NotifyOnNewObject")
         if not okN then log.error("channel hook from NotifyOnNewObject failed: %s", tostring(errN)) end
@@ -152,6 +165,10 @@ local function start()
             local okM, errM = pcall(function() MAP.onLoadMap(world and world:get()) end)
             if not okM then log.error("map service LoadMap part failed: %s", tostring(errM):match("^[^\n]*")) end
         end
+        if jmapReady then
+            local okJ, errJ = pcall(function() JMAP.onLoadMap(world and world:get()) end)
+            if not okJ then log.error("Journal map LoadMap part failed: %s", tostring(errJ):match("^[^\n]*")) end
+        end
         local okL, errL = pcall(ExecuteInGameThreadWithDelay, 3000, function()
             local ok, err = pcall(ensureClass)
             if not ok then log.error("class check failed: %s", tostring(err)) end
@@ -161,6 +178,7 @@ local function start()
 
     ModRef.OnUnload = function()
         pcall(function() ModRef:SetSharedVariable(LOWER .. ".map", "stopped") end)
+        if jmapReady then pcall(JMAP.stop) end
         local okU, errU = pcall(setState, "stopped")
         log.info("STOPPED%s", okU and "" or (" (state not published: " .. tostring(errU) .. ")"))
     end
