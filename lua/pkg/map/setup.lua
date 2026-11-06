@@ -699,7 +699,9 @@ local function localIntel()
     local map, seen, n = {}, {}, 0
     for _, m in ipairs(markersOf("Intel", W.world)) do
         local area, id = setting(m, "AreaName"), setting(m, "UniqueIdentifier")
-        if M.checkText(area, M.LIMIT.area) and M.checkId(id) and map[id] == nil then
+        local text = setting(m, "TaskText") or ""
+        -- the host's checks: a marker it skips (bad AreaName, id or TaskText) never arrives, so it isn't counted
+        if M.checkText(area, M.LIMIT.area) and M.checkId(id) and M.checkText(text, M.LIMIT.text, true) and map[id] == nil then
             map[id] = area
             if not seen[area] then seen[area] = true n = n + 1 end
         end
@@ -896,7 +898,13 @@ function M.onLoadMap(world)
     if W.world ~= wp or not W.started then
         -- The Start marker didn't begin play in this world: a stock map (nothing to do), or the hook missed it.
         local sm = markersOf("Start", wp)
-        if #sm == 0 then log.debug("MAPSETUP %s has no %s start marker; nothing to set up", wp, NAME) return end
+        if #sm == 0 then
+            -- Reset here too: InitGameState runs only on the server, so on a client this is what makes the next world
+            -- with the Start marker (even the same path again) start fresh.
+            newWorld(nil)
+            log.debug("MAPSETUP %s has no %s start marker; nothing to set up", wp, NAME)
+            return
+        end
         newWorld(wp)
         W.started, W.startMarker, W.startName, W.host = true, pathOf(sm[1]), fname(sm[1]), host
         if not host then return end

@@ -684,6 +684,7 @@ local function clientManager(name, ids, raw)
 end
 soundFails = true
 logs = {}
+local traitorBefore = nativeCalls.traitor
 local north = clientManager("ObjectiveManager_C_N", { "DemoIntelNorth" })
 local south = clientManager("ObjectiveManager_C_S", nil) -- its Objectives hasn't arrived yet
 tick()
@@ -691,7 +692,7 @@ soundFails = false
 ok(north["Area Name"]:ToString() == "Demo North" and count('^OK AREANAME ObjectiveManager_C_N Area Name="Demo North" set locally %(replicated ""; tasks 1%)') == 1, "client: Area Name set from the local markers", table.concat(logs, " | "))
 ok(south["Area Name"]:ToString() == "" and count("ObjectiveManager_C_S") == 0, "client: a manager whose Objectives hasn't arrived is left for later")
 ok(count("^CABIN sound A at .*SpawnSoundAtLocation gave nil %(no audio device%?%) %(not judged on a client%)") == 1 and count("^FAIL CABIN") == 0, "client: a failed cabin sound is a plain line")
-ok(count("TRAITOR") == 0 and nativeCalls.set >= 0, "client: no traitor mirror on a client")
+ok(count("TRAITOR") == 0 and nativeCalls.traitor == traitorBefore, "client: no traitor mirror on a client", nativeCalls.traitor - traitorBefore)
 OBJ[south.__meta.__path] = { tasks = { { id = "DemoIntelSouth", text = "x", ttext = "x", state = false, tstate = false } } }
 tick(3)
 ok(south["Area Name"]:ToString() == "Demo South" and count("^OK AREANAME ObjectiveManager_C_S ") == 1 and count("^OK AREANAME") == 2, "client: set once it arrives, one line per manager")
@@ -699,6 +700,46 @@ do
     local before = nativeCalls.describe
     tick(3)
     ok(nativeCalls.describe == before, "client: no more reads once every local area is set")
+end
+
+-- a client goes back to the menu (a stock map) and loads the same demo world again: InitGameState runs only on the
+-- server, so the stock map's LoadMap must reset the per-world state, or the second visit gets no cabin sound, no Area
+-- Name, and its Start marker's BeginPlay is taken for a doubled callback
+do
+    local function clientLoad(world, start)
+        logs = {}
+        if start then MS.onStartBeginPlay(start) end
+        MS.onLoadMap(world)
+    end
+    clientLoad(stock, nil)
+    ok(MS.start(stock) == false and not MS.looping(), "client revisit: the stock map stops the loop")
+    north["Area Name"] = FText("")
+    south["Area Name"] = FText("")
+    local s0 = #sounds
+    clientLoad(wc, scl)
+    ok(MS.state().started == true and MS.start(wc) == true, "client revisit: the demo world starts again")
+    ok(count("second Start marker") == 0, "client revisit: the Start marker's BeginPlay isn't taken for a doubled callback", table.concat(logs, " | "))
+    tick(3)
+    ok(count("^OK CABIN sound A at ") == 1 and #sounds == s0 + 2, "client revisit: the cabin sound plays again", table.concat(lines("CABIN"), " | "))
+    ok(count('^OK AREANAME ObjectiveManager_C_N Area Name="Demo North" set locally') == 1 and count('^OK AREANAME ObjectiveManager_C_S Area Name="Demo South" set locally') == 1,
+        "client revisit: Area Name set again on both managers", table.concat(lines("AREANAME"), " | "))
+end
+
+-- a marker the host skips for its TaskText isn't counted on a client: the loop stops once the other areas are set
+do
+    local w, s = demoLevel("/Game/Mods/DemoMap/Maps/L_ClientSkip.L_ClientSkip")
+    marker(w, "Intel", "DM_Intel_West", { 0, 0, 0 }, 0, { AreaName = str("Demo West"), UniqueIdentifier = str("WestText"), TaskText = str(string.rep("a", 257)) })
+    load(w, s)
+    MS.start(w)
+    wc = w
+    clientManager("ObjectiveManager_C_N2", { "DemoIntelNorth" })
+    clientManager("ObjectiveManager_C_S2", { "DemoIntelSouth" })
+    tick(2)
+    local realFind, looks = FindAllOf, 0
+    FindAllOf = function(n, ...) if n == "ObjectiveManager_C" then looks = looks + 1 end return realFind(n, ...) end
+    tick(3)
+    FindAllOf = realFind
+    ok(count("^OK AREANAME") == 2 and looks == 0, "client: an area the host skips (bad TaskText) isn't waited for", looks)
 end
 
 -- hostile replicated ids: each manager left alone, one FAIL line, no Lua error
