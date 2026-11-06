@@ -7,7 +7,7 @@ local NAME = scriptDir:match("([^/\\]+)[/\\][Ss]cripts$")
 local LOWER = NAME:lower()
 local V = require(LOWER .. ".version")
 local log = require(LOWER .. ".log").new(NAME)
--- The map service (lua/pkg/map/setup.lua, map service stories 5-6); loaded here, started in start().
+-- The map service (lua/pkg/map/setup.lua, map service stories 5-9); loaded here, started in start().
 local okMap, MAP = pcall(require, LOWER .. ".map.setup")
 -- The map service's Journal map and area flags (lua/pkg/map/journalmap.lua, map service story 7, every machine);
 -- driven from the same LoadMap post-hook.
@@ -27,6 +27,11 @@ end
 setState("loading")
 -- <core>.map: "ready" once the map service's setup is installed (DemoMapLoader then skips its own), else why not.
 ModRef:SetSharedVariable(LOWER .. ".map", "loading")
+-- <core>.map.setup (map service story 9, add-only): this machine's map setup, "none" | "pending <world>" | "done <world>"
+-- | "failed <n> <world>"; the map service publishes it from here on (MAP.init's env.publish), and it stays "none" when
+-- that service doesn't run (then <core>.map says why).
+local SETUP_KEY = LOWER .. ".map.setup"
+ModRef:SetSharedVariable(SETUP_KEY, "none")
 local boot = (tonumber(ModRef:GetSharedVariable(LOWER .. ".boot")) or 0) + 1
 ModRef:SetSharedVariable(LOWER .. ".boot", boot)
 ModRef:SetSharedVariable(LOWER .. ".version", V.version)
@@ -131,7 +136,10 @@ local function start()
         log.error("map service did not load (%s); no map setup on this machine", tostring(MAP):match("^[^\n]*"))
         ModRef:SetSharedVariable(LOWER .. ".map", "failed: did not load")
     else
-        local okI, errI = pcall(function() MAP.init({ log = log }) MAP.install() end)
+        local okI, errI = pcall(function()
+            MAP.init({ log = log, publish = function(value) ModRef:SetSharedVariable(SETUP_KEY, value) end })
+            MAP.install()
+        end)
         if okI then mapReady = true
         else
             log.error("map service could not start: %s", tostring(errI):match("^[^\n]*"))
@@ -183,6 +191,7 @@ local function start()
     ModRef.OnUnload = function()
         if mapReady then pcall(MAP.stop) end
         pcall(function() ModRef:SetSharedVariable(LOWER .. ".map", "stopped") end)
+        pcall(function() ModRef:SetSharedVariable(SETUP_KEY, "none") end)
         if jmapReady then pcall(JMAP.stop) end
         local okU, errU = pcall(setState, "stopped")
         log.info("STOPPED%s", okU and "" or (" (state not published: " .. tostring(errU) .. ")"))

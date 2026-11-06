@@ -19,7 +19,7 @@
 -- with the Start marker) then mirrors each task's State into TraitorState on the host (<Core>_SetTraitorTaskState, only
 -- for the managers core filled), sets Area Name on a client from the replicated task ids matched against the local
 -- Intel markers (untrusted: lookup keys only), and plays the cabin sound on every machine. The Journal map and flags are
--- journalmap.lua (story 7); the dependent signal is story 9.
+-- journalmap.lua (story 7).
 -- Story 8: the sky. In the LoadMap post-hook only (a LoadMap-only section: never during the Start marker's BeginPlay,
 -- where spawning it hung the game, and never listed as deferred there), the host spawns the game's Ultra_Dynamic_Sky_C
 -- at the level's one Sky marker, rotation 0, and sets its Time of Day to StartHour * 100 (then one Update Replicated
@@ -27,6 +27,14 @@
 -- (M.groundedCheck: the game's own construction script moves it to a trace hit + 90 Z, and core never moves it back).
 -- Clients get it by replication; the game sets its speed from the lobby's night cycle (Time Speed and Animate Time of
 -- Day are never touched here).
+-- Story 9: the dependent signal. One add-only, string-valued shared variable, <core>.map.setup (main.lua passes the
+-- publisher as env.publish), on every machine: "none" (no level with core's Start marker here: a stock map, the menu,
+-- a failed travel, before the first world, after unload, or the map service not running), "pending <world>" (the Start
+-- marker is in <world>, its setup hasn't finished), "done <world>" or "failed <n> <world>" (finished; n >= 1 is W.fails,
+-- the setup's FAIL-line count in that world at that moment). <world> is pathOf(world), always last. Published on the
+-- game thread only: newWorld (none / pending), the end of the host's LoadMap part, a client's LoadMap return points in a
+-- Start-marker world; finished once per world. The loop (traitor mirror, Area Name, cabin sound) and journalmap.lua are
+-- ongoing fixes, not part of it: a later failure never changes a published done.
 local BASE = (...):gsub("%.map%.setup$", "")
 local V = require(BASE .. ".version")
 local REF = require(BASE .. ".ref")
@@ -59,7 +67,7 @@ M.STARTS = { "BaseCampStarts", "ResearchCenterStarts", "AirportStarts", "Slaught
 M.CORRECTIVE = "Corrective"
 M.MIN_STARTS = 20
 M.NUKE_Z = 12000
--- Caps on what a level may hold (marker values are checked before use; story 9 adds the full bad-input sweep).
+-- Caps on what a level may hold (every marker value is checked before use; map-setup.md "bad-input cases").
 M.LIMIT = { markers = 256, starts = 1024, equipment = 64, area = 128, id = 64, location = 128, text = 256, tasks = 64 }
 -- Position check tolerance: the float round trip of a spawn transform.
 M.EPS = 0.01
@@ -227,7 +235,12 @@ end
 
 -- ---------------------------------------------------------------- engine helpers
 local log = { info = print, warn = print, error = print, debug = function() end }
-function M.init(env) if env and env.log then log = env.log end end
+-- env.log: core's logger; env.publish(value): optional, sets <core>.map.setup (story 9).
+local publisher
+function M.init(env)
+    if env and env.log then log = env.log end
+    publisher = env and type(env.publish) == "function" and env.publish or nil
+end
 
 -- Liveness through the UFunction (never UE4SS's obj:IsValid(), which checks only the address). Tests replace it.
 function M.alive(o)
@@ -253,7 +266,32 @@ local function worldOf(a) return try(function() return pathOf(a:GetWorld()) end)
 
 -- Per-world state: paths and plain values only. Reset in InitGameState (once per world, before any BeginPlay).
 local W = {}
-local function newWorld(wp) W = { world = wp, done = {}, deferred = {}, spawned = {}, filled = {}, objects = 0, fails = 0, poss = 0 } end
+-- Story 9: the signal. signalValue is the last value published (nil before the first); a repeat logs nothing.
+local signalValue
+local function publish(v)
+    if v == signalValue then return end
+    signalValue = v
+    log.info("MAPSETUP signal %s", v)
+    if not publisher then return end
+    local okP, errP = pcall(publisher, v)
+    if not okP and not W.publishWarned then
+        W.publishWarned = true -- once per world (newWorld resets W)
+        log.warn("MAPSETUP signal %s couldn't be published (%s); the setup goes on", v, firstLine(errP))
+    end
+end
+function M.signal() return signalValue end
+-- This machine's setup in this world has finished: done, or failed <n> (n = this world's FAIL lines so far). Once per
+-- world, so neither a doubled LoadMap nor a later loop failure changes it.
+local function finish()
+    if W.finished or not W.world then return end
+    W.finished = true
+    local n = W.fails or 0
+    publish(n > 0 and string.format("failed %d %s", n, W.world) or ("done " .. W.world))
+end
+local function newWorld(wp)
+    W = { world = wp, done = {}, deferred = {}, spawned = {}, filled = {}, objects = 0, fails = 0, poss = 0 }
+    publish(wp and ("pending " .. wp) or "none")
+end
 local function ok(fmt, ...) W.objects = (W.objects or 0) + 1 log.info("OK " .. fmt, ...) end
 local function fail(fmt, ...) W.fails = (W.fails or 0) + 1 log.info("FAIL " .. fmt, ...) end
 function M.state() return W end
@@ -962,6 +1000,7 @@ end
 function M.onLoadMap(world)
     if not alive(world) then
         log.info("MAPSETUP LoadMap gave no world (the travel failed); nothing to set up")
+        publish("none") -- W stays as it is
         return
     end
     M.preload()
@@ -979,17 +1018,18 @@ function M.onLoadMap(world)
         end
         newWorld(wp)
         W.started, W.startMarker, W.startName, W.host = true, pathOf(sm[1]), fname(sm[1]), host
-        if not host then return end
+        if not host then finish() return end
         fail("WIRE the start marker's BeginPlay never ran in %s (hook missing?); setting up now, after the game state's BeginPlay", wp)
     end
     W.host = host
-    if not host then return end
+    if not host then finish() return end
     if next(W.deferred) == nil and W.loadMapDone then return end
     W.loadMapDone = true
     local t0 = os.clock()
     local def = runSections(world, "loadmap")
     log.info("MAPSETUP host: done in %.0f ms (after the map load): %d objects wired, %d position checks, %d failures%s", (os.clock() - t0) * 1000,
         W.objects or 0, W.poss or 0, W.fails or 0, #def > 0 and ("; still deferred: " .. table.concat(def, ", ")) or "")
+    finish()
 end
 
 -- Hooks on the marker's and the game state's BeginPlay, registered once per function (by address: a class reloaded

@@ -210,6 +210,9 @@ foreach ($id in 'obj-desc-empty', 'obj-trait-unfilled', 'obj-set-ok', 'obj-desc-
     $badInput += "\[$T\] OK CASE match1\.$id "
 }
 foreach ($id in 'pre-obj-set', 'pre-obj-desc', 'pre-obj-trait') { $badInput += "\[$T\] OK CASE $id " }
+# Map service story 9: the map setup signal (<name>.map.setup) read from the test's own Lua state during main.lua, in
+# the menu and in the stock match (listen host): exactly "none" each time.
+foreach ($id in 'pre-map-signal', 'menu1.map-signal', 'match1.map-signal') { $badInput += "\[$T\] OK CASE $([regex]::Escape($id)) " }
 $NT = [regex]::Escape("${name}SkelNative")
 $badInput += @(
     "\[$T\] OK CASES main\.lua objectives recorded=3"

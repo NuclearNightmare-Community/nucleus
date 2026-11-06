@@ -292,12 +292,13 @@ newObj("/Script/Engine.Default__GameplayStatics", "/Script/Engine.GameplayStatic
 local MS = require("nucleus.map.setup")
 MS.alive = isAlive
 local logs = {}
-MS.init({ log = {
+local LOGGER = {
     info = function(f, ...) logs[#logs + 1] = string.format(f, ...) end,
     warn = function(f, ...) logs[#logs + 1] = "WARN " .. string.format(f, ...) end,
     error = function(f, ...) logs[#logs + 1] = "ERROR " .. string.format(f, ...) end,
     debug = function(f, ...) logs[#logs + 1] = "DEBUG " .. string.format(f, ...) end,
-} })
+}
+MS.init({ log = LOGGER })
 local function lines(rx) local out = {} for _, l in ipairs(logs) do if l:find(rx) then out[#out + 1] = l end end return out end
 local function count(rx) return #lines(rx) end
 local function dump() for _, l in ipairs(logs) do print("  | " .. l) end end
@@ -530,7 +531,9 @@ place(stock, "PS_1", "/Script/Engine.PlayerStart", { 0, 0, 0 }, 0, { PlayerStart
 spawnedCount = 0
 load(stock, nil)
 ok(spawnedCount == 0 and count("WIRE") == 0 and count("ORDER") == 0, "stock map: nothing spawned, no WIRE or ORDER")
-ok(count("^DEBUG") <= 1 and count("^[^DW]") == 0, "stock map: one DEBUG line at most", table.concat(logs, " | "))
+-- (story 9: besides the signal's own line when it changes to none)
+ok(count("^DEBUG") <= 1 and count("^[^DW]") - count("^MAPSETUP signal none$") == 0, "stock map: one DEBUG line at most", table.concat(logs, " | "))
+ok(MS.signal() == "none", "stock map: the signal is none", MS.signal())
 
 logs = {}
 local okNil, errNil = pcall(MS.onLoadMap, nil)
@@ -1031,6 +1034,216 @@ do
     local w = demoLevel("/Game/Mods/DemoMap/Maps/L_SkyMissed.L_SkyMissed")
     load(w, nil)
     ok(ofClass(w, "Ultra_Dynamic_Sky_C") == 1 and count(SKYLINE) == 1, "missed BeginPlay: the sky spawned after the map load")
+end
+
+-- ================================================================ story 9: the dependent signal (<core>.map.setup)
+NET.server, NET.standalone = true, false
+local pubs = {}
+local publishThrows = false
+MS.init({ log = LOGGER, publish = function(v)
+    if publishThrows then error("SetSharedVariable refused (test)", 0) end
+    pubs[#pubs + 1] = v
+end })
+local function esc(s) return (s:gsub("%p", "%%%0")) end
+local function sig(rx) return count("^MAPSETUP signal " .. rx .. "$") end
+
+-- the grammar: none | pending <w> | done <w> | failed <n> <w> (n >= 1), the world last
+local function grammar(v)
+    if v == "none" then return true end
+    local st, rest = tostring(v):match("^(%a+) (.+)$")
+    if st == "pending" or st == "done" then return rest:find("^/") ~= nil end
+    if st == "failed" then local n, w = rest:match("^(%d+) (/.+)$") return n ~= nil and tonumber(n) >= 1 and w ~= nil end
+    return false
+end
+
+-- host demo: pending at the Start marker's BeginPlay, done at LoadMap; one line per change
+do
+    local wp = "/Game/Mods/DemoMap/Maps/L_Sig.L_Sig"
+    local w, s = demoLevel(wp)
+    pubs = {}
+    local atGS
+    load(w, s, { beforeLoadMap = function() atGS = MS.signal() end })
+    ok(atGS == "pending " .. wp, "signal host: pending <world> after the Start marker's BeginPlay", atGS)
+    ok(MS.signal() == "done " .. wp and pubs[#pubs] == "done " .. wp, "signal host: done <world> at LoadMap", MS.signal())
+    ok(count("^FAIL") == 0 and sig("pending " .. esc(wp)) == 1 and sig("done " .. esc(wp)) == 1, "signal host: one MAPSETUP signal line per change", table.concat(lines("signal"), " | "))
+    local nLines, nPubs = count("^MAPSETUP signal"), #pubs
+    for _, v in ipairs(pubs) do ok(grammar(v), "signal host: published value in the grammar", v) end
+    -- the doubled LoadMap: value and log unchanged
+    MS.onLoadMap(w)
+    MS.onLoadMap(w)
+    ok(MS.signal() == "done " .. wp and #pubs == nPubs and count("^MAPSETUP signal") == nLines, "signal doubled LoadMap: value and log unchanged")
+    -- a later loop failure (the cabin sound) never changes a published done
+    MS.start(w)
+    soundFails = true
+    tick(3)
+    soundFails = false
+    ok(count("^FAIL CABIN") >= 1 and MS.state().fails >= 1, "signal loop: the cabin sound failed in the loop", table.concat(lines("CABIN"), " | "))
+    MS.onLoadMap(w)
+    ok(MS.signal() == "done " .. wp and #pubs == nPubs, "signal loop: a loop failure doesn't change done", MS.signal())
+    MS.stop()
+    -- InitGameState of the next world: none (once; a second InitGameState logs nothing)
+    logs = {}
+    MS.onInitGameState()
+    MS.onInitGameState()
+    ok(MS.signal() == "none" and sig("none") == 1 and pubs[#pubs] == "none", "signal: InitGameState publishes none, a repeat logs nothing")
+end
+
+-- host failures: two bad markers (an unknown Item, StartHour 25: demo-badmarkers' setup part) -> failed 2 <world>
+do
+    local wp = "/Game/Mods/DemoMap/Maps/L_SigBad.L_SigBad"
+    local w, s = demoLevel(wp, { badItem = true, startHour = 25 })
+    load(w, s)
+    ok(count("^FAIL WIRE item marker=DM_Item_Flashlight: Item unknown value 7; skipped$") == 1 and count("^FAIL WIRE sky marker=DM_Sky: StartHour 25 isn't 0%.%.24$") == 1, "signal failures: the two FAIL lines", table.concat(lines("^FAIL"), " | "))
+    ok(count("^FAIL") == 2 and MS.signal() == "failed 2 " .. wp and sig("failed 2 " .. esc(wp)) == 1, "signal failures: failed <n> <world>, n = the setup's FAIL lines", MS.signal())
+end
+
+-- client: done <world> at LoadMap, nothing spawned; a missed BeginPlay too; a second Start marker is failed 1
+NET.server, NET.standalone = false, false
+do
+    local wp = "/Game/Mods/DemoMap/Maps/L_SigClient.L_SigClient"
+    local w, s = demoLevel(wp)
+    spawnedCount = 0
+    local atGS
+    load(w, s, { beforeLoadMap = function() atGS = MS.signal() end })
+    ok(atGS == "pending " .. wp and MS.signal() == "done " .. wp and spawnedCount == 0, "signal client: pending, then done <world> at LoadMap, nothing spawned", tostring(atGS) .. " / " .. tostring(MS.signal()))
+    local n = #pubs
+    MS.onLoadMap(w)
+    ok(#pubs == n and MS.signal() == "done " .. wp, "signal client: a doubled LoadMap republishes nothing")
+    -- a later loop failure on a client (a hostile manager's Area Name) and another LoadMap: still done
+    MS.start(w)
+    wc = w
+    clientManager("ObjectiveManager_C_SigHostile", { "NoSuchIntel" })
+    logs = {}
+    tick(2)
+    MS.onLoadMap(w)
+    MS.stop()
+    ok(count("^FAIL AREANAME ObjectiveManager_C_SigHostile") == 1 and MS.signal() == "done " .. wp and #pubs == n, "signal client: a loop failure and a later LoadMap don't change done", MS.signal())
+
+    local wp2 = "/Game/Mods/DemoMap/Maps/L_SigClientMissed.L_SigClientMissed"
+    local w2 = demoLevel(wp2)
+    MS.onLoadMap(stock) -- a client resets on the stock map's LoadMap (no InitGameState there)
+    ok(MS.signal() == "none", "signal client: the stock map's LoadMap is none")
+    logs = {}
+    MS.onLoadMap(w2)
+    ok(MS.signal() == "done " .. wp2 and sig("pending " .. esc(wp2)) == 1 and sig("done " .. esc(wp2)) == 1, "signal client: a missed BeginPlay is pending then done at LoadMap", table.concat(lines("signal"), " | "))
+
+    local wp3 = "/Game/Mods/DemoMap/Maps/L_SigClientTwo.L_SigClientTwo"
+    local w3, s3 = demoLevel(wp3)
+    local s3b = marker(w3, "Start", "DM_Start_B", { 0, 0, 0 })
+    MS.onLoadMap(stock)
+    logs = {}
+    MS.onStartBeginPlay(s3)
+    MS.onStartBeginPlay(s3b)
+    MS.onLoadMap(w3)
+    ok(count("^FAIL WIRE start marker=DM_Start_B: a second Start marker") == 1 and MS.signal() == "failed 1 " .. wp3, "signal client: a second Start marker is failed 1 <world>", MS.signal())
+end
+NET.server, NET.standalone = true, false
+
+-- stock map and failed travel: none; a failed travel keeps the per-world state
+do
+    local wp = "/Game/Mods/DemoMap/Maps/L_SigTravel.L_SigTravel"
+    local w, s = demoLevel(wp)
+    load(w, s)
+    ok(MS.signal() == "done " .. wp, "signal travel: done before the failed travel")
+    logs = {}
+    local okN = pcall(MS.onLoadMap, nil)
+    ok(okN and MS.signal() == "none" and sig("none") == 1 and MS.state().world == wp, "signal failed travel: none, the per-world state kept", tostring(MS.signal()) .. " / " .. tostring(MS.state().world))
+    MS.onLoadMap(INVALID)
+    ok(MS.signal() == "none" and sig("none") == 1, "signal failed travel: an invalid world is none, logged once")
+    load(w, s)
+    load(stock, nil)
+    ok(MS.signal() == "none" and sig("none") == 1, "signal stock map: none", table.concat(lines("signal"), " | "))
+    -- LoadMap of a stock world while the value is something else (no InitGameState: a client)
+    load(w, s)
+    logs = {}
+    MS.onLoadMap(stock)
+    ok(MS.signal() == "none" and sig("none") == 1, "signal stock map: the stock branch of LoadMap publishes none")
+end
+
+-- publish throws: one WARN per world, the setup completes, no error escapes
+do
+    local wp = "/Game/Mods/DemoMap/Maps/L_SigThrow.L_SigThrow"
+    local w, s = demoLevel(wp)
+    publishThrows = true
+    local okT, errT = pcall(load, w, s)
+    publishThrows = false
+    ok(okT, "signal publish throws: no error escapes", errT)
+    ok(count("^WARN MAPSETUP signal .* couldn't be published %(SetSharedVariable refused %(test%)%); the setup goes on$") == 1, "signal publish throws: one WARN line in this world", table.concat(lines("signal"), " | "))
+    ok(count("^OK WIRE GameStartService_C at ") == 1 and count("^OK WIRE 8 EnemyWaypointActor_C") == 1 and count("^FAIL") == 0 and MS.signal() == "done " .. wp, "signal publish throws: the setup completes")
+    ok(sig("pending " .. esc(wp)) == 1 and sig("done " .. esc(wp)) == 1, "signal publish throws: each change still logged")
+end
+
+-- no publisher (env.publish missing): the value is still kept and logged
+do
+    MS.init({ log = LOGGER })
+    local wp = "/Game/Mods/DemoMap/Maps/L_SigNoPub.L_SigNoPub"
+    local w, s = demoLevel(wp)
+    local okP = pcall(load, w, s)
+    ok(okP and MS.signal() == "done " .. wp and count("^WARN") == 0, "signal without a publisher: kept and logged, no WARN")
+    MS.init({ log = LOGGER, publish = function(v) pubs[#pubs + 1] = v end })
+end
+
+-- ================================================================ story 9: the bad-input sweep's in-world gaps
+-- Each bad value is one FAIL line, that object is skipped, the rest of the setup goes on (signal failed <n>).
+local function restWired(what)
+    ok(count("^OK WIRE GameStartService_C at ") == 1 and count("^OK WIRE AISpawner_C") == 1 and count("^OK WIRE 8 EnemyWaypointActor_C") == 1 and count("^OK WIRE Lever_Actor_C") == 1,
+        what .. ": the rest wired", table.concat(lines("^FAIL"), " | "))
+end
+-- intel: an oversized (129) AreaName, an empty id, an oversized (65) id
+do
+    local wp = "/Game/Mods/DemoMap/Maps/L_SweepIntel.L_SweepIntel"
+    local w, s = demoLevel(wp)
+    marker(w, "Intel", "DM_Intel_A129", { 0, 0, 0 }, 0, { AreaName = str(string.rep("a", 129)), UniqueIdentifier = str("A129") })
+    marker(w, "Intel", "DM_Intel_IdEmpty", { 0, 0, 0 }, 0, { AreaName = str("Demo North"), UniqueIdentifier = str("") })
+    marker(w, "Intel", "DM_Intel_Id65", { 0, 0, 0 }, 0, { AreaName = str("Demo North"), UniqueIdentifier = str(string.rep("x", 65)) })
+    local okL, errL = pcall(load, w, s)
+    ok(okL, "sweep intel: no Lua error escapes", errL)
+    ok(count("^FAIL WIRE intel marker=DM_Intel_A129: AreaName 129 characters, cap 128; skipped$") == 1, "sweep intel: a 129-character AreaName is one FAIL line", table.concat(lines("^FAIL"), " | "))
+    ok(count("^FAIL WIRE intel marker=DM_Intel_IdEmpty: UniqueIdentifier empty; skipped$") == 1, "sweep intel: an empty id is one FAIL line")
+    ok(count("^FAIL WIRE intel marker=DM_Intel_Id65: UniqueIdentifier 65 characters, cap 64; skipped$") == 1, "sweep intel: a 65-character id is one FAIL line")
+    ok(count("^FAIL") == 3 and count("^OK WIRE intel BP_CM_V4_C ") == 2 and count("^OK WIRE ObjectiveManager_C ") == 2, "sweep intel: those three skipped, the good two wired")
+    ok(count("^OK OBJECTIVES .* filled by Nucleus_SetObjectives: objectives=1 tasks=1 ") == 2, "sweep intel: the skipped markers aren't in any task list")
+    restWired("sweep intel")
+    ok(MS.signal() == "failed 3 " .. wp, "sweep intel: signal failed 3", MS.signal())
+end
+-- the computer: an oversized (129) LocationName, a Landing that is a marker of another kind or in another level, no
+-- ReinforcementStart, one in another level. Its generator lists the lever instead, so only the computer is skipped.
+local otherRS = newWorld("/Game/Maps/OtherRS.OtherRS")
+local otherPS = place(otherRS, "PS_Other", "/Script/Engine.PlayerStart", { 0, 0, 0 }, 0, { PlayerStartTag = str("None") })
+local otherLanding = marker(otherRS, "Landing", "DM_Landing_Other", { 0, 0, 0 })
+for i, c in ipairs({
+    { "LocationName 129", function(cm) cm.LocationName = str(string.rep("c", 129)) end, "LocationName 129 characters, cap 128" },
+    { "Landing of another kind", function(cm, lv) cm.Landing = lv end, "Landing DM_Lever is not a Landing marker in this level" },
+    { "Landing in another level", function(cm) cm.Landing = otherLanding end, "Landing DM_Landing_Other is not a Landing marker in this level" },
+    { "no ReinforcementStart", function(cm) cm.ReinforcementStart = nil end, "no ReinforcementStart set" },
+    { "ReinforcementStart in another level", function(cm) cm.ReinforcementStart = otherPS end, "ReinforcementStart PS_Other is not in this level" },
+}) do
+    local wp = "/Game/Mods/DemoMap/Maps/L_SweepComp" .. i .. ".L_SweepComp" .. i
+    local w, s = demoLevel(wp)
+    local lv = objects[wp .. ":PersistentLevel.DM_Lever"]
+    objects[wp .. ":PersistentLevel.DM_Generator"].Equipment = arr({ lv })
+    c[2](objects[wp .. ":PersistentLevel.DM_Computer"], lv)
+    local okL, errL = pcall(load, w, s)
+    ok(okL, "sweep computer " .. c[1] .. ": no Lua error escapes", errL)
+    ok(count("^FAIL WIRE BP_Radio_C marker=DM_Computer: " .. esc(c[3]) .. "; skipped$") == 1 and count("^FAIL") == 1, "sweep computer " .. c[1] .. ": one FAIL line", table.concat(lines("^FAIL"), " | "))
+    ok(ofClass(w, "BP_Radio_C") == 0 and count('^OK WIRE BP_GeneratorGameplayNew_C "Demo Generator" Equipment=1 %(Lever_Actor_C%)') == 1, "sweep computer " .. c[1] .. ": the computer skipped, the generator wired")
+    restWired("sweep computer " .. c[1])
+    ok(MS.signal() == "failed 1 " .. wp, "sweep computer " .. c[1] .. ": signal failed 1", MS.signal())
+end
+-- the generator: an oversized (129) LocationName is one FAIL line; an empty one is allowed
+for _, c in ipairs({ { "129", string.rep("g", 129), false }, { "empty", "", true } }) do
+    local wp = "/Game/Mods/DemoMap/Maps/L_SweepGen" .. c[1] .. ".L_SweepGen" .. c[1]
+    local w, s = demoLevel(wp)
+    objects[wp .. ":PersistentLevel.DM_Generator"].LocationName = str(c[2])
+    local okL, errL = pcall(load, w, s)
+    ok(okL, "sweep generator LocationName " .. c[1] .. ": no Lua error escapes", errL)
+    if c[3] then
+        ok(count("^FAIL") == 0 and count('^OK WIRE BP_GeneratorGameplayNew_C "" Equipment=1 %(BP_Radio_C%)') == 1 and MS.signal() == "done " .. wp, "sweep generator LocationName empty: allowed, wired", table.concat(lines("Generator"), " | "))
+    else
+        ok(count("^FAIL WIRE BP_GeneratorGameplayNew_C marker=DM_Generator: LocationName 129 characters, cap 128; skipped$") == 1 and count("^FAIL") == 1, "sweep generator LocationName 129: one FAIL line", table.concat(lines("^FAIL"), " | "))
+        ok(ofClass(w, "BP_GeneratorGameplayNew_C") == 0 and count("^OK WIRE BP_Radio_C") == 1 and MS.signal() == "failed 1 " .. wp, "sweep generator LocationName 129: skipped, the rest wired")
+    end
+    restWired("sweep generator LocationName " .. c[1])
 end
 
 print(string.format("map_setup_test: %d passed, %d failed", pass, failN))

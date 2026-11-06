@@ -13,7 +13,8 @@
 --            values (bad-input cases below), on and off the game thread and before connect, and checks each answer
 --            against the contract. The objectives natives (map service story 3) also run for real on a manager the
 --            test spawns on the host, and the forced missing struct member through core's test-only DLL
---            (test/SkelNative).
+--            (test/SkelNative). The map setup signal (<core>.map.setup, map service story 9) is read during main.lua,
+--            in the menu and in the stock match: "none" each time.
 -- ui:        the UI helpers (stories 7-10) unattended: menu -> match -> (RemoveAllWidgets and re-add) -> menu -> match,
 --            with elements created before the first match, same id twice, set and its no-op, long text, remove, style,
 --            setVisible, all four corners and gaps, offset, absolute, a three-element stack, near the crosshair with
@@ -106,6 +107,17 @@ if SCENARIO == "bad-input" then
     try("pre-obj-desc", CORE .. "_DescribeObjectives(<missing>) [main.lua]", "_DescribeObjectives", missing)
     try("pre-obj-trait", CORE .. "_SetTraitorTaskState(<missing>, id, true) [main.lua]", "_SetTraitorTaskState", missing, "a", true)
 end
+
+-- 5. The map setup signal (map service story 9) read during main.lua: core's main.lua (first in mods.txt) publishes
+-- "none" before any world exists. Read-only: the signal takes no input. Reported as a case once the scenario runs.
+local SETUP_KEY = CORE:lower() .. ".map.setup"
+local function readSignal()
+    local okS, v = pcall(function() return ModRef:GetSharedVariable(SETUP_KEY) end)
+    if not okS then error("GetSharedVariable(" .. SETUP_KEY .. ") threw: " .. tostring(v):match("^[^\n]*"), 0) end
+    return v
+end
+local PRE_SIGNAL
+if SCENARIO == "bad-input" then PRE_SIGNAL = table.pack(pcall(readSignal)) end
 
 local REQ, DONE = scriptDir .. "\\request.txt", scriptDir .. "\\done.txt"
 os.remove(REQ); os.remove(DONE)
@@ -403,6 +415,8 @@ function E.ret(what, pred) return { what = what, test = function(ok, r) return o
 -- A channel reply (the call returns a string) that starts with prefix.
 function E.reply(prefix) return { what = "reply starting '" .. prefix .. "'", test = function(ok, r) return ok and type(r[1]) == "string" and r[1]:sub(1, #prefix) == prefix end } end
 -- client.call: false plus a reply starting with prefix.
+-- The map setup signal (map service story 9) outside a map with core's Start marker: exactly the string "none".
+E.signalNone = { what = "exactly the string 'none'", test = function(ok, r) return ok and r.n == 1 and type(r[1]) == "string" and r[1] == "none" end }
 function E.callErr(prefix) return { what = "false, '" .. prefix .. "...'", test = function(ok, r) return ok and r[1] == false and type(r[2]) == "string" and r[2]:sub(1, #prefix) == prefix end } end
 
 local cases = { total = 0, passed = 0 }
@@ -1045,6 +1059,11 @@ local function preConnectCases()
                 E.err(tostring(r.name) .. ": no object at /Game/NoSuch/NNNoManager.NNNoManager"))
         end
         check(#PRE_NATIVE == 3, "CASES main.lua objectives recorded=%d (expected 3)", #PRE_NATIVE)
+        case("pre-map-signal", "GetSharedVariable(\"" .. SETUP_KEY .. "\") [main.lua]", function()
+            if not PRE_SIGNAL then error("not recorded during main.lua", 0) end
+            if not PRE_SIGNAL[1] then error(PRE_SIGNAL[2], 0) end
+            return PRE_SIGNAL[2]
+        end, E.signalNone)
     end)
 end
 
@@ -1313,6 +1332,10 @@ local function badInputCases(phase)
     step(phase .. ": channel cases", function() channelCases(phase) end)
     step(phase .. ": ui cases", function() uiCases(phase) end)
     step(phase .. ": objectives cases", function() objectivesCases(phase) end)
+    -- Map service story 9: the map setup signal, read from this Lua state (menu1 and the stock SmallMap: none).
+    step(phase .. ": map signal case", function()
+        case(phase .. ".map-signal", "GetSharedVariable(\"" .. SETUP_KEY .. "\") [" .. phase .. "]", readSignal, E.signalNone)
+    end)
     offThreadCases(phase)
 end
 
