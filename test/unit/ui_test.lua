@@ -706,6 +706,7 @@ local offImg = gw("Image", R(940, 20, 990, 40)) -- would overlap the element if 
 offscreen.WidgetTree = obj({ RootWidget = offImg }, "/Game/Test/Offscreen.WidgetTree")
 function offscreen:IsInViewport() return false end
 TOPS[2] = offscreen
+TOPS[3] = hudN -- the live HUD is in the viewport too: its canvas is already a root, so it must not be added again
 local nearMiss = put(gw("Image", R(850, 16, 890, 40))) -- 10 px left of the element: context, not an overlap
 
 -- story 12 AC 4: with debug off nothing is scheduled and no check runs, through attach, re-place, hide and show

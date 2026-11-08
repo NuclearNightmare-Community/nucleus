@@ -18,10 +18,11 @@
 -- other top-level viewport widgets (FindAllOf("UserWidget") in the viewport; never GetAllWidgetsOfClass's out array,
 -- whose entries point into freed memory: story 17). Collapsed, Hidden and zero-opacity subtrees are pruned; a
 -- switcher's active child only. Only widgets that draw something count (an Image or Border with a brush and alpha > 0,
--- non-empty text, buttons, bars, ...); full-screen ones (>= 90% of the screen both ways) are skipped. A Nucleus text widget counts as one unit (its tag names it), never
--- its inner Border/TextBlock. The element's own widget and its subtree are skipped. At most CAP widgets per check.
--- Rectangles come from <Core>_AbsTopLeft / _AbsBottomRight on core's ModActor class default object (Slate's cached
--- geometry: zero until the widget has been painted). Holds no UObject between calls.
+-- non-empty text, buttons, bars, ...); full-screen ones (>= 90% of the screen both ways) are skipped. A Nucleus text
+-- widget counts as one unit (its tag names it), never its inner Border/TextBlock. The element's own widget and its
+-- subtree are skipped. At most CAP widgets per check. Rectangles come from <Core>_AbsTopLeft / _AbsBottomRight on
+-- core's ModActor class default object (Slate's cached geometry: zero until the widget has been painted). Holds no
+-- UObject between calls.
 local BASE = (...):gsub("%.ui%.debug$", "")
 local C = require(BASE .. ".ui.common")
 local H = require(BASE .. ".ui.hud")
