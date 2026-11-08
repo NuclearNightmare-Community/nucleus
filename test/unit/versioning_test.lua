@@ -101,15 +101,17 @@ ok(S.parse("1.2.3").major == 1 and S.parse(">=1.2.3") == nil and S.parse(5) == n
 -- ---------------------------------------------------------------- features
 local F = require("nucleus.features")
 local declared = F.declared()
-local want = { "call", "clock", "deref", "free", "ref", "ui", "ui.button", "ui.debug", "ui.elements", "ui.hud", "ui.journal", "ui.panel", "ui.place", "ui.text" }
-eq(table.concat(declared, ","), table.concat(want, ","), "declared(): the v0.4.0 feature list, sorted")
+local want = { "call", "clock", "deref", "free", "map.setup", "ref", "ui", "ui.button", "ui.debug", "ui.elements", "ui.hud", "ui.journal", "ui.panel", "ui.place", "ui.text" }
+eq(table.concat(declared, ","), table.concat(want, ","), "declared(): the 0.5.0 feature list (map.setup hand-named), sorted")
 for i = 2, #declared do ok(declared[i - 1] < declared[i], "declared() is sorted and unique at " .. i) end
 -- the rule
 do
     local f = function() end
+    local savedHand = F.HAND; F.HAND = {}
     local got = F.fromApi({ name = "N", version = "1", log = { info = f }, has = f, features = f, call = f,
         mod = { a = f, b = f }, ns = { leaf = f, sub = { x = f }, deep = { m = { y = f } } } })
     eq(table.concat(got, ","), "call,mod,ns,ns.deep,ns.deep.m,ns.leaf,ns.sub", "fromApi: the naming rule (modules not expanded, data skipped)")
+    F.HAND = savedHand
     eq(#F.fromApi(nil), #F.HAND, "fromApi(nil): only the hand-named list")
     local saved = F.HAND
     F.HAND = { "ui.panel.reorder" }
