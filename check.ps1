@@ -122,6 +122,14 @@ foreach ($p in 'menu1', 'match1') {
         $badInput += "\[$T\] OK CASE $p\.$id "
     }
 }
+# Map service story 17: core's map setup alive() against real UE4SS values (refused: a missing member's placeholder, a
+# struct value, a TArray, an out-array entry, nil, a number, a string, a table; live: actor, class, function, world, object).
+foreach ($p in 'menu1', 'match1') {
+    foreach ($id in 'alive-trivial', 'alive-struct', 'alive-tarray', 'alive-remote', 'alive-nil', 'alive-num', 'alive-str', 'alive-table',
+                    'alive-actor', 'alive-class', 'alive-func', 'alive-world', 'alive-obj') {
+        $badInput += "\[$T\] OK CASE $p\.$id "
+    }
+}
 # The UI helpers' cases (stories 7-10), in both worlds, and the calls made before connect.
 foreach ($p in 'menu1', 'match1') {
     foreach ($id in 'ui-watch-nil', 'ui-watch-str', 'ui-watch-two', 'ui-unwatch-str', 'ui-unwatch-float', 'ui-unwatch-unknown', 'ui-find-arg',

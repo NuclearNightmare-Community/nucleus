@@ -12,7 +12,8 @@
 -- isHost is IsServer and not IsStandalone, cached per world; a client spawns nothing here. Every spawned object gets
 -- one "OK|FAIL WIRE" line and one position check against its marker (distance 0, yaw 0); a bad marker value is one
 -- FAIL line and that object is skipped. No UObject is kept between calls (paths, plain values and weak handles only),
--- liveness comes from KismetSystemLibrary:IsValid, every hook body runs under pcall.
+-- liveness comes from KismetSystemLibrary:IsValid behind UE4SS's own type()/IsValid() gate (story 17), every hook body
+-- runs under pcall.
 -- Story 6: right after each manager spawns, the host fills it through core's <Core>_SetObjectives (one objective, a
 -- task per valid Intel marker of its area; text = TaskText, else derived from the id) and reads it back with
 -- <Core>_DescribeObjectives. A 1 s game-thread loop (M.start/M.stop, registered from core's LoadMap post-hook in a level
@@ -242,11 +243,35 @@ function M.init(env)
     publisher = env and type(env.publish) == "function" and env.publish or nil
 end
 
--- Liveness through the UFunction (never UE4SS's obj:IsValid(), which checks only the address). Tests replace it.
+-- Liveness through the UFunction (never UE4SS's obj:IsValid() alone, which checks only the address). Tests replace it.
+-- Map service stories 16/17: the pinned UE4SS reads ANY userdata passed as an object parameter as a UObject wrapper,
+-- unchecked. A missing member's placeholder (a TrivialObject holding 0xFFFFFFFFFFFFEFFF) crashed the game inside
+-- KismetSystemLibrary:IsValid, and an out array's RemoteUnrealParam entries point into the call's freed buffer
+-- (docs/custom-maps.md, "Story 16"). So the gate, in order: a userdata; UE4SS's own type() names a UObject wrapper (a
+-- TrivialObject has no type(), a struct value is UScriptStruct, an array TArray, a parameter RemoteUnrealParam); UE4SS's
+-- own IsValid() holds (not null, not the placeholder; says nothing about liveness); then the UFunction, which stays the
+-- liveness test. A refusal is an answer (false, no log); a UFunction error on a value that passed the gate is one WARN
+-- per session, and false.
+local UOBJECT_WRAPPERS = {
+    UObject = true, AActor = true, UClass = true, UFunction = true, UStruct = true,
+    UEnum = true, UWorld = true, UInterface = true, UDataTable = true,
+}
+local aliveWarned = false
 function M.alive(o)
     if type(o) ~= "userdata" then return false end
+    local okT, t = pcall(function() return o:type() end)
+    if not (okT and type(t) == "string" and UOBJECT_WRAPPERS[t]) then return false end
+    local okV, v = pcall(function() return o:IsValid() end)
+    if not (okV and v == true) then return false end
     local ok, r = pcall(function() return StaticFindObject(KSL_ISVALID)(StaticFindObject(KSL_CDO), o) end)
-    return ok and r == true
+    if not ok then
+        if not aliveWarned then
+            aliveWarned = true
+            pcall(log.warn, "MAPSETUP alive: KismetSystemLibrary:IsValid raised for a %s (%s); answered false (logged once per session)", t, firstLine(r))
+        end
+        return false
+    end
+    return r == true
 end
 local function alive(o) return M.alive(o) end
 local function try(f) local ok, v = pcall(f) if ok then return v end return nil end
