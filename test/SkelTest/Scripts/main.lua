@@ -1327,6 +1327,76 @@ objectivesOffThreadCases = function(P)
     case(P .. "off-obj-trait-bad", nTRAIT .. "(1, 2, 3) [off thread]", function() return TRAIT(1, 2, 3) end, E.err(nTRAIT .. " refused: called off the game thread"))
 end
 
+-- Map service story 17: core's M.alive (lua/pkg/map/setup.lua) against real UE4SS values. The module is loaded in this
+-- Lua state with require, so the exact shipped function runs (it requires only .version and .ref and registers nothing
+-- at load). Each case first proves its input is the kind it names, else it fails as "input wasn't a <kind> (type=...)".
+-- The out array's entry is touched only by type() and alive: never compared, unwrapped or kept. Nothing here outlives
+-- the step.
+local KSL_CDO_PATH = "/Script/Engine.Default__KismetSystemLibrary"
+local KSL_ISVALID_PATH = "/Script/Engine.KismetSystemLibrary:IsValid"
+local function u4type(v)
+    if type(v) ~= "userdata" then return false, type(v) end
+    local ok, t = pcall(function() return v:type() end)
+    return ok, ok and tostring(t) or ("err:" .. firstLine(t))
+end
+-- fetch() -> the input; kind(v) -> true or the reason it isn't that kind. Returns the case function.
+local function aliveOf(SETUP, kindName, fetch, kind)
+    return function()
+        local v = fetch()
+        local okK, why = kind(v)
+        if not okK then error(string.format("input wasn't a %s (type=%s)", kindName, tostring(why))) end
+        return SETUP.alive(v)
+    end
+end
+local function wrapperKind(name)
+    return function(v)
+        local ok, t = u4type(v)
+        if ok and t == name then return true end
+        return false, t
+    end
+end
+local function aliveCases(phase)
+    local P = phase .. ".alive-"
+    local okS, SETUP = pcall(require, CORE:lower() .. ".map.setup")
+    if not check(okS and type(SETUP) == "table" and type(SETUP.alive) == "function",
+        "CASE %smodule %s.map.setup loaded in this state with an alive function (%s)", P, CORE:lower(), okS and type(SETUP) or firstLine(SETUP)) then
+        return
+    end
+    local refused = E.ret("false", function(r) return r.n == 1 and r[1] == false end)
+    local live = E.ret("true", function(r) return r.n == 1 and r[1] == true end)
+    local function world() local p = pc() return valid(p) and p:GetWorld() or nil end
+    -- a missing member: UE4SS's placeholder, a userdata whose type() raises (a TrivialObject)
+    case(P .. "trivial", "alive(pc()[\"Found Player2\"]) [missing member]", aliveOf(SETUP, "missing member's placeholder",
+        function() return pc()["Found Player2"] end,
+        function(v)
+            if type(v) ~= "userdata" then return false, type(v) end
+            local ok, t = u4type(v)
+            if ok then return false, t end
+            return true
+        end), refused)
+    case(P .. "struct", "alive(pc().ControlRotation) [struct value]", aliveOf(SETUP, "UScriptStruct",
+        function() return pc().ControlRotation end, wrapperKind("UScriptStruct")), refused)
+    case(P .. "tarray", "alive(world.GameState.PlayerArray) [array]", aliveOf(SETUP, "TArray",
+        function() return world().GameState.PlayerArray end, wrapperKind("TArray")), refused)
+    case(P .. "remote", "alive(GetAllActorsOfClass(world, PlayerController, out) out[1]) [out-array entry]", aliveOf(SETUP, "RemoteUnrealParam",
+        function()
+            local out = {}
+            GS():GetAllActorsOfClass(world(), StaticFindObject("/Script/Engine.PlayerController"), out)
+            return out[1]
+        end, wrapperKind("RemoteUnrealParam")), refused)
+    case(P .. "nil", "alive(nil)", aliveOf(SETUP, "nil", function() return nil end, function(v) return v == nil, type(v) end), refused)
+    case(P .. "num", "alive(1)", aliveOf(SETUP, "number", function() return 1 end, function(v) return type(v) == "number", type(v) end), refused)
+    case(P .. "str", "alive(\"x\")", aliveOf(SETUP, "string", function() return "x" end, function(v) return type(v) == "string", type(v) end), refused)
+    case(P .. "table", "alive({})", aliveOf(SETUP, "table", function() return {} end, function(v) return type(v) == "table", type(v) end), refused)
+    case(P .. "actor", "alive(pc()) [AActor]", aliveOf(SETUP, "AActor", function() return pc() end, wrapperKind("AActor")), live)
+    case(P .. "class", "alive(pc():GetClass()) [UClass]", aliveOf(SETUP, "UClass", function() return pc():GetClass() end, wrapperKind("UClass")), live)
+    case(P .. "func", "alive(KismetSystemLibrary:IsValid) [UFunction]", aliveOf(SETUP, "UFunction",
+        function() return StaticFindObject(KSL_ISVALID_PATH) end, wrapperKind("UFunction")), live)
+    case(P .. "world", "alive(pc():GetWorld()) [UWorld]", aliveOf(SETUP, "UWorld", function() return world() end, wrapperKind("UWorld")), live)
+    case(P .. "obj", "alive(KismetSystemLibrary's CDO) [UObject]", aliveOf(SETUP, "UObject",
+        function() return StaticFindObject(KSL_CDO_PATH) end, wrapperKind("UObject")), live)
+end
+
 local function badInputCases(phase)
     step(phase .. ": native cases", function() nativeCases(phase) end)
     step(phase .. ": channel cases", function() channelCases(phase) end)
@@ -1336,6 +1406,7 @@ local function badInputCases(phase)
     step(phase .. ": map signal case", function()
         case(phase .. ".map-signal", "GetSharedVariable(\"" .. SETUP_KEY .. "\") [" .. phase .. "]", readSignal, E.signalNone)
     end)
+    step(phase .. ": alive cases", function() aliveCases(phase) end)
     offThreadCases(phase)
 end
 

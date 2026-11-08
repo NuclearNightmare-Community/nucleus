@@ -15,10 +15,10 @@
 -- it costs one boolean read per attach or re-place.
 --
 -- What is walked (the manual mode's prototype, SkelTest overlapReport, moved here): the live HUD's OwningCanvas and the
--- other top-level viewport widgets (WidgetBlueprintLibrary.GetAllWidgetsOfClass, else FindAllOf("UserWidget") in the
--- viewport). Collapsed, Hidden and zero-opacity subtrees are pruned; a switcher's active child only. Only widgets that
--- draw something count (an Image or Border with a brush and alpha > 0, non-empty text, buttons, bars, ...); full-screen
--- ones (>= 90% of the screen both ways) are skipped. A Nucleus text widget counts as one unit (its tag names it), never
+-- other top-level viewport widgets (FindAllOf("UserWidget") in the viewport; never GetAllWidgetsOfClass's out array,
+-- whose entries point into freed memory: story 17). Collapsed, Hidden and zero-opacity subtrees are pruned; a
+-- switcher's active child only. Only widgets that draw something count (an Image or Border with a brush and alpha > 0,
+-- non-empty text, buttons, bars, ...); full-screen ones (>= 90% of the screen both ways) are skipped. A Nucleus text widget counts as one unit (its tag names it), never
 -- its inner Border/TextBlock. The element's own widget and its subtree are skipped. At most CAP widgets per check.
 -- Rectangles come from <Core>_AbsTopLeft / _AbsBottomRight on core's ModActor class default object (Slate's cached
 -- geometry: zero until the widget has been painted). Holds no UObject between calls.
@@ -103,27 +103,13 @@ local function readCoreTag(w)
 end
 
 -- Top-level viewport widgets other than the HUD, pushed as roots. Returns how many and the method.
-local function topLevel(world, uwClass, hudAddr, add)
+-- Map service story 17: no WidgetBlueprintLibrary:GetAllWidgetsOfClass. UE4SS hands its out array back as
+-- RemoteUnrealParam entries that point into the call's freed parameter buffer (docs/custom-maps.md, "Story 16"), so
+-- reading or unwrapping them reads freed memory. FindAllOf returns the UObjects themselves.
+local function topLevel(hudAddr, add)
     local n = 0
-    local function take(x)
-        if type(x) ~= "userdata" and type(x) ~= "table" then return end
-        -- Array elements may come back wrapped (a RemoteUnrealParam with get()) instead of as the UObject itself.
-        if x.IsValid == nil and x.get ~= nil then x = x:get() end
-        if C.valid(x) and x:GetAddress() ~= hudAddr then n = n + 1; add(x) end
-    end
-    local ok = pcall(function()
-        local out = {}
-        StaticFindObject("/Script/UMG.Default__WidgetBlueprintLibrary"):GetAllWidgetsOfClass(world, out, uwClass, true)
-        local arr = out.FoundWidgets
-        if arr == nil and out[1] ~= nil then arr = out end
-        if arr == nil then error("no FoundWidgets in the out table") end
-        if type(arr) == "table" then for _, x in ipairs(arr) do take(x) end
-        else arr:ForEach(function(_, e) take(e:get()) end) end
-    end)
-    if ok then return n, "GetAllWidgetsOfClass" end
-    n = 0
     for _, x in ipairs(FindAllOf("UserWidget") or {}) do
-        if C.valid(x) and x:IsInViewport() then take(x) end
+        if C.valid(x) and x:IsInViewport() and x:GetAddress() ~= hudAddr then n = n + 1; add(x) end
     end
     return n, "FindAllOf(UserWidget)"
 end
@@ -155,7 +141,7 @@ function D._check(hud, w, journal)
     local roots = { canvas }
     local tops, via = 0, "none"
     if UW and not journal then
-        local okT, n, how = pcall(topLevel, hud:GetWorld(), UW, hud:GetAddress(), function(x) roots[#roots + 1] = x end)
+        local okT, n, how = pcall(topLevel, hud:GetAddress(), function(x) roots[#roots + 1] = x end)
         if okT then tops, via = n, how end
     end
 

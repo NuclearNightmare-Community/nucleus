@@ -201,10 +201,16 @@ local notify = {}
 function NotifyOnNewObject(cls, fn) notify[#notify + 1] = { cls = cls, fn = fn } end
 local findAllCount = 0
 local JOURNALS = {}
+local TOPS = {} -- top-level UserWidgets for the overlap walk (story 17: FindAllOf("UserWidget") + IsInViewport only)
 function FindAllOf(cls)
     if cls == "Journal_C" then
         local out = {}
         for _, j in ipairs(JOURNALS) do if j.__alive then out[#out + 1] = j end end
+        return out
+    end
+    if cls == "UserWidget" then -- the overlap walk's roots, not a HUD seed: not counted
+        local out = {}
+        for _, x in ipairs(TOPS) do out[#out + 1] = x end
         return out
     end
     findAllCount = findAllCount + 1
@@ -658,8 +664,6 @@ local function gw(kind, rect, isa)
     function x:GetChildAt(i) return self.children[i + 1] end
     return x
 end
-local TOPS = {}
-function WBL.GetAllWidgetsOfClass(_, world, out, cls, top) out.FoundWidgets = TOPS end
 
 local hudN = H._poll()
 local cv = hudN.OwningCanvas
@@ -695,7 +699,13 @@ local otherEl = put(newText(PC)); otherEl.tip = "nucleus:OtherMod:x"; ABS[otherE
 local popup = gw("PopupUI_C", R(0, 0, 1000, 600), { "UserWidget" })
 local popImg = gw("Image", R(990, 40, 1000, 50))
 popup.WidgetTree = obj({ RootWidget = popImg }, "/Game/Test/Popup.WidgetTree")
+function popup:IsInViewport() return self.inViewport ~= false end
 TOPS[1] = popup
+local offscreen = gw("OffscreenUI_C", R(0, 0, 1000, 600), { "UserWidget" }) -- not in the viewport: never a root
+local offImg = gw("Image", R(940, 20, 990, 40)) -- would overlap the element if its widget were walked
+offscreen.WidgetTree = obj({ RootWidget = offImg }, "/Game/Test/Offscreen.WidgetTree")
+function offscreen:IsInViewport() return false end
+TOPS[2] = offscreen
 local nearMiss = put(gw("Image", R(850, 16, 890, 40))) -- 10 px left of the element: context, not an overlap
 
 -- story 12 AC 4: with debug off nothing is scheduled and no check runs, through attach, re-place, hide and show
@@ -716,6 +726,8 @@ ok(byPath[C.pathOf(imgHit)] and byPath[C.pathOf(imgHit)].class == "Image" and ne
 ok(byPath[C.pathOf(inner)] ~= nil and byPath[C.pathOf(emptyText)] == nil, "overlaps: text inside a panel; empty text draws nothing")
 ok(byPath[C.pathOf(otherEl)] and byPath[C.pathOf(otherEl)].element == "nucleus:OtherMod:x", "overlaps: another mod's Nucleus element counts, named by its tag")
 ok(byPath[C.pathOf(popImg)] ~= nil, "overlaps: a top-level widget's tree is walked")
+ok(byPath[C.pathOf(offImg)] == nil, "overlaps: a UserWidget outside the viewport isn't a root")
+ok(info and info.via == "FindAllOf(UserWidget)" and info.roots == 2, "overlaps: roots from FindAllOf(UserWidget) in the viewport (story 17)", info and (tostring(info.via) .. " roots=" .. tostring(info.roots)))
 ok(byPath[C.pathOf(hidden)] == nil and byPath[C.pathOf(clear)] == nil and byPath[C.pathOf(faded)] == nil and byPath[C.pathOf(hidPanel.children[1])] == nil,
     "overlaps: collapsed, clear, transparent and hidden-panel widgets don't count")
 ok(info and info.fullScreen == 1 and info.screen.w == 1000 and info.screen.h == 600 and not info.capped and info.errors == 0, "overlaps: info (full-screen skipped, screen size)")
