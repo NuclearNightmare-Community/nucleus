@@ -1,10 +1,11 @@
 {
   "id": "nucleus",
   "name": "Nucleus",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "scope": "all",
-  "game": { "version": "V8.1.5", "build": "26357084" },
+  "game": { "version": "V8.2", "build": "26512322" },
   "ue4ss": "v3.0.1-1181-g83330635",
   "compat": { "floor": "0.1.0" },
-  "dependsOn": []
+  "dependsOn": [],
+  "license": "MIT"
 }

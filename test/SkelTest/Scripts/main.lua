@@ -32,7 +32,7 @@
 local scriptDir = debug.getinfo(1, "S").source:gsub("^@", ""):match("^(.*)[/\\]")
 local ME = scriptDir:match("([^/\\]+)[/\\][Ss]cripts$")
 local CORE = ME:match("^(.-)SkelTest$") -- the one place the core's name comes from: this folder's name
-local NEED = ">=0.4.0" -- core.has and core.features (story 18); any core at or above it, down to core's floor
+local NEED = ">=0.5.0" -- core.has and core.features (story 18); any core at or above it, down to core's floor
 
 local function say(fmt, ...) print("[" .. ME .. "] " .. string.format(fmt, ...) .. "\n") end
 
@@ -1424,7 +1424,7 @@ local function versionCases(phase)
         end)
     end
     local NB = "connect: need "
-    case(P .. "ver-need-missing", "connect{ mod, no need }", probe({ mod = PROBE }), refused(NB .. "must be a string like '>=0.4.0', got nil"))
+    case(P .. "ver-need-missing", "connect{ mod, no need }", probe({ mod = PROBE }), refused(NB .. "must be a string like '>=0.5.0', got nil"))
     case(P .. "ver-need-empty", "connect{ need = '' }", probe({ mod = PROBE, need = "" }), refused(NB .. "'' is empty"))
     case(P .. "ver-need-ge", "connect{ need = '>=' }", probe({ mod = PROBE, need = ">=" }), refused(NB .. "'>=' is not a minimum version"))
     case(P .. "ver-need-gex", "connect{ need = '>=x' }", probe({ mod = PROBE, need = ">=x" }), refused(NB .. "'>=x' is not a minimum version"))
@@ -1432,8 +1432,8 @@ local function versionCases(phase)
     case(P .. "ver-need-lt", "connect{ need = '<0.3.0' }", probe({ mod = PROBE, need = "<0.3.0" }), refused(NB .. "'<0.3.0' is not a minimum version"))
     case(P .. "ver-need-tilde", "connect{ need = '~0.3.0' }", probe({ mod = PROBE, need = "~0.3.0" }), refused(NB .. "'~0.3.0' is not a minimum version"))
     case(P .. "ver-need-300", "connect{ need = <300 chars> }", probe({ mod = PROBE, need = ">=" .. string.rep("9", 298) }), refused("is 300 bytes, cap 64"))
-    case(P .. "ver-need-num", "connect{ need = 3 }", probe({ mod = PROBE, need = 3 }), refused(NB .. "must be a string like '>=0.4.0', got number"))
-    case(P .. "ver-need-table", "connect{ need = {} }", probe({ mod = PROBE, need = {} }), refused(NB .. "must be a string like '>=0.4.0', got table"))
+    case(P .. "ver-need-num", "connect{ need = 3 }", probe({ mod = PROBE, need = 3 }), refused(NB .. "must be a string like '>=0.5.0', got number"))
+    case(P .. "ver-need-table", "connect{ need = {} }", probe({ mod = PROBE, need = {} }), refused(NB .. "must be a string like '>=0.5.0', got table"))
     case(P .. "ver-need-space", "connect{ need = '>= 0.3.0' }", probe({ mod = PROBE, need = ">= 0.3.0" }), refused(NB .. "'>= 0.3.0' is not a minimum version"))
     case(P .. "ver-need-10digits", "connect{ need = '>=1234567890.0.0' }", probe({ mod = PROBE, need = ">=1234567890.0.0" }), refused("is not a minimum version"))
     case(P .. "ver-opts-nil", "connect(nil)", function() return client.connect(nil) end,

@@ -7,7 +7,7 @@
 -- (on this workspace's machine: MiKTeX's texlua.exe, which is Lua 5.3).
 local ROOT = (arg and arg[0] or ""):match("^(.*)[/\\]test[/\\]unit[/\\][^/\\]+$") or "."
 
-local VERSION = { name = "Nucleus", version = "0.4.0", floor = "0.1.0" }
+local VERSION = { name = "Nucleus", version = "0.5.0", floor = "0.1.0" }
 package.preload["nucleus.version"] = function() return VERSION end
 table.insert(package.searchers, 2, function(name)
     local rest = name:match("^nucleus%.(.+)$")
@@ -171,7 +171,7 @@ function StaticFindObject(path)
     if path == "/Game/Mods/Nucleus/ModActor.ModActor_C" then return cls end
     return INVALID
 end
-Nucleus_NativeVersion = function() return "0.4.0", "v3.0.1-1181-g83330635" end
+Nucleus_NativeVersion = function() return "0.5.0", "v3.0.1-1181-g83330635" end
 Nucleus_ClockMicros = function() return 0 end
 
 local Cl = require("nucleus.client")
@@ -199,7 +199,7 @@ for i, c in ipairs(refusedNeeds) do
 end
 do
     local okC, r, msg, calls = probe(nil, false)
-    ok(okC and r == false and msg:find("must be a string like '>=0.4.0', got nil", 1, true) and calls == 1, "AC 5: connect with no need", msg)
+    ok(okC and r == false and msg:find("must be a string like '>=0.5.0', got nil", 1, true) and calls == 1, "AC 5: connect with no need", msg)
     ok(LINES[#LINES]:find("^%[Probe%] ERROR connect: need must be a string") ~= nil, "AC 5: the line is the mod's, at ERROR", LINES[#LINES])
     local _, _, m300 = probe(string.rep("a", 300), true)
     ok(#m300 < 400 and m300:find(string.rep("a", 64) .. "' is 300 bytes", 1, true), "AC 5: a 300-char need is echoed capped at 64", #m300)
@@ -243,9 +243,9 @@ end
 -- The real connect: core.has and core.features over a real api table (AC 4)
 local core
 do
-    local r, res = connectWith("0.4.0", "^0.3.0")
+    local r, res = connectWith("0.5.0", "^0.3.0")
     core = res.ready
-    ok(r == true and type(core) == "table", "connect with an old caret need on 0.4.0: onReady", res.failed)
+    ok(r == true and type(core) == "table", "connect with an old caret need on 0.5.0: onReady", res.failed)
 end
 if core then
     eq(table.concat(core.features(), ","), table.concat(declared, ","), "AC 4: core.features() equals declared() (the READY line)")
@@ -264,7 +264,7 @@ if core then
     local before = linesMatching("DEPRECATED")
     local ok1, v1 = core.call("deprecated-test")
     local ok2, v2 = core.call("deprecated-test")
-    ok(ok1 and v1 == "0.4.0" and ok2 and v2 == "0.4.0", "AC 8: the deprecated op still works", tostring(v1) .. " " .. tostring(v2))
+    ok(ok1 and v1 == "0.5.0" and ok2 and v2 == "0.5.0", "AC 8: the deprecated op still works", tostring(v1) .. " " .. tostring(v2))
     eq(linesMatching("DEPRECATED") - before, 1, "AC 8: one DEPRECATED line for two calls")
     ok(LINES[#LINES]:find("^%[Dep%] WARN DEPRECATED channel op 'deprecated%-test'; use 'version' instead%.") ~= nil, "AC 8: tagged with the dependent, names the replacement", LINES[#LINES])
     local ok3 = core.call("version"); ok(ok3, "the replacement works")
