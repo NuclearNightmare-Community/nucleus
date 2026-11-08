@@ -8,6 +8,8 @@ local semver = require(BASE .. ".semver")
 local logm = require(BASE .. ".log")
 local refm = require(BASE .. ".ref")
 local clockm = require(BASE .. ".clock")
+local featm = require(BASE .. ".features")
+local deprecate = require(BASE .. ".deprecate")
 -- UI helpers (ui-helpers-contract.md). Loading them registers the HUD creation callback (ui/hud.lua) in this Lua state.
 -- A failure here must not stop connect for mods that use no UI: core.ui is then missing and onReady is told why.
 local uiOk, uiErr = pcall(function()
@@ -23,7 +25,15 @@ local CDO = "/Game/Mods/" .. NAME .. "/ModActor.Default__ModActor_C"
 local CALL = NAME .. "_Call"
 local MAX_REQUEST = 4096
 
+local FLOOR = V.floor -- the oldest need this core still serves (mod.json "compat.floor", story 18); nil: no floor
+
 local C = { name = NAME }
+local boundLog -- the connecting mod's logger (deprecation lines are tagged with it); set by connect
+
+-- Echoes at most 64 printable bytes of a caller's value into a message.
+local function quote(s)
+    return (tostring(s):sub(1, 64):gsub("[^%w%p ]", "?"))
+end
 
 local function str(v)
     if type(v) == "string" then return v end
@@ -46,6 +56,8 @@ function C.call(op, payload)
     if payload ~= nil and type(payload) ~= "string" and type(payload) ~= "number" then
         return false, "err:bad-request payload must be a string or number, got " .. type(payload)
     end
+    local repl = deprecate.OPS[op]
+    if repl then pcall(deprecate.warn, boundLog, "channel op '" .. quote(op) .. "'", "'" .. repl .. "'") end
     local req = payload ~= nil and (op .. ":" .. tostring(payload)) or op
     if #req > MAX_REQUEST then return false, string.format("err:too-long %d bytes, cap %d", #req, MAX_REQUEST) end
     local okF, cdo = pcall(found, CDO)
@@ -57,9 +69,52 @@ function C.call(op, payload)
     return false, out
 end
 
--- connect{ mod, need, onReady = fn(core), onFail = fn(message), timeout = seconds }
+-- The refusal for a version mismatch or a bad need (story 18), without the " <mod> will not run." tail; nil when
+-- compatible. Internal (the unit tests check the exact messages).
+function C._compatMessage(have, need, mod, floor)
+    local ok, kind = semver.check(have, need, floor)
+    if ok then return nil end
+    if kind == "core-too-old" then
+        return string.format("%s %s is older than %s needs (%s). Update %s.", NAME, tostring(have), mod, need, NAME)
+    elseif kind == "mod-too-old" then
+        return string.format("%s was made for %s %s, which this %s %s no longer supports (oldest: %s). Update %s.",
+            mod, NAME, need, NAME, tostring(have), tostring(floor), mod)
+    elseif kind == "bad-have" then
+        return string.format("%s reports version '%s', which isn't X.Y.Z; reinstall %s.", NAME, quote(have), NAME)
+    end
+    local _, why = semver.parseNeed(need)
+    return string.format("connect: need %s. Fix %s's connect call (and its mod.json dependsOn) to name the oldest %s it works with, like '>=%s'.",
+        type(need) == "string" and ("'" .. quote(need) .. "' " .. tostring(why)) or tostring(why), mod, NAME, V.version)
+end
+
+-- core.has(name) -> boolean and core.features() -> sorted list (story 18), over the list features.fromApi made from
+-- this mod's api table. has never raises: anything but a known name (non-string, empty, too long, nil) is false.
+local function featureCalls(list)
+    local set = featm.set(list)
+    local function has(name)
+        if type(name) ~= "string" or #name == 0 or #name > featm.MAX_NAME then return false end
+        return set[name] == true
+    end
+    local function features()
+        local copy = {}
+        for i, n in ipairs(list) do copy[i] = n end
+        return copy
+    end
+    return has, features
+end
+
+-- connect{ mod, need, onReady = fn(core), onFail = fn(message), timeout = seconds } -> true | false, message.
+-- need is the oldest core the mod works with: ">=X.Y.Z" ("^X.Y.Z" and a bare "X.Y.Z" are read as ">=X.Y.Z"). Returns
+-- false when connect refuses at once (bad arguments, the native part missing), after logging the one line and calling
+-- onFail; true when it is waiting for core (onReady or onFail come later, on the game thread). Never raises.
 function C.connect(opts)
-    assert(type(opts) == "table" and type(opts.mod) == "string" and type(opts.need) == "string", "connect{ mod = <string>, need = <semver> }")
+    if type(opts) ~= "table" or type(opts.mod) ~= "string" then
+        local msg = string.format("connect{ mod = <string>, need = '>=X.Y.Z' } needs a table with a string mod, got %s%s.",
+            type(opts), type(opts) == "table" and (" with mod " .. type(opts.mod)) or "")
+        pcall(logm.new(NAME .. " client").error, "%s", msg)
+        if type(opts) == "table" and type(opts.onFail) == "function" then pcall(opts.onFail, msg) end
+        return false, msg
+    end
     local mod, need = opts.mod, opts.need
     local log = logm.new(mod)
     local timeout = tonumber(opts.timeout) or 60
@@ -76,9 +131,18 @@ function C.connect(opts)
         end
     end
 
+    -- need is checked here, in main.lua, so a typo is reported at once (story 18 AC 5: one clean line, no raise).
+    if not semver.parseNeed(need) then
+        local msg = C._compatMessage(V.version, need, mod, nil)
+        fail(msg)
+        return false, msg .. tail
+    end
+
+    boundLog = boundLog or log -- the first mod in this state that got past its arguments (normally the only one)
     if type(_G[NAME .. "_NativeVersion"]) ~= "function" then
-        fail(NAME .. "'s native part is not loaded (Mods/" .. NAME .. "/dlls/main.dll missing or failed to load).")
-        return
+        local msg = NAME .. "'s native part is not loaded (Mods/" .. NAME .. "/dlls/main.dll missing or failed to load)."
+        fail(msg)
+        return false, msg .. tail
     end
 
     local deadline -- set on the first game-thread attempt; covers a wrong mods.txt order and slow first worlds
@@ -100,10 +164,8 @@ function C.connect(opts)
             if expired then fail(NAME .. " did not finish loading; see its errors earlier in UE4SS.log.") end
             return
         end
-        if not semver.satisfies(version, need) then
-            fail(string.format("%s %s is not compatible; %s needs %s (^ rules). Update %s.", NAME, tostring(version), mod, need, NAME))
-            return
-        end
+        local incompatible = C._compatMessage(version, need, mod, FLOOR)
+        if incompatible then fail(incompatible) return end
         if not found(CLASS) then
             if expired then fail(NAME .. "'s Blueprint content is not installed (Content/Paks/LogicMods/" .. NAME .. ".pak).") end
             return
@@ -114,6 +176,7 @@ function C.connect(opts)
             return
         end
         done = true
+        boundLog = log
         log.info("CONNECT ok %s %s (%s)", NAME, version, reply)
         local api = {
             name = NAME, version = version, log = log, call = C.call,
@@ -122,22 +185,11 @@ function C.connect(opts)
         }
         if uiOk then
             local U = uiErr
-            api.ui = {
-                hud = { find = U.hud.find, watch = U.hud.watch, unwatch = U.hud.unwatch, isVisible = U.hud.isVisible, stats = U.hud.stats },
-                -- story 13 (core 0.3.0): the Journal's map page as a host
-                journal = { find = U.journal.find, watch = U.journal.watch, unwatch = U.journal.unwatch, isOpen = U.journal.isOpen, stats = U.journal.stats },
-                text = { create = U.text.create, set = U.text.set, setStyle = U.text.setStyle, setVisible = U.text.setVisible,
-                         remove = U.text.remove, isShown = U.text.isShown, stats = U.text.stats, tagOf = U.text.tagOf },
-                -- story 14 (core 0.3.0): panels, with reordering
-                panel = { create = U.panel.create, setStyle = U.panel.setStyle, setVisible = U.panel.setVisible, remove = U.panel.remove,
-                          isShown = U.panel.isShown, order = U.panel.order, setOrder = U.panel.setOrder, move = U.panel.move },
-                -- story 15 (core 0.3.0): buttons with click callbacks (on hosts with a cursor: the Journal)
-                button = { create = U.button.create, setLabel = U.button.setLabel, setEnabled = U.button.setEnabled,
-                           setVisible = U.button.setVisible, remove = U.button.remove, isShown = U.button.isShown, stats = U.button.stats },
-                place = U.place.place,
-                elements = U.place.elements,
-                debug = { overlaps = U.debug.overlaps }, -- story 12: a diagnostic for testing a mod's UI
-            }
+            -- core.ui's shape is declared once, in features.lua (UI), so the feature list core's READY line shows is
+            -- the one core.has answers from.
+            local ui, missing = featm.buildUi(U)
+            if #missing > 0 then log.error("%s's UI helpers lack %s; those calls are not available.", NAME, table.concat(missing, ", ")) end
+            api.ui = ui
             -- The UI helpers run in this mod's state with its logger; until now they refuse every call ("before connect").
             U.common.bind{ mod = mod, log = log, ref = refm.ref, deref = refm.deref, free = refm.free, micros = clockm.micros }
             -- One timing summary line when this mod unloads, chained in front of any OnUnload already set.
@@ -155,6 +207,9 @@ function C.connect(opts)
         else
             log.error("%s's UI helpers failed to load (%s); core.ui is not available.", NAME, tostring(uiErr))
         end
+        -- Story 18: feature checks, generated from this api table (features.lua). Optional for dependents: the
+        -- minimum version is the normal way to depend on a feature.
+        api.has, api.features = featureCalls(featm.fromApi(api))
         if opts.onReady then
             local okR, err = pcall(opts.onReady, api)
             if not okR then log.error("onReady threw: %s", tostring(err)) end
@@ -176,7 +231,12 @@ function C.connect(opts)
         if done and handle then pcall(CancelDelayedAction, handle); handle = nil end
     end)
     if okL and math.type(res) == "integer" then handle = res
-    else fail("connect could not reach the game thread: " .. (okL and ("LoopInGameThreadWithDelay returned " .. tostring(res)) or tostring(res))) end
+    else
+        local msg = "connect could not reach the game thread: " .. (okL and ("LoopInGameThreadWithDelay returned " .. tostring(res)) or tostring(res))
+        fail(msg)
+        return false, msg .. tail
+    end
+    return true
 end
 
 return C

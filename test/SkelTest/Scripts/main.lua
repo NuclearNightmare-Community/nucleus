@@ -9,7 +9,7 @@
 --            weak handle, checks its layout, and checks that the previous world's widget handle derefs to nil. In
 --            each match it also times <Core>_Ref, and makes the hard overlap check (story 12 AC 6): core's overlap walk
 --            (ui/debug.lua) must find no drawn widget under the top-right widget.
--- bad-input: menu -> SmallMap?listen; calls every public native, the channel and every core.ui function with bad
+-- bad-input: menu -> SmallMap?listen; calls every public native, the channel, connect's need, core.has and every core.ui function with bad
 --            values (bad-input cases below), on and off the game thread and before connect, and checks each answer
 --            against the contract. The objectives natives (map service story 3) also run for real on a manager the
 --            test spawns on the host, and the forced missing struct member through core's test-only DLL
@@ -32,7 +32,7 @@
 local scriptDir = debug.getinfo(1, "S").source:gsub("^@", ""):match("^(.*)[/\\]")
 local ME = scriptDir:match("([^/\\]+)[/\\][Ss]cripts$")
 local CORE = ME:match("^(.-)SkelTest$") -- the one place the core's name comes from: this folder's name
-local NEED = "0.3.0" -- core.ui.journal, panel and button (stories 13-15); below 1.0.0 the caret rule needs the same minor
+local NEED = ">=0.4.0" -- core.has and core.features (story 18); any core at or above it, down to core's floor
 
 local function say(fmt, ...) print("[" .. ME .. "] " .. string.format(fmt, ...) .. "\n") end
 
@@ -556,7 +556,7 @@ local function channelCases(phase)
     local function direct(req) return function() return asString(cdo[CALL](cdo, req)) end end
     local function directRaw(...) local a = table.pack(...) return function() return cdo[CALL](cdo, table.unpack(a, 1, a.n)) end end
     case(P .. "ch-ping", "call(\"ping\") [control]", function() return core.call("ping") end, E.ret("true, 'pong ...'", function(r) return r[1] == true and tostring(r[2]):find("^pong ") ~= nil end))
-    case(P .. "ch-version", "call(\"version\") [control]", function() return core.call("version") end, E.ret("true, version", function(r) return r[1] == true and r[2] == NEED end))
+    case(P .. "ch-version", "call(\"version\") [control]", function() return core.call("version") end, E.ret("true, version", function(r) return r[1] == true and r[2] == core.version end))
     case(P .. "ch-nil", "call(nil)", function() return core.call(nil) end, E.callErr("err:bad-request op must be a string"))
     case(P .. "ch-table", "call({})", function() return core.call({}) end, E.callErr("err:bad-request op must be a string"))
     case(P .. "ch-num", "call(42)", function() return core.call(42) end, E.callErr("err:bad-request op must be a string"))
@@ -1397,7 +1397,102 @@ local function aliveCases(phase)
         function() return StaticFindObject(KSL_CDO_PATH) end, wrapperKind("UObject")), live)
 end
 
+-- ---------------------------------------------------------------- versioning (story 18)
+-- connect's need (AC 5: each bad one refused at once with one clean line, false + the message, onFail once, no raise),
+-- core.has and core.features (AC 4), the compatibility rule on this core (AC 1-3, through the client's own message
+-- builder; the floor case passes a floor of 0.3.0 as a test build would), and a deprecated op (AC 8: works, and logs
+-- one DEPRECATED line per dependent per session; check.ps1 counts it across both worlds).
+-- The bad-need connects use a probe mod name, so their lines aren't the test dependent's; none of them gets far
+-- enough to start a connect loop.
+local PROBE = ME .. "Need"
+local featuresLogged = false
+local function versionCases(phase)
+    local P = phase .. "."
+    local function probe(opts)
+        return function()
+            local calls, got = 0, nil
+            if type(opts) == "table" then opts.onFail = function(m) calls = calls + 1; got = m end end
+            local ok, msg = client.connect(opts)
+            return ok, msg, calls, got
+        end
+    end
+    -- false, "<text>... <probe> will not run.", onFail called once with the same message (without the tail)
+    local function refused(text)
+        return E.ret("false, '..." .. text .. "... will not run.', onFail once", function(r)
+            return r[1] == false and type(r[2]) == "string" and r[2]:find(text, 1, true) ~= nil
+                and r[2]:find(" will not run.", 1, true) ~= nil and r[3] == 1 and type(r[4]) == "string" and r[2]:sub(1, #r[4]) == r[4]
+        end)
+    end
+    local NB = "connect: need "
+    case(P .. "ver-need-missing", "connect{ mod, no need }", probe({ mod = PROBE }), refused(NB .. "must be a string like '>=0.4.0', got nil"))
+    case(P .. "ver-need-empty", "connect{ need = '' }", probe({ mod = PROBE, need = "" }), refused(NB .. "'' is empty"))
+    case(P .. "ver-need-ge", "connect{ need = '>=' }", probe({ mod = PROBE, need = ">=" }), refused(NB .. "'>=' is not a minimum version"))
+    case(P .. "ver-need-gex", "connect{ need = '>=x' }", probe({ mod = PROBE, need = ">=x" }), refused(NB .. "'>=x' is not a minimum version"))
+    case(P .. "ver-need-short", "connect{ need = '>=1.2' }", probe({ mod = PROBE, need = ">=1.2" }), refused(NB .. "'>=1.2' is not a minimum version"))
+    case(P .. "ver-need-lt", "connect{ need = '<0.3.0' }", probe({ mod = PROBE, need = "<0.3.0" }), refused(NB .. "'<0.3.0' is not a minimum version"))
+    case(P .. "ver-need-tilde", "connect{ need = '~0.3.0' }", probe({ mod = PROBE, need = "~0.3.0" }), refused(NB .. "'~0.3.0' is not a minimum version"))
+    case(P .. "ver-need-300", "connect{ need = <300 chars> }", probe({ mod = PROBE, need = ">=" .. string.rep("9", 298) }), refused("is 300 bytes, cap 64"))
+    case(P .. "ver-need-num", "connect{ need = 3 }", probe({ mod = PROBE, need = 3 }), refused(NB .. "must be a string like '>=0.4.0', got number"))
+    case(P .. "ver-need-table", "connect{ need = {} }", probe({ mod = PROBE, need = {} }), refused(NB .. "must be a string like '>=0.4.0', got table"))
+    case(P .. "ver-need-space", "connect{ need = '>= 0.3.0' }", probe({ mod = PROBE, need = ">= 0.3.0" }), refused(NB .. "'>= 0.3.0' is not a minimum version"))
+    case(P .. "ver-need-10digits", "connect{ need = '>=1234567890.0.0' }", probe({ mod = PROBE, need = ">=1234567890.0.0" }), refused("is not a minimum version"))
+    case(P .. "ver-opts-nil", "connect(nil)", function() return client.connect(nil) end,
+        E.ret("false, 'connect{ ... } needs a table ...'", function(r) return r[1] == false and tostring(r[2]):find("needs a table with a string mod, got nil", 1, true) ~= nil end))
+    case(P .. "ver-opts-mod-num", "connect{ mod = 5 }", probe({ mod = 5, need = ">=0.1.0" }),
+        E.ret("false, '... got table with mod number', onFail once", function(r) return r[1] == false and tostring(r[2]):find("got table with mod number", 1, true) ~= nil and r[3] == 1 end))
+
+    -- AC 1-3 on this core: the client's own message builder (nil = compatible).
+    local function compat(need, floor) return function() return client._compatMessage(core.version, need, PROBE, floor) end end
+    for i, need in ipairs({ ">=0.1.0", ">=0.2.0", ">=0.3.0", ">=" .. core.version, "^0.2.0", "^0.3.0", "0.2.0", "0.3.0" }) do
+        case(P .. "ver-accept-" .. i, "compatible(" .. need .. ") [core " .. tostring(core.version) .. "]", compat(need, "0.1.0"), E.nilret)
+    end
+    local OLD = string.format("%s %s is older than %s needs (", CORE, tostring(core.version), PROBE)
+    case(P .. "ver-core-old", "compatible(>=99.0.0)", compat(">=99.0.0", "0.1.0"), E.ret("'" .. OLD .. ">=99.0.0). Update " .. CORE .. ".'", function(r) return r[1] == OLD .. ">=99.0.0). Update " .. CORE .. "." end))
+    case(P .. "ver-core-old-caret", "compatible(^99.0.0)", compat("^99.0.0", "0.1.0"), E.ret("'" .. OLD .. "^99.0.0). Update " .. CORE .. ".'", function(r) return r[1] == OLD .. "^99.0.0). Update " .. CORE .. "." end))
+    local FL = string.format("%s was made for %s >=0.2.0, which this %s %s no longer supports (oldest: 0.3.0). Update %s.", PROBE, CORE, CORE, tostring(core.version), PROBE)
+    case(P .. "ver-floor", "compatible(>=0.2.0) [floor 0.3.0]", compat(">=0.2.0", "0.3.0"), E.ret("'" .. FL .. "'", function(r) return r[1] == FL end))
+
+    -- AC 4: core.has and core.features.
+    local function has(...) local a = table.pack(...) return function() return core.has(table.unpack(a, 1, a.n)) end end
+    local isTrue = E.ret("true", function(r) return r.n == 1 and r[1] == true end)
+    local isFalse = E.ret("false", function(r) return r.n == 1 and r[1] == false end)
+    local okF, list = pcall(core.features)
+    local listed = okF and type(list) == "table" and #list > 0
+    check(listed, "CASE %s core.features() -> %s (expected a non-empty list)", P .. "ver-features", okF and tostring(type(list)) or ("error: " .. firstLine(list)))
+    if listed then
+        for _, name in ipairs(list) do case(P .. "ver-has-" .. name, "core.has('" .. name .. "')", has(name), isTrue) end
+        local okD, declared = pcall(function() return require(CORE:lower() .. ".features").declared() end)
+        case(P .. "ver-features-declared", "core.features() == the READY line's list", function() return table.concat(list, ",") end,
+            E.ret(okD and table.concat(declared, ",") or "declared() failed", function(r) return okD and r[1] == table.concat(declared, ",") end))
+        case(P .. "ver-features-copy", "core.features() returns a fresh table", function()
+            local a = core.features(); a[1] = "changed"; a[#a + 1] = "extra"
+            return table.concat(core.features(), ",")
+        end, E.ret("the list unchanged", function(r) return r[1] == table.concat(list, ",") end))
+        if not featuresLogged then featuresLogged = true; say("FEATURES %s", table.concat(list, ",")) end
+    end
+    for _, n in ipairs({ "ui.text", "ui.panel", "ui.button", "ui.journal", "call", "ref" }) do
+        case(P .. "ver-has-known-" .. n, "core.has('" .. n .. "') [AC 4 names]", has(n), isTrue)
+    end
+    case(P .. "ver-has-unknown", "core.has('ui.nosuch')", has("ui.nosuch"), isFalse)
+    case(P .. "ver-has-fn", "core.has('ui.text.create') [a function of a module is not a feature]", has("ui.text.create"), isFalse)
+    case(P .. "ver-has-num", "core.has(42)", has(42), isFalse)
+    case(P .. "ver-has-empty", "core.has('')", has(""), isFalse)
+    case(P .. "ver-has-300", "core.has(<300 chars>)", has(string.rep("u", 300)), isFalse)
+    case(P .. "ver-has-nil", "core.has(nil)", has(nil), isFalse)
+    case(P .. "ver-has-none", "core.has()", has(), isFalse)
+    case(P .. "ver-has-table", "core.has({})", has({}), isFalse)
+    case(P .. "ver-has-bool", "core.has(true)", has(true), isFalse)
+    case(P .. "ver-has-skip", "core.has('version') [data, not a feature]", has("version"), isFalse)
+
+    -- AC 8: the test-only deprecated op still works (answered like "version"), twice per world.
+    for i = 1, 2 do
+        case(P .. "ver-deprecated-" .. i, "call(\"deprecated-test\")", function() return core.call("deprecated-test") end,
+            E.ret("true, version", function(r) return r[1] == true and r[2] == core.version end))
+    end
+end
+
 local function badInputCases(phase)
+    step(phase .. ": versioning cases", function() versionCases(phase) end)
     step(phase .. ": native cases", function() nativeCases(phase) end)
     step(phase .. ": channel cases", function() channelCases(phase) end)
     step(phase .. ": ui cases", function() uiCases(phase) end)
@@ -3030,7 +3125,15 @@ client.connect{
         elseif SCENARIO == "ui" or SCENARIO == "soak" then
             core.log.debugEnabled = true -- the helpers' DEBUG lines (tick summaries, freed handles) are part of the check
             profile(true)
-            if SCENARIO == "ui" then buildUi() buildButtons() else buildSoak() end
+            if SCENARIO == "ui" then
+                -- Story 18 AC 8 with two dependents: the test-only deprecated op, twice here and twice in the peer;
+                -- check.ps1 wants one DEPRECATED line from each.
+                for i = 1, 2 do
+                    local okD, v = core.call("deprecated-test")
+                    say("DEPRECATED-OP call %d ok=%s reply=%s", i, tostring(okD), tostring(v))
+                end
+                buildUi() buildButtons()
+            else buildSoak() end
         else buildSkeleton() end
         -- The runner: a game-thread loop registered here on the game thread, cancelled once finished. Never
         -- LoopAsync + ExecuteInGameThread (core's ui/hud.lua: the pinned UE4SS can lose such callbacks).
