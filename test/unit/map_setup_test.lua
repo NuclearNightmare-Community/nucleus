@@ -397,7 +397,7 @@ load(w1, s1)
 ok(#hooks == 2 and hooks[1].path:find("BP_Marker_Start_C:ReceiveBeginPlay", 1, true) and hooks[2].path:find("BP_FirstPersonGameState_C:ReceiveBeginPlay", 1, true), "hooks: start marker and game state BeginPlay", #hooks)
 ok(count("^FAIL") == 0, "solo: no FAIL line", count("^FAIL")) if count("^FAIL") > 0 then dump() end
 ok(count("^OK WIRE GameStartService_C at %(%-4200,0,0%), 10 %*Starts arrays x 24 PlayerStarts %(1 Corrective") == 1, "solo: the service, 24 starts, 1 Corrective out")
-ok(count("the nuke aims at %(%-4200,0,12000%)") == 1, "solo: the nuke aim is the marker + 12000 Z")
+ok(count("the nuke flight starts from this service %(native on V8%.2%)") == 1 and count("12000") == 0, "solo: the nuke line names the service and claims no 12000")
 ok(count("^OK WIRE item marker=DM_Item_Painkillers Item=0 Item_Painkillers_C at ") == 1 and count("^OK WIRE item marker=DM_Item_Flashlight Item=1 Item_Flashlight_C at ") == 1, "solo: each item marker spawns its own item")
 ok(count('^OK WIRE ObjectiveManager_C ') == 2 and count('^OK WIRE intel BP_CM_V4_C ') == 2, "solo: two managers, two intel")
 ok(count('^OK WIRE BP_Radio_C "Demo Computer" HelicopterLocation=%(%-1000,3500,0%) ReinformantLocation=PS_01') == 1, "solo: the computer wired")

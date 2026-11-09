@@ -6,8 +6,8 @@
 --   * RegisterInitGameStatePostHook (after the level loads, before any BeginPlay): the hooks on the Start marker's and
 --     the game state's ReceiveBeginPlay;
 --   * the Start marker's BeginPlay (level actors begin play before the game state): GameStartService_C first (its 10
---     *Starts arrays from the level's PlayerStarts, the Corrective lobby start left out; the nuke aims at its location
---     + 12000 Z), then every other kind whose classes are still in memory;
+--     *Starts arrays from the level's PlayerStarts, the Corrective lobby start left out; the nuke flight starts from this
+--     service, native on V8.2), then every other kind whose classes are still in memory;
 --   * the LoadMap post-hook of that world, the same frame: whatever the travel's GC dropped.
 -- isHost is IsServer and not IsStandalone, cached per world; a client spawns nothing here. Every spawned object gets
 -- one "OK|FAIL WIRE" line and one position check against its marker (distance 0, yaw 0); a bad marker value is one
@@ -67,7 +67,6 @@ M.STARTS = { "BaseCampStarts", "ResearchCenterStarts", "AirportStarts", "Slaught
     "OilRigStarts", "ShelterStarts", "UndergroundStarts", "MedbayStarts", "DrillingRigStarts" }
 M.CORRECTIVE = "Corrective"
 M.MIN_STARTS = 20
-M.NUKE_Z = 12000
 -- Caps on what a level may hold (every marker value is checked before use; map-setup.md "bad-input cases").
 M.LIMIT = { markers = 256, starts = 1024, equipment = 64, area = 128, id = 64, location = 128, text = 256, tasks = 64 }
 -- Position check tolerance: the float round trip of a spawn transform.
@@ -506,8 +505,8 @@ SECTIONS[#SECTIONS + 1] = { "service", { "service" }, function(world, cls)
     W.service = pathOf(svc)
     W.spawned[pathOf(sm)] = W.service
     if #bad == 0 then
-        ok("WIRE GameStartService_C at %s, 10 *Starts arrays x %d PlayerStarts (%d Corrective lobby start left out); the nuke aims at %s",
-            vec(at), #objs, corrective, vec({ X = at.X, Y = at.Y, Z = at.Z + M.NUKE_Z }))
+        ok("WIRE GameStartService_C at %s, 10 *Starts arrays x %d PlayerStarts (%d Corrective lobby start left out); the nuke flight starts from this service (native on V8.2)",
+            vec(at), #objs, corrective)
     else
         fail("WIRE GameStartService_C at %s: *Starts arrays not filled (%s)", vec(at), table.concat(bad, ", "))
     end
