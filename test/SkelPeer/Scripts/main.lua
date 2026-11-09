@@ -6,7 +6,7 @@
 local scriptDir = debug.getinfo(1, "S").source:gsub("^@", ""):match("^(.*)[/\\]")
 local ME = scriptDir:match("([^/\\]+)[/\\][Ss]cripts$")
 local CORE = ME:match("^(.-)SkelPeer$") -- the one place the core's name comes from: this folder's name
-local NEED = "0.3.0"
+local NEED = "^0.3.0" -- the old caret form on purpose (story 18 item 4: read as >=0.3.0)
 
 local function say(fmt, ...) print("[" .. ME .. "] " .. string.format(fmt, ...) .. "\n") end
 
@@ -19,6 +19,11 @@ local clicks = 0
 client.connect{
     mod = ME, need = NEED,
     onReady = function(core)
+        -- Story 18 AC 8: the test-only deprecated op, twice; one DEPRECATED line for this dependent (check.ps1, ui).
+        for i = 1, 2 do
+            local okD, v = core.call("deprecated-test")
+            say("DEPRECATED-OP call %d ok=%s reply=%s", i, tostring(okD), tostring(v))
+        end
         local ok, h = pcall(core.ui.button.create, {
             id = "peer", label = "Peer button", place = { host = "journal", corner = "top-left" },
             onClick = function(handle)

@@ -35,6 +35,7 @@ $name = $manifest.name
 $version = $manifest.version
 $t = "${name}SkelTest"
 $N = [regex]::Escape($name); $T = [regex]::Escape($t); $Ver = [regex]::Escape($version)
+$Floor = [regex]::Escape("$($manifest.compat.floor)")   # story 18: core's compatibility floor, in its READY line
 $Peer = [regex]::Escape("${name}SkelPeer")   # story 15's second test dependent (scenario ui)
 if (-not $Log) { $Log = Join-Path (Resolve-Path $Instance) 'NuclearNightmare\Binaries\Win64\ue4ss\UE4SS.log' }
 if (-not (Test-Path $Log)) { Write-Host "FAIL: no log at $Log"; exit 1 }
@@ -54,6 +55,7 @@ $always = @(
     '!removing hook'
     '!stack traceback'
     '!\[script_hook\]'
+    "!\[$N\] WARN feature list unavailable"   # story 18: the READY line must list the features
     "!\[$N\] native: FAULT"
     "!\[$N\] native: ERROR"
     "!internal error"
@@ -68,7 +70,7 @@ $always = @(
 )
 $started = @(
     "\[$N\] native: loaded, version $Ver for UE4SS v3\.0\.1-1181-g83330635"
-    "\[$N\] READY version=$Ver native=$Ver ue4ss=v3\.0\.1-1181-g83330635"
+    "\[$N\] READY version=$Ver native=$Ver ue4ss=v3\.0\.1-1181-g83330635 boot=\d+ floor=$Floor features=[a-z][\w.,]*\s*$"
     "\[$N\] CHANNEL hooked .*ModActor_C:${N}_Call"
     "\[$T\] NATIVE main\.lua ${N}_NativeVersion ok=true version=$Ver ue4ss=v3\.0\.1-1181-g83330635"
     "\[$T\] NATIVE main\.lua ${N}_ClockMicros ok=true type=integer"
@@ -188,6 +190,28 @@ foreach ($p in 'menu1', 'match1') {
 }
 foreach ($id in 'pre-create', 'pre-watch', 'pre-find', 'pre-elements', 'pre-overlaps', 'pre-journal-watch', 'pre-journal-isopen', 'pre-panel-create', 'pre-panel-move', 'pre-button-create') { $badInput += "\[$T\] OK CASE $id " }
 $badInput += "\[$T\] OK CASES before-connect recorded=10"
+# Story 18: versioning. connect's bad needs (AC 5), the compatibility rule on this core (AC 1-3), core.has and
+# core.features (AC 4) and the deprecated op (AC 8), in both worlds.
+foreach ($p in 'menu1', 'match1') {
+    foreach ($id in 'ver-need-missing', 'ver-need-empty', 'ver-need-ge', 'ver-need-gex', 'ver-need-short', 'ver-need-lt', 'ver-need-tilde',
+                    'ver-need-300', 'ver-need-num', 'ver-need-table', 'ver-need-space', 'ver-need-10digits', 'ver-opts-nil', 'ver-opts-mod-num',
+                    'ver-accept-1', 'ver-accept-2', 'ver-accept-3', 'ver-accept-4', 'ver-accept-5', 'ver-accept-6', 'ver-accept-7', 'ver-accept-8',
+                    'ver-core-old', 'ver-core-old-caret', 'ver-floor', 'ver-features-declared', 'ver-features-copy',
+                    'ver-has-known-ui\.text', 'ver-has-known-ui\.panel', 'ver-has-known-ui\.button', 'ver-has-known-ui\.journal',
+                    'ver-has-known-call', 'ver-has-known-ref', 'ver-has-unknown', 'ver-has-fn', 'ver-has-num', 'ver-has-empty', 'ver-has-300',
+                    'ver-has-nil', 'ver-has-none', 'ver-has-table', 'ver-has-bool', 'ver-has-skip', 'ver-deprecated-1', 'ver-deprecated-2') {
+        $badInput += "\[$T\] OK CASE $p\.$id "
+    }
+}
+$Probe = [regex]::Escape("${t}Need")
+$badInput += @(
+    # Each bad need is one clean line from the probe (12 per world), and nothing else from it.
+    "#24|\[$Probe\] ERROR connect: need .* will not run\.\s*$"
+    "#24|\[$Probe\] "
+    "\[$T\] FEATURES [a-z][\w.,]*\s*$"
+    # AC 8: one DEPRECATED line for this dependent in the whole session (four calls, two worlds).
+    "#1|\[$T\] WARN DEPRECATED channel op 'deprecated-test'; use 'version' instead\."
+)
 # Map service story 3: the objectives natives. Their bad values in both worlds and off the game thread; the writers
 # refused in the standalone menu; in the match a manager of the test's own filled, read back, refused a second fill,
 # and one task's TraitorState set and cleared; the forced missing struct member through core's test-only DLL
@@ -255,7 +279,7 @@ $ui = $started + @(
     "#1|\[$T\] WARN text 'long': text is longer than 256 characters"
     # Story 12: with debug on, the automatic overlap check WARNs per overlapping widget (a diagnostic, allowed here); a
     # check or a widget that fails ("ui overlap check failed", "ui overlap: ... could not be checked") is not.
-    "!\[$T\] WARN (?!hud watcher \d+: |text 'long': |ui overlap '|button 'b2' onClick: |$slowWarnOk)"
+    "!\[$T\] WARN (?!hud watcher \d+: |text 'long': |ui overlap '|button 'b2' onClick: |DEPRECATED channel op 'deprecated-test'|$slowWarnOk)"
     "\[$T\] OK UIOVERLAP match1 'xcross' \(near the crosshair, offset x=-24\) reports the crosshair "
     "\[$T\] WARN ui overlap 'xcross': \S+[.:]Crosshair \(Image\) "
     "\[$T\] OK UIOVERLAP match1 automatic checks were scheduled"
@@ -326,7 +350,12 @@ $ui = $started + @(
     "\[$Peer\] PEER ready: button 'peer' created"
     "#1|\[$Peer\] PEERCLICK \d+ 'peer'"
     "\[$Peer\] PEERCLICK 1 'peer'"
-    "!\[$Peer\] (ERROR|WARN (?!$slowWarnOk))"
+    "!\[$Peer\] (ERROR|WARN (?!DEPRECATED channel op 'deprecated-test'|$slowWarnOk))"
+    # Story 18 AC 8: the test-only deprecated op works, and logs one DEPRECATED line per dependent (two calls each).
+    "#1|\[$T\] WARN DEPRECATED channel op 'deprecated-test'; use 'version' instead\."
+    "#1|\[$Peer\] WARN DEPRECATED channel op 'deprecated-test'; use 'version' instead\."
+    "#2|\[$T\] DEPRECATED-OP call \d ok=true reply=$Ver\s*$"
+    "#2|\[$Peer\] DEPRECATED-OP call \d ok=true reply=$Ver\s*$"
     "\[$T\] OK BHOOK match2 "
     "\[$T\] OK BPENDING match2 "
     "\[$T\] OK BMAP match2 "
@@ -474,6 +503,13 @@ foreach ($pattern in ($always + $expect[$Scenario])) {
         $label = $pattern
     }
     if ($ok) { Write-Host "ok:   $label" } else { Write-Host "FAIL: $label"; $failed++ }
+}
+if ($Scenario -eq 'bad-input') {
+    # Story 18 AC 4: core.features() in the test dependent equals the list core's READY line shows.
+    $ready = @($lines | Where-Object { $_ -match "\[$N\] READY .* features=(\S+)" } | ForEach-Object { $Matches[1] }) | Select-Object -Last 1
+    $seen = @($lines | Where-Object { $_ -match "\[$T\] FEATURES (\S+)" } | ForEach-Object { $Matches[1] }) | Select-Object -Last 1
+    if ($ready -and $ready -eq $seen) { Write-Host "ok:   core.features() equals the READY line's features ($ready)" }
+    else { Write-Host "FAIL: core.features() ($seen) differs from the READY line's features ($ready)"; $failed++ }
 }
 if ($Scenario -eq 'soak') {
     # Story 7 AC 7: the one-minute windows that lie wholly in the idle match (the first one after "SOAK idle" may

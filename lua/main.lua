@@ -7,6 +7,9 @@ local NAME = scriptDir:match("([^/\\]+)[/\\][Ss]cripts$")
 local LOWER = NAME:lower()
 local V = require(LOWER .. ".version")
 local log = require(LOWER .. ".log").new(NAME)
+-- Story 18: the feature names core.has answers for, listed in the READY line (a player's log shows what their core
+-- supports). Loaded under pcall: a missing file costs the list, not the start-up.
+local okFeat, FEAT = pcall(require, LOWER .. ".features")
 -- The map service (lua/pkg/map/setup.lua, map service stories 5-9); loaded here, started in start().
 local okMap, MAP = pcall(require, LOWER .. ".map.setup")
 -- The map service's Journal map and area flags (lua/pkg/map/journalmap.lua, map service story 7, every machine);
@@ -64,6 +67,9 @@ local function handle(request)
     if #op > MAX_OP then return string.format("err:bad-request op is %d bytes, cap %d", #op, MAX_OP) end
     if op == "ping" then return string.format("ok:pong %s boot=%d", V.version, boot) end
     if op == "version" then return "ok:" .. V.version end
+    -- Test-only, deprecated in favour of "version" (story 18 AC 8; deprecate.lua): answered like it, and the client logs
+    -- one DEPRECATED line per dependent. Not public API.
+    if op == "deprecated-test" then return "ok:" .. V.version end
     return "err:unknown-op " .. quote(op)
 end
 
@@ -197,9 +203,16 @@ local function start()
         log.info("STOPPED%s", okU and "" or (" (state not published: " .. tostring(errU) .. ")"))
     end
 
+    -- Story 18: what this core supports, as core.has answers it (features.lua), for the READY line.
+    local features = "unavailable"
+    local okD, list = false, FEAT
+    if okFeat then okD, list = pcall(FEAT.declared) end
+    if okD then features = table.concat(list, ",")
+    else log.warn("feature list unavailable: %s", tostring(list):match("^[^\n]*")) end
+
     if mapReady then ModRef:SetSharedVariable(LOWER .. ".map", "ready") end
     setState("ready")
-    log.info("READY version=%s native=%s ue4ss=%s boot=%d", V.version, tostring(nv), tostring(nue), boot)
+    log.info("READY version=%s native=%s ue4ss=%s boot=%d floor=%s features=%s", V.version, tostring(nv), tostring(nue), boot, tostring(V.floor), features)
 end
 
 local ok, err = xpcall(start, debug.traceback)

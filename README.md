@@ -54,8 +54,8 @@ $inst = 'C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463'   # absol
 The `manual` scenario is for playing the game yourself with core and the test dependent installed. The test dependent never travels, presses keys or runs timed checks, and never logs `FAIL` for anything you do. It connects to core (`CONNECT ok`, or one line saying why it can't) and keeps a `Nucleus manual: <n>` label in the top-right corner of the HUD through `core.ui.text`, so core attaches it again whenever the game rebuilds or replaces the HUD: first match, back to the menu, new match, death and revive (core logs `DEBUG ui attach 'manual' created|reused ...` each time). `n` counts the attaches. Each attach logs one `ATTACH` line with the HUD, whether it is visible (the menu and the lobby hide it; that's expected) and the label's rectangle. The UI helpers' `DEBUG` lines are on: a `hud tick n=... avg=... max=...` summary once a minute (story 7's 10-minute cost check reads these). While the HUD is visible, it also logs an `OVERLAP` report from `core.ui.debug.overlaps` (story 12) about 1 s and 4 s after an attach: every drawn widget whose on-screen rectangle intersects the label's (`OVERLAP none (...)` when nothing does), plus `OVERLAP near` lines for drawn widgets within 64 px of it. With debug on, core's automatic check also logs `WARN ui overlap 'manual': ...` once per overlapping widget.
 
 ```powershell
-cd <workspace>\mods\Nucleus
-$inst = '<workspace>\game-instances\v8.1.2-build26193463'
+cd C:\...\nuclear-nightmare\mods\Nucleus
+$inst = 'C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463'
 ./build.ps1                                     # once, if build/package/ is missing or out of date
 ./deploy.ps1 -Instance $inst -Test -Scenario manual
 ..\..\tools\launch.ps1 -Instance $inst          # play; quit the game when done
@@ -83,12 +83,28 @@ The name is `mod.json` `name` (and `id`, its lowercase form). Change it there an
 | Blueprint (`/Game/Mods/<name>/ModActor`, `<name>_Call`, `<name>_Abs*`, `WBP_<name>Text`, `WBP_<name>Panel`, `WBP_<name>Button` and its `<name>_OnClicked`, the map markers `/Game/Mods/<name>/Map/`) | the `-CoreName=` argument of the `CoreGen` commandlet (`build.ps1` passes `mod.json` `name`) |
 | Pak (`Content/Paks/LogicMods/<name>.pak`) and install folder (`Mods/<name>/`) | `build.ps1` and `deploy.ps1`, from `mod.json` |
 | Core's Lua (`[<name>]` log prefix, channel path, shared variables `<lowercase>.state` and `<lowercase>.map`, the map markers' paths) | the folder it runs from (`Mods/<name>/Scripts/main.lua`) |
-| Lua modules (`<lowercase>.client`, `.clock`, `.log`, `.ref`, `.semver`, `.ui.*`) | `build.ps1` stages them as `Scripts/<lowercase>/` (the UI helpers as `Scripts/<lowercase>/ui/`) and writes `Scripts/<lowercase>/version.lua`; the UI helpers' error prefix (`<lowercase>.ui`) and widget tag prefix come from it |
+| Lua modules (`<lowercase>.client`, `.clock`, `.log`, `.ref`, `.semver`, `.features`, `.deprecate`, `.ui.*`) | `build.ps1` stages them as `Scripts/<lowercase>/` (the UI helpers as `Scripts/<lowercase>/ui/`) and writes `Scripts/<lowercase>/version.lua`; the UI helpers' error prefix (`<lowercase>.ui`) and widget tag prefix come from it |
 | Test dependents (`<name>SkelTest`, and `<name>SkelPeer` for `ui`) | `deploy.ps1` installs `test/SkelTest` as `Mods/<name>SkelTest` and `test/SkelPeer` as `Mods/<name>SkelPeer`; each reads the name from its folder |
 | Core's test-only DLL (`<name>SkelNative`, for `bad-input`) | `build.ps1` builds the CMake target `CoreNativeTest` (`test/SkelNative/skel_native.cpp` with core's `objectives.cpp`) into `build/native-out/test/main.dll`, never packaged; `deploy.ps1 -Test -Scenario bad-input` installs it as `Mods/<name>SkelNative/dlls/main.dll` |
 | `run.ps1`, `check.ps1`, log folder `dumps/<copy>/<lowercase>/` | `mod.json` |
 
 Generic names that don't carry core's name, and so never change: the CMake targets `CoreNative` and `CoreNativeTest`, the Unreal module and commandlet `CoreGen`, the Unreal project `NuclearNightmare`. Real dependents keep their own `CORE` constant in their bootstrap and must update it.
+
+## Versioning (story 18, core 0.5.0)
+
+Core only ever adds: no public API (natives, `nucleus.*` modules, channel ops, `core.ui.*`, the `mod.json` contract) is removed or changed incompatibly, before or after 1.0. A replaced API is deprecated: it keeps working, logs one `WARN DEPRECATED <old>; use <new> instead.` line per dependent per session (`lua/pkg/deprecate.lua`), and goes only in a breaking major, announced here. Every public API change needs an entry below and, when it adds something a mod could check for, a `features.lua` entry.
+
+- **Dependents declare a minimum:** `"dependsOn": [{ "id": "nucleus", "version": ">=0.5.0" }]` and the same string in `connect{ need = ">=0.5.0" }`. Any core at or above it satisfies it. `^X.Y.Z` and a bare `X.Y.Z` (what `connect` took before 0.5.0) are read as `>=X.Y.Z`, so mods released with `^0.2.0` / `"0.2.0"` load on 0.5.0 unchanged. Anything else (`~`, `<`, `>= 0.3.0`, `>=1.2`, a non-string, over 64 bytes) is refused at once: `connect` logs one line (`connect: need '<need>' is not a minimum version (want '>=X.Y.Z'). ...`), calls `onFail`, and returns `false, message`. `connect` never raises; it returns `true` when it is waiting for core.
+- **Core holds the floor:** `mod.json` `"compat": { "floor": "0.1.0" }`, the oldest need this core still serves (`build.ps1` writes it into `version.lua`; it stays 0.1.0 until a breaking major). The refusals name the older side: `Nucleus <have> is older than <mod> needs (<need>). Update Nucleus.` and, below the floor, `<mod> was made for Nucleus <need>, which this Nucleus <have> no longer supports (oldest: <floor>). Update <mod>.`
+- **Feature checks (optional):** `core.has(name) -> boolean`, `core.features() -> { name, ... }` (sorted, a fresh table). Names are API paths generated from the api table `onReady` receives (`lua/pkg/features.lua`): the functions on it (`call`, `ref`, `deref`, `free`), its tables (`clock`, `ui`), and inside a namespace like `ui` every module and function (`ui.text`, `ui.panel`, `ui.button`, `ui.journal`, `ui.hud`, `ui.debug`, `ui.place`, `ui.elements`); a module's own functions aren't listed. Changes inside an existing API get hand-named entries (`features.HAND`, e.g. `ui.panel.reorder`), each added by the story that makes the change. `has` is false, never an error, for anything else (non-string, empty, over 64 bytes, nil). The minimum version stays the normal way to depend on a feature. Core's `READY` line lists the same names: `READY version=0.5.0 ... boot=<n> floor=0.1.0 features=call,clock,...`.
+- **Test-only:** the channel op `deprecated-test` (answered like `version`) is deprecated on purpose for the `bad-input` and `ui` scenarios; it isn't public API.
+
+### Changelog
+
+- **0.5.0** (story 18, planned as 0.4.0, which was never released; the release also adds the map service, `CHANGELOG.md`): minimum-version needs (`>=X.Y.Z`; `^` and bare read as `>=`), `mod.json` `compat.floor`, the new refusal messages, `connect` returning `true | false, message` and never raising on bad arguments, `core.has`, `core.features`, `nucleus.semver` `parseNeed`, `compare` and `check` (and `satisfies(have, need[, floor])` under the new rule), the `READY` line's `floor=` and `features=`, the deprecation mechanism.
+- **0.3.0** (stories 13-15): `core.ui.journal`, `core.ui.panel`, `core.ui.button`, `place = { panel = ... }`.
+- **0.2.0**: `core.ui` (see "UI helpers").
+- **0.1.0**: the walking skeleton (natives, channel, `connect`, `log`, `ref`, `semver`).
 
 ## Natives
 
@@ -177,9 +193,11 @@ Every native validates its arguments and answers bad input with one Lua error na
 
 Reached on the API that `connect`'s `onReady` receives; each dependent runs its own copy in its own Lua state. Contract: `ui-helpers-contract.md` and stories 7-10 in the workspace spec (where they disagree, the stories win). Every function runs only on the game thread (`<lowercase>.ui.<fn> called off the game thread`) and only after `connect` (`<lowercase>.ui: <fn> called before connect`), validates its input first and raises one clean error naming the function and the problem. Nothing keeps a UObject between calls: paths, weak handles and plain tables only.
 
-`core.ui` is new public API in core 0.2.0. Under the caret rule below 1.0.0 (same minor, `semver.lua`), a dependent connects with `need = "0.2.0"`; one that still asks for `0.1.x` is refused by core 0.2.0 and has to raise its `need`.
+`core.ui` is new public API in core 0.2.0. Under the caret rule below 1.0.0 (same minor, `semver.lua`), a dependent connects with `need = "0.2.0"`; one that still asks for `0.1.x` is refused by core 0.2.0 and has to raise its `need`. (From 0.5.0 the caret is read as a minimum; see "Versioning".)
 
 **Core 0.3.0** (2026-10-27) adds `core.ui.journal` (story 13), `core.ui.panel` (story 14) and `core.ui.button` (story 15), and `place = { panel = ... }` in intents. Under the same caret rule a dependent connects with `need = "0.3.0"`; one that still asks for `0.2.0` is refused by core 0.3.0 (`Nucleus 0.3.0 is not compatible; <mod> needs 0.2.0 (^ rules). Update Nucleus.`) and has to raise its `need` (and its `mod.json` `dependsOn` range) to `0.3.0`. The native part carries the version too (`Nucleus_NativeVersion`; core refuses to start when the DLL and the Lua differ), so this bump rebuilt `main.dll`. Verified in the VM on 0.3.0 (2026-10-27, `main.dll` rebuilt, `abi-check` 0 missing): `skeleton` (`READY version=0.3.0 native=0.3.0`), `bad-input` (965 cases) and `ui` (120 checks, the second dependent connecting with `need = "0.3.0"`). **Dependents still on `need = "0.2.0"`** (`mods/clock`, `mods/markers`, both also `dependsOn ^0.2.0`) don't connect to 0.3.0, and clock's `deploy.ps1` refuses to deploy next to it, until they raise their requirement.
+
+**Core 0.5.0** (soft release to testers, game V8.2.1 build 26512322; changes in `CHANGELOG.md`) adds the map service and story 18's versioning (planned as 0.4.0, which was never released). Needs are minimums from here on, and `^0.2.0` / `"0.2.0"` read as `>=0.2.0`, so `mods/clock` and `mods/markers` connect to 0.5.0 unchanged (their own `deploy.ps1` still checks `dependsOn` with the caret rule and refuses 0.5.0 unless `-Force`). The version comes from `mod.json` at build time (`version.lua`, the native's `CORE_VERSION`), so this bump rebuilds `main.dll` too.
 
 | Module | What it does |
 |---|---|
