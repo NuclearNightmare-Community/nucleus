@@ -6,7 +6,7 @@ All notable changes to Nucleus are recorded here. The format follows [Keep a Cha
 
 ## [0.5.0] - 2026-11-DD
 
-Soft release to a few testers, not released publicly. Game: Nuclear Nightmare V8.2 (build 26512322). UE4SS: v3.0.1-1181-g83330635.
+Soft release to a few testers, not released publicly. Game: Nuclear Nightmare V8.2.1 (build 26512322). UE4SS: v3.0.1-1181-g83330635.
 
 For players: nothing changes on the game's own maps. On a custom map built with Nucleus's map markers, Nucleus now does the setup the map needs on its own: the lobby countdown, the start positions, the game's real objects and enemies, the Journal's tasks and map, and day and night. A custom map is a pak and a `mod.json`, with no Lua of its own.
 
