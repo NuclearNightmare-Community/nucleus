@@ -10,6 +10,7 @@ $inst = 'C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463'   # absol
 ./deploy.ps1 -Instance $inst                  # core only; -Test adds the test dependent; -Remove takes it all out
 ./run.ps1 -Instance $inst -Scenario skeleton  # unattended in-game run + check.ps1 (also no-native, no-pak, bad-input, ui, journal, soak)
 ./run.ps1 -Instance $inst -Scenario skeleton -Target vm   # the same in the Hyper-V VM, while you play (below)
+pwsh -File test/unit/run_guard_test.ps1       # run.ps1 refuses while another runner's test mod is enabled (-AllowOtherDrivers)
 ./check.ps1 -Instance $inst -Scenario skeleton
 ```
 
