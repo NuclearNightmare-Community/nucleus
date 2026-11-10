@@ -13,6 +13,8 @@
   front (never into another program), so it takes the mouse for a moment. "<seq> shot <label>" is served only in the
   VM (a screenshot); on the host it is acknowledged and skipped.
   Keeps the log as <workspace>/dumps/<copy>/<name lowercase>/<scenario>.log (ignored by git) and runs check.ps1.
+  Refuses to start while another runner's test or driver mod is enabled in the copy (the workspace's tools/run-guard:
+  the refusal names each and the command that clears it); -AllowOtherDrivers runs anyway.
   Steam must be running. Don't type into the game while it runs.
   -Target vm runs the scenario in the Hyper-V VM NNB instead (tools/vm/vm-sp.ps1, README "Tests in the VM"): the
   host's build/package and the test dependent go into the VM's copy of the same build (staged through
@@ -29,7 +31,8 @@ param(
     [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'soak')]
     [string] $Scenario = 'skeleton',
     [int] $TimeoutSec = 0, # 0: 420 s, 900 s for ui (it travels four times and waits for layout), 1200 s for journal (24 key presses, a revive, a map change), 1000 s for soak (10 min idle); x1.5 in the VM
-    [ValidateSet('host', 'vm')] [string] $Target = 'host'
+    [ValidateSet('host', 'vm')] [string] $Target = 'host',
+    [switch] $AllowOtherDrivers # run even when another runner's test mod is enabled in the copy (tools/run-guard)
 )
 $ErrorActionPreference = 'Stop'
 $hostTimeout = switch ($Scenario) { 'ui' { 900 } 'journal' { 1200 } 'soak' { 1000 } default { 420 } }
@@ -39,6 +42,7 @@ $name     = (Get-Content (Join-Path $here 'mod.json') -Raw | ConvertFrom-Json).n
 $testName = "${name}SkelTest"
 $inst     = (Resolve-Path $Instance).Path
 $root     = Split-Path (Split-Path $inst)
+. (Join-Path $root 'tools\run-guard\run-guard.ps1')
 $log      = Join-Path $inst 'NuclearNightmare\Binaries\Win64\ue4ss\UE4SS.log'
 $scripts  = Join-Path $inst "NuclearNightmare\Binaries\Win64\ue4ss\Mods\$testName\Scripts"
 $outDir   = Join-Path $root "dumps\$(Split-Path $inst -Leaf)\$($name.ToLowerInvariant())"
@@ -51,11 +55,16 @@ if ($Target -eq 'vm') {
     Assert-NNBSpScenario -Scenario $Scenario -HostOnly 'soak'
     $kept = Join-Path $outDir "$Scenario.vm.log"
     Remove-Item $kept -ErrorAction SilentlyContinue
-    $run = Invoke-NNBSpRun -Instance $inst -TestMod $testName -Mods $name, $testName, "${name}SkelPeer", "${name}SkelNative" -Paks "$name.pak" `
-        -EndPattern "\[$testName\] END result=" -TimeoutSec (Get-NNBSpTimeout $hostTimeout $TimeoutSec) -LogOut $kept -Prepare {
-            param($stage)
-            & (Join-Path $here 'deploy.ps1') -Instance $stage -Test -Scenario $Scenario -Staged
-        }
+    # A refusal of the guard (the VM copy's mods.txt, in the stage) ends the run before anything is installed there.
+    try {
+        $run = Invoke-NNBSpRun -Instance $inst -TestMod $testName -Mods $name, $testName, "${name}SkelPeer", "${name}SkelNative" -Paks "$name.pak" `
+            -EndPattern "\[$testName\] END result=" -TimeoutSec (Get-NNBSpTimeout $hostTimeout $TimeoutSec) -LogOut $kept -Prepare {
+                param($stage)
+                $refusal = Get-RunGuardRefusal -Workspace $root -Instance $stage -Owner $name -Bypass:$AllowOtherDrivers -Vm
+                if ($refusal) { throw $refusal }
+                & (Join-Path $here 'deploy.ps1') -Instance $stage -Test -Scenario $Scenario -Staged
+            }
+    } catch { if ("$($_.Exception.Message)".StartsWith('refused: ')) { Write-Host $_.Exception.Message; exit 1 }; throw }
     if (-not $run.Log) { Write-Host 'No UE4SS.log from the VM.'; exit 1 }
     & (Join-Path $here 'check.ps1') -Log $kept -Scenario $Scenario -Target vm
     exit $LASTEXITCODE
@@ -135,6 +144,9 @@ function Invoke-Request([string] $cmd) {
     Write-Host ("  posted {0} to the game window (down={1} up={2})" -f $label, $down, $up)
 }
 
+# A test mod another runner left enabled would fail this run in confusing ways.
+$refusal = Get-RunGuardRefusal -Workspace $root -Instance $inst -Owner $name -Bypass:$AllowOtherDrivers
+if ($refusal) { Write-Host $refusal; exit 1 }
 if (Get-Process -Name 'NuclearNightmare*' -ErrorAction SilentlyContinue) { throw 'Nuclear Nightmare is already running (a dev copy or the real game); not launching.' }
 & (Join-Path $here 'deploy.ps1') -Instance $inst -Test -Scenario $Scenario
 Remove-Item $log -ErrorAction SilentlyContinue
