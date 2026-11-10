@@ -4,7 +4,7 @@ All notable changes to Nucleus are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
-## [0.5.0] - 2026-11-DD
+## [0.5.0] - 2026-11-09
 
 Soft release to a few testers, not released publicly. Game: Nuclear Nightmare V8.2.1 (build 26512322). UE4SS: v3.0.1-1181-g83330635.
 
