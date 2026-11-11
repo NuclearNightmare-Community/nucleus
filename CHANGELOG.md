@@ -2,9 +2,9 @@
 
 All notable changes to Nucleus are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). From 0.5.0 a dependent's `need` and `dependsOn` are minimum versions (`>=0.5.0`), so a newer Nucleus never asks dependents to raise them. Up to 0.3.0, below 1.0.0 a dependent connected only to the same minor version (`need = "0.3.0"` accepted 0.3.x).
 
-## [Unreleased]
+## [0.6.0] - 2026-11-11
 
-Version 0.6.0 in `mod.json`, not released yet. Game: Nuclear Nightmare V8.2.1 (build 26512322). UE4SS: v3.0.1-1181-g83330635.
+Soft release to a few testers, not released publicly. Game: Nuclear Nightmare V8.2.1 (build 26512322). UE4SS: v3.0.1-1181-g83330635.
 
 For players: mods that put buttons or text on the map (the Journal) can now place them on the binder itself, on a page, under the map square or beside the match, task and ammo panels, instead of in the corners of the screen around it.
 
@@ -25,7 +25,7 @@ For players: mods that put buttons or text on the map (the Journal) can now plac
 
 ## [0.5.0] - 2026-11-09
 
-Soft release to a few testers, not released publicly. Game: Nuclear Nightmare V8.2.1 (build 26512322). UE4SS: v3.0.1-1181-g83330635.
+Built for the soft release but never handed out: 0.6.0 replaced it before any files were sent. Not released publicly. Game: Nuclear Nightmare V8.2.1 (build 26512322). UE4SS: v3.0.1-1181-g83330635.
 
 For players: nothing changes on the game's own maps. On a custom map built with Nucleus's map markers, Nucleus now does the setup the map needs on its own: the lobby countdown, the start positions, the game's real objects and enemies, the Journal's tasks and map, and day and night. A custom map is a pak and a `mod.json`, with no Lua of its own.
 
@@ -104,5 +104,5 @@ Not released publicly.
 
 - The core: a C++ DLL with weak object handles (`Nucleus_Ref`, `Nucleus_Deref`, `Nucleus_RefFree`), a LogicMods Blueprint pak with the `Nucleus_Call` channel, and Lua with the dependent bootstrap, `connect` and logging.
 
-[Unreleased]: https://github.com/NuclearNightmare-Community/nucleus/compare/v0.5.0...HEAD
+[0.6.0]: https://github.com/NuclearNightmare-Community/nucleus/releases/tag/v0.6.0
 [0.5.0]: https://github.com/NuclearNightmare-Community/nucleus/releases/tag/v0.5.0
