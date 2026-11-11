@@ -199,7 +199,7 @@ local function checkElement(el)
     if el.removed then return nil, "the element was removed" end
     if el.panel then return nil, "the element is inside panel '" .. el.panel.id .. "' (check the panel)" end
     if not el.visible then return nil, "the element is hidden (setVisible false)" end
-    if el.nearAbsent then return nil, "the element is collapsed (its near target is not drawn)" end
+    if el.nearAbsent then return nil, "the element is collapsed (its near target or journal region is not drawn)" end
     local w = el.ref and C.deref(el.ref)
     if el.place.host == "journal" then
         if not w then return nil, "the element is not attached (the Journal is closed)" end

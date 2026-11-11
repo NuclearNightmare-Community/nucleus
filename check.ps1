@@ -156,6 +156,16 @@ foreach ($p in 'menu1', 'match1') {
                     'ui-journal-isopen-ok', 'ui-journal-find-arg', 'ui-journal-find-ok', 'ui-journal-watch-ok', 'ui-journal-stats',
                     'ui-create-journal-near', 'ui-place-host', 'ui-place-host-num', 'ui-place-host-journal-near', 'ui-place-host-journal-ok',
                     'ui-isshown-journal', 'off-ui-journal-watch', 'off-ui-journal-unwatch', 'off-ui-journal-isopen', 'off-ui-journal-find',
+                    # story 19: journal regions (the I/O matrix's error rows; a corner in and near each region), elements(host)
+                    'ui-elements-bogus', 'ui-elements-two', 'ui-elements-hud', 'ui-elements-journal',
+                    'ui-place-region-hud', 'ui-place-inset-hud', 'ui-place-region-spine', 'ui-place-region-num', 'ui-place-inset-huge',
+                    'ui-place-inset-num', 'ui-place-near-region-key', 'ui-place-near-inset-key', 'ui-place-abs-region-key', 'ui-place-abs-inset-key',
+                    'ui-place-near-hud-map', 'ui-place-journal-near-corner',
+                    'ui-place-region-ammo', 'ui-place-region-binder', 'ui-place-region-cover', 'ui-place-region-map',
+                    'ui-place-region-map-header', 'ui-place-region-match', 'ui-place-region-page-left', 'ui-place-region-page-right',
+                    'ui-place-region-tasks', 'ui-place-near-ammo', 'ui-place-near-binder', 'ui-place-near-cover', 'ui-place-near-map',
+                    'ui-place-near-map-header', 'ui-place-near-match', 'ui-place-near-page-left', 'ui-place-near-page-right',
+                    'ui-place-near-tasks',
                     # story 14: panels and their reordering (AC 5), and the panel functions off the game thread
                     'ui-panel-create-none', 'ui-panel-create-unknown', 'ui-panel-create-noid', 'ui-panel-layout-grid', 'ui-panel-layout-num',
                     'ui-panel-gap-3', 'ui-panel-gap-huge', 'ui-panel-place-str', 'ui-panel-style-purple', 'ui-panel-create-ok', 'ui-panel-in-panel',
@@ -398,8 +408,17 @@ $journal = $started + @(
     "#12|\[$T\] OK JCLICK \S+ a real click on 'jb1' ran its onClick exactly once"
     "\[$T\] OK JCLICKALL 12 real clicks on 'jb1' over 12 opens"
     "\[$T\] JSTEPS 10 opens, average per step: canvas \d+; "
-    "#12|\[$T\] OK JCORNER "
+    "#12|\[$T\] OK JCORNER \S+ 'jt' in the cover's top-right, 16 inward"
     "#12|\[$T\] OK JCLOSED "
+    # Story 19: the Journal regions, created after the ten opens and checked on the revive and map-change opens.
+    "\[$T\] OK JRPENDING the region elements are created while the map is closed \(11\)"
+    "#2|\[$T\] OK JRCOLLAPSE (revive|match2)-open no measured-region element shown while its region was not painted"
+    "#2|\[$T\] OK JRSHOWN (revive|match2)-open every region element shown "
+    "#2|\[$T\] JREGION (revive|match2)-open canvas \(0,0\)-\(\d+,10\d\d\)"
+    "#18|\[$T\] JREGION (revive|match2)-open region \S+ \(-?\d+,-?\d+\)-\(\d+,\d+\)"
+    "#2|\[$T\] OK JRNEAR (revive|match2)-open 'jn' under the map square"
+    "#2|\[$T\] OK JRCOVER (revive|match2)-open 'jc' at the cover's bottom-right"
+    "#2|\[$T\] OK JRCORNERS (revive|match2)-open 9 of 9 'jr-<region>' texts"
     "\[$T\] OK JEVENTS 10 opens: opened=10 closed=10 lost=0"
     "\[$T\] OK JONE revive-open "
     "\[$T\] OK JONE match2-open "

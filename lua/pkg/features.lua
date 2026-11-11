@@ -18,6 +18,7 @@ local SKIP = { name = true, version = true, log = true, has = true, features = t
 -- Hand-named features. Add-only: a name, once shipped, stays (story 18: core only ever adds).
 M.HAND = {
     "map.setup", -- map service (0.5.0): the nucleus.map.setup shared variable, outside the api table (user 2026-11-08)
+    "ui.journal.regions", -- story 19 (0.6.0): named Journal regions in core.ui.place (region, inset, near = <region>) and elements("journal")
 }
 
 -- The UI part of the api table: path -> { module, function } (client.lua builds api.ui from this).

@@ -660,6 +660,10 @@ namespace
 	 *   <Core>_AbsTopLeft(Widget)          = LocalToAbsolute(geo, (0,0))
 	 *   <Core>_AbsBottomRight(Widget)      = LocalToAbsolute(geo, LocalSize(geo))
 	 *   <Core>_AbsToLocal(Widget, Absolute) = AbsoluteToLocal(geo, Absolute)
+	 *   <Core>_RectIn(Canvas, Widget, Frac) = AbsoluteToLocal(Canvas geo, LocalToAbsolute(Widget geo, LocalSize(Widget geo) * Frac))
+	 * _RectIn (story 19, journal regions) gives a point of Widget's rectangle in Canvas's local units (canvas units):
+	 * Frac (0,0) is its top-left, (1,1) its bottom-right. The measured journal regions sit inside box panels, so only
+	 * geometry knows them, and FGeometry isn't usable from Lua; one Vector2D return is the shape proven from Lua.
 	 */
 	void AddGeometry(UBlueprint* BP, const FString& Core)
 	{
@@ -700,6 +704,28 @@ namespace
 			G.Link(F.Entry, TEXT("Absolute"), Local, TEXT("AbsoluteCoordinate"));
 			G.Link(Local, PN_Ret, F.Result, PN_Ret);
 			G.Chain({F.Entry, Geo, Local, F.Result});
+		}
+		{
+			const FParams In = {{TEXT("Canvas"), ObjT(UWidget::StaticClass())}, {TEXT("Widget"), ObjT(UWidget::StaticClass())}, {TEXT("Frac"), Vec2T()}};
+			FFunc F = AddFunction(BP, FName(Core + TEXT("_RectIn")), In, {{PN_Ret, Vec2T()}});
+			FGraph G(BP, F.G);
+			UK2Node_CallFunction* Geo = G.Call(UWidget::StaticClass(), GET_FUNCTION_NAME_CHECKED(UWidget, GetCachedGeometry));
+			G.Link(F.Entry, TEXT("Widget"), Geo, PN_Self);
+			UK2Node_CallFunction* CanvasGeo = G.Call(UWidget::StaticClass(), GET_FUNCTION_NAME_CHECKED(UWidget, GetCachedGeometry));
+			G.Link(F.Entry, TEXT("Canvas"), CanvasGeo, PN_Self);
+			UK2Node_CallFunction* Size = G.Call(USlateBlueprintLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(USlateBlueprintLibrary, GetLocalSize));
+			G.Link(Geo, PN_Ret, Size, TEXT("Geometry"));
+			UK2Node_CallFunction* Mul = G.Call(UKismetMathLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, Multiply_Vector2DVector2D));
+			G.Link(Size, PN_Ret, Mul, TEXT("A"));
+			G.Link(F.Entry, TEXT("Frac"), Mul, TEXT("B"));
+			UK2Node_CallFunction* Abs = G.Call(USlateBlueprintLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(USlateBlueprintLibrary, LocalToAbsolute));
+			G.Link(Geo, PN_Ret, Abs, TEXT("Geometry"));
+			G.Link(Mul, PN_Ret, Abs, TEXT("LocalCoordinate"));
+			UK2Node_CallFunction* Local = G.Call(USlateBlueprintLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(USlateBlueprintLibrary, AbsoluteToLocal));
+			G.Link(CanvasGeo, PN_Ret, Local, TEXT("Geometry"));
+			G.Link(Abs, PN_Ret, Local, TEXT("AbsoluteCoordinate"));
+			G.Link(Local, PN_Ret, F.Result, PN_Ret);
+			G.Chain({F.Entry, Geo, CanvasGeo, Size, Mul, Abs, Local, F.Result});
 		}
 	}
 

@@ -541,31 +541,36 @@ attachChildren = function(p, pw, hostObj, fresh, reason, report, steps)
     end
 end
 
--- Places every live element of one host: corners re-stack once each, near and absolute elements on their own.
+-- The journal context (story 19 regions) for one call on a host, or nil on the HUD.
+local function ctxFor(host, obj, canvas) return host == "journal" and P.journalCtx(obj, canvas) or nil end
+
+-- Places every live element of one host: each corner stack (story 19: per region) re-stacks once, near and absolute
+-- elements on their own. Journal regions are read at most once (one context).
 local function placeAll(host, hostObj, canvas, prepass)
     local live = liveIn(canvas)
-    local corners = {}
+    local ctx = ctxFor(host, hostObj, canvas)
+    local stacks = {}
     for _, el in ipairs(C.order) do
         if not el.removed and el.place.host == host then
             local w = live(el)
             if w then
-                if el.place.corner then corners[el.place.corner] = true
+                if el.place.corner then stacks[P.skeyOf(el.place.corner, el.place.region)] = el.place
                 else
-                    local ok, err = pcall(P.apply, el, w, hostObj, live, prepass)
+                    local ok, err = pcall(P.apply, el, w, hostObj, live, prepass, ctx)
                     if not ok then C.warnOnce("place:" .. el.id, "place '%s' failed: %s", el.id, tostring(err):match("^[^\n]*")) end
                 end
             end
         end
     end
-    for corner in pairs(corners) do
-        local ok, err = pcall(P.restack, host, corner, live, prepass)
-        if not ok then C.warnOnce("stack:" .. host .. corner, "stacking %s %s failed: %s", host, corner, tostring(err):match("^[^\n]*")) end
+    for k, pl in pairs(stacks) do
+        local ok, err = pcall(P.restack, host, pl.corner, live, prepass, pl.region, ctx)
+        if not ok then C.warnOnce("stack:" .. host .. k, "stacking %s %s failed: %s", host, k, tostring(err):match("^[^\n]*")) end
     end
 end
 
 -- Can a size change of this element move another one? Only when a later visible element shares its corner stack
--- (same host, same corner; the last element's height moves nothing). Near and absolute positions don't depend on the
--- element's own size. A panel's child moves what its panel moves.
+-- (same host, corner and region; the last element's height moves nothing). Near and absolute positions don't depend
+-- on the element's own size. A panel's child moves what its panel moves.
 local function sizeMatters(el)
     if el.panel then return el.visible and sizeMatters(el.panel) end
     local corner = el.place.corner
@@ -573,16 +578,17 @@ local function sizeMatters(el)
     local after = false
     for _, e in ipairs(C.order) do
         if e == el then after = true
-        elseif after and not e.removed and e.visible and e.place.corner == corner and e.place.host == el.place.host then return true end
+        elseif after and not e.removed and e.visible and e.place.corner == corner and e.place.host == el.place.host
+            and e.place.region == el.place.region then return true end
     end
     return false
 end
 
 -- Story 12 (debug only): an element's re-place also moves the rest of its corner stack; check them all.
-local function checkCorner(host, corner, why)
+local function checkCorner(host, corner, why, region)
     if not C.debugOn() then return end
     for _, e in ipairs(C.order) do
-        if not e.removed and e.place.corner == corner and e.place.host == host then D.schedule(e, why) end
+        if not e.removed and e.place.corner == corner and e.place.host == host and e.place.region == region then D.schedule(e, why) end
     end
 end
 
@@ -599,15 +605,17 @@ end
 -- Re-places what one element's change can move: its corner's stack, or the element alone (a child: its panel).
 local function replace(el)
     if el.panel then return replace(el.panel) end
-    local obj, canvas = liveHost(el.place.host)
+    local host = el.place.host
+    local obj, canvas = liveHost(host)
     if not obj then return end
     local live = liveIn(canvas)
     local w = live(el)
+    local ctx = ctxFor(host, obj, canvas)
     if el.place.corner then
-        pcall(P.restack, el.place.host, el.place.corner, live, true)
-        checkCorner(el.place.host, el.place.corner, "re-stack")
+        pcall(P.restack, host, el.place.corner, live, true, el.place.region, ctx)
+        checkCorner(host, el.place.corner, "re-stack", el.place.region)
     elseif w then
-        local ok, err = pcall(P.apply, el, w, obj, live, true)
+        local ok, err = pcall(P.apply, el, w, obj, live, true, ctx)
         if not ok then C.warnOnce("place:" .. el.id, "place '%s' failed: %s", el.id, tostring(err):match("^[^\n]*")) end
         if C.debugOn() then D.schedule(el, "re-place") end
     end
@@ -615,11 +623,11 @@ end
 local function resized(el) if sizeMatters(el) then replace(el) end end
 X._resized = resized
 
-local function restackCorner(host, corner)
+local function restackCorner(host, corner, region)
     if not corner then return end
-    checkCorner(host, corner, "re-stack")
+    checkCorner(host, corner, "re-stack", region)
     local obj, canvas = liveHost(host)
-    if obj then pcall(P.restack, host, corner, liveIn(canvas), true) end
+    if obj then pcall(P.restack, host, corner, liveIn(canvas), true, region, ctxFor(host, obj, canvas)) end
 end
 
 -- Story 13: the line of the last Journal event, logged on a later tick (an open Journal's, or the next HUD tick once
@@ -830,6 +838,7 @@ local function onJournal(j, info)
         local canvas = J._canvasOf(j)
         if not canvas then return end -- J._canvasOf warned once; the elements stay pending until the next open
         local tCanvas = C.micros() - t0
+        P.journalReset() -- story 19: a new Journal; its measured regions are unknown until its first paint
         -- A new Journal holds none of our widgets, so nothing is scanned. Only when the same Journal comes back
         -- (never seen on V8.1.2) are its children scanned for our tags, so nothing is duplicated.
         local byId = {}
@@ -882,10 +891,12 @@ local function onJournal(j, info)
         -- closed or lost: the Journal is out of the viewport for good (each open is a new one). Its widgets are never
         -- touched, only our handles to them are freed; the elements keep their state for the next open.
         local freed = 0
+        P.journalReset()
         forHost("journal", function(el)
             if el.ref then freed = freed + 1 end
             freeRef(el)
             el.attached, el.slotKey, el.appliedVis, el.stackHeight, el.padKey = false, nil, nil, nil, nil
+            el.nearRect = nil
         end)
         if freed > 0 and C.debugOn() then journalLog = { text = string.format("ui journal %s: freed %d widget handle(s) (%s)", info.event, freed, tostring(info.reason)) } end
     end
@@ -894,7 +905,9 @@ end
 local function liveRef(el) return el.ref and C.deref(el.ref) or nil end
 local function onJournalTick(j)
     if journalLog then flushJournalLog() return end
-    P.tick("journal", j, liveRef) -- corner stacks re-measured for a few ticks after the open (Slate measures late)
+    -- Corner stacks re-measured for a few ticks after the open (Slate measures late); story 19: measured regions
+    -- re-read until valid, then every 4 ticks.
+    P.tick("journal", j, liveRef)
 end
 
 local journalWatching = false
@@ -1017,7 +1030,7 @@ local function detach(el)
         el.panel = nil
         if w then applyGaps(p); resized(p) end
     elseif w and el.place.corner then
-        restackCorner(el.place.host, el.place.corner)
+        restackCorner(el.place.host, el.place.corner, el.place.region)
     end
 end
 
@@ -1041,7 +1054,7 @@ local function removeEl(el, underRemovedPanel)
         for i, ch in ipairs(p.children) do if ch == el then table.remove(p.children, i) break end end
         if w then applyGaps(p); resized(p) end
     elseif w and not el.panel and el.place.corner then
-        restackCorner(el.place.host, el.place.corner)
+        restackCorner(el.place.host, el.place.corner, el.place.region)
     end
 end
 X._remove = removeEl
@@ -1082,7 +1095,7 @@ function X._setVisible(el, visible)
         if el.panel then
             applyGaps(el.panel) -- the first visible child has no gap before it
             resized(el.panel)   -- the panel's size changed: what follows it in its corner moves
-        elseif el.place.corner then restackCorner(el.place.host, el.place.corner) -- a hidden element takes no space
+        elseif el.place.corner then restackCorner(el.place.host, el.place.corner, el.place.region) -- a hidden element takes no space
         elseif visible and C.debugOn() then D.schedule(el, "shown") end
     end
 end
@@ -1205,7 +1218,7 @@ P.place = function(h, intent)
         attachNow(el, "place on host " .. pl.host)
         return
     end
-    local oldHost, oldCorner = el.place.host, el.place.corner
+    local oldHost, oldCorner, oldRegion = el.place.host, el.place.corner, el.place.region
     if pl.host == "journal" then ensureJournal() end
     if oldHost ~= pl.host then
         detach(el)
@@ -1218,12 +1231,12 @@ P.place = function(h, intent)
     if liveWidget(el) then
         local obj, canvas = liveHost(pl.host)
         if obj then
-            if oldCorner and oldCorner ~= pl.corner then
-                pcall(P.restack, pl.host, oldCorner, liveIn(canvas), true)
-                checkCorner(pl.host, oldCorner, "re-stack")
+            if oldCorner and (oldCorner ~= pl.corner or oldRegion ~= pl.region) then
+                pcall(P.restack, pl.host, oldCorner, liveIn(canvas), true, oldRegion, ctxFor(pl.host, obj, canvas))
+                checkCorner(pl.host, oldCorner, "re-stack", oldRegion)
             end
             placeAll(pl.host, obj, canvas, true)
-            if pl.corner then checkCorner(pl.host, pl.corner, "place") elseif C.debugOn() then D.schedule(el, "place") end
+            if pl.corner then checkCorner(pl.host, pl.corner, "place", pl.region) elseif C.debugOn() then D.schedule(el, "place") end
         end
     elseif not el.attached then
         attachNow(el, "place")
