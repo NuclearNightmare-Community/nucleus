@@ -412,7 +412,9 @@ $journal = $started + @(
     "#12|\[$T\] OK JCLOSED "
     # Story 19: the Journal regions, created after the ten opens and checked on the revive and map-change opens.
     "\[$T\] OK JRPENDING the region elements are created while the map is closed \(11\)"
-    "#2|\[$T\] OK JRCOLLAPSE (revive|match2)-open no measured-region element shown while its region was not painted"
+    # Story 20: exact- and map-region elements are drawn before the poll's opened; content-sized ones stay collapsed.
+    "#2|\[$T\] OK JRFIRST (revive|match2)-open 7 of 7 exact- and map-region elements shown with a valid drawn rect at the opened event"
+    "#2|\[$T\] OK JRCOLLAPSE (revive|match2)-open no content-sized-region element shown while its region was not painted"
     "#2|\[$T\] OK JRSHOWN (revive|match2)-open every region element shown "
     "#2|\[$T\] JREGION (revive|match2)-open canvas \(0,0\)-\(\d+,10\d\d\)"
     "#18|\[$T\] JREGION (revive|match2)-open region \S+ \(-?\d+,-?\d+\)-\(\d+,\d+\)"
@@ -429,7 +431,9 @@ $journal = $started + @(
     "\[$T\] OK JKEYALL 12 of 12 opens by the real"
     "\[$T\] OK JTRACK "
     "#1|\[$T\] WARN journal watcher \d+: "
-    "\[$T\] DEBUG ui journal attach n=4 in \d+ us \(canvas \d+; 'jt' \d+ \(create \d+\); 'jb1' \d+ \(create \d+, in 'jpanel'\); 'jb2' \d+ \(create \d+, in 'jpanel'\); 'jpanel' \d+ \(create \d+, own -?\d+\); place \d+\): 'jt' created "
+    "\[$T\] DEBUG ui journal attach n=4 in \d+ us \(canvas \d+; 'jt' \d+ \(create \d+\); 'jb1' \d+ \(create \d+, in 'jpanel'\); 'jb2' \d+ \(create \d+, in 'jpanel'\); 'jpanel' \d+ \(create \d+, own -?\d+\); place \d+\): 'jt' created .*\(construct\)"
+    # Story 20: every open's elements were attached in the Journal's Construct, none at the poll's opened.
+    "!\[$T\] DEBUG ui journal attach .*\(Journal opened\)"
     "\[$T\] DEBUG ui journal closed: freed 4 widget handle\(s\)"
     "!\[$T\] ui journal attach left "
     "!\[$T\] WARN (?!journal watcher \d+: |$slowWarnOk)"

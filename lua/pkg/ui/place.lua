@@ -56,7 +56,8 @@ local ELEMENT_NAMES = "crosshair"
 -- Story 19: regions of the open Journal, reached from Journal_C.MapWidget (V8.2.1 tree). kind "exact": a direct child
 -- of the host canvas with stretched anchors (its slot gives the edges); "union": binder, edge by edge from the two page
 -- papers; "measured": a widget inside box panels (prop, then GetParent ups times, of class cls when given), measured
--- with <Core>_RectIn after the first paint.
+-- with <Core>_RectIn after the first paint; "computed" (story 20, map only): computed from the live slots before the
+-- first paint (P.mapRect), measured once painted (verify-once), measured throughout when it can't be computed.
 local REGIONS = {
     cover = { kind = "exact", prop = "NN_BinderCover", path = "MapWidget.NN_BinderCover",
         desc = "the dark binder cover the pages sit on (NN_BinderCover); exact" },
@@ -66,8 +67,8 @@ local REGIONS = {
         desc = "the right page paper: match, tasks, ammo (NN_RightFieldPaper); exact" },
     binder = { kind = "union", path = "MapWidget.NN_LeftFieldPaper + NN_RightFieldPaper",
         desc = "both pages with the spine: the outer edges of the two page papers; exact" },
-    map = { kind = "measured", prop = "MapUI", ups = 0, path = "MapWidget.MapUI",
-        desc = "the map square (MapUI in NN_FieldMapPlane, 736x611 at scale 1; zoom and pan never move it); measured" },
+    map = { kind = "computed", prop = "MapUI", ups = 0, path = "MapWidget.MapUI",
+        desc = "the map square (MapUI in NN_FieldMapPlane, 736x611 at scale 1; zoom and pan never move it); computed, verified once by measuring" },
     ["map-header"] = { kind = "measured", prop = "TextBlock_86", ups = 2, cls = "Border", path = "MapWidget.TextBlock_86 parent parent (Border)",
         desc = "the MAP / time / DAY bar above the map; measured" },
     match = { kind = "measured", prop = "StackBox_1", ups = 2, cls = "VerticalBox", path = "MapWidget.StackBox_1 parent parent (VerticalBox)",
@@ -297,10 +298,55 @@ function P.validRect(l, t, r, b)
     return r - l > 1 and b - t > 1
 end
 
+-- Story 20: the map square computed before the first paint, from the live slots of the left page's layout and the
+-- map box's shrink-only rule (one formula at every aspect). i = {
+--   W, H        canvas size (canvas units)
+--   an, off     HorizontalBox_1's stretched CanvasPanelSlot: an = { minX, minY, maxX, maxY }, off = { L, T, R, B }
+--   p3, f3      VerticalBox_3's HorizontalBoxSlot padding { L, T, R, B } and fill value
+--   p4, f4      the other HorizontalBox_1 child's padding and fill value
+--   ph          the header's VerticalBoxSlot padding { T, B }; hdr the header's desired height
+--   pm          the ScaleBox's VerticalBoxSlot padding { L, T, R, B }
+--   w0, h0      the SizeBox's width and height overrides }
+-- Returns the rect as edges (a = 0, absolute canvas units, like a measured one), or nil and why.
+function P.mapRect(i)
+    if type(i) ~= "table" then return nil, "no inputs" end
+    local nums = { W = i.W, H = i.H, hdr = i.hdr, w0 = i.w0, h0 = i.h0, f3 = i.f3, f4 = i.f4 }
+    for k, v in pairs(nums) do
+        if not finite(v) then return nil, k .. " is not a finite number" end
+        if v <= 0 then return nil, string.format("%s is %g (must be over 0)", k, v) end
+    end
+    local groups = { an = { "minX", "minY", "maxX", "maxY" }, off = { "L", "T", "R", "B" }, p3 = { "L", "T", "R", "B" },
+        p4 = { "L", "T", "R", "B" }, ph = { "T", "B" }, pm = { "L", "T", "R", "B" } }
+    for g, ks in pairs(groups) do
+        if type(i[g]) ~= "table" then return nil, g .. " is missing" end
+        for _, k in ipairs(ks) do
+            if not finite(i[g][k]) then return nil, g .. "." .. k .. " is not a finite number" end
+        end
+    end
+    local an, off, p3, p4, ph, pm = i.an, i.off, i.p3, i.p4, i.ph, i.pm
+    local L = an.minX * i.W + off.L
+    local T = an.minY * i.H + off.T
+    local R = an.maxX * i.W - off.R
+    local B = an.maxY * i.H - off.B
+    local free = (R - L) - (p3.L + p3.R + p4.L + p4.R)
+    local colW = free * i.f3 / (i.f3 + i.f4)
+    local colL, colT, colB = L + p3.L, T + p3.T, B - p3.B
+    local aL, aR = colL + pm.L, colL + colW - pm.R
+    local aT, aB = colT + ph.T + i.hdr + ph.B + pm.T, colB - pm.B
+    local aw, ah = aR - aL, aB - aT
+    if not (aw > 0 and ah > 0) then return nil, string.format("no room for the map (%gx%g)", aw, ah) end
+    local s = math.min(1, aw / i.w0, ah / i.h0)
+    local cx, cy = (aL + aR) / 2, (aT + aB) / 2
+    local hw, hh = i.w0 * s / 2, i.h0 * s / 2
+    return { l = { a = 0, o = cx - hw }, t = { a = 0, o = cy - hh }, r = { a = 0, o = cx + hw }, b = { a = 0, o = cy + hh } }, nil, s
+end
+
 -- ---- reading regions (game thread). A context is one journal callback's view: the live Journal, the host canvas
 -- (or nil: looked up on first use), and the regions read so far (each region is read at most once per context, so at
 -- most once per tick). Nothing in it outlives the callback.
-function P.journalCtx(j, canvas) return { j = j, canvas = canvas, rects = {}, why = {} } end
+-- prepaint (story 20): the context of the Journal's Construct, before its first paint; measured regions read as not
+-- painted yet without measuring.
+function P.journalCtx(j, canvas, prepaint) return { j = j, canvas = canvas, rects = {}, why = {}, prepaint = prepaint == true } end
 
 local function className(o)
     local ok, n = pcall(function() return o:GetClass():GetFName():ToString() end)
@@ -383,6 +429,14 @@ local function measuredRegion(ctx, name)
         w = p
     end
     if spec.cls and className(w) ~= spec.cls then return missing(name, "found a " .. tostring(className(w)) .. ", not a " .. spec.cls) end
+    return P._rectIn(ctx, w)
+end
+
+-- A widget's drawn rectangle in the host canvas's units (<Core>_RectIn), as edges; nil, "not painted yet" until it is
+-- valid. A pre-paint context (story 20: inside the Journal's Construct) never measures: nothing is painted there, and
+-- the ModActor lookup could miss.
+function P._rectIn(ctx, w)
+    if ctx.prepaint then return nil, "not painted yet" end
     local canvas = ctxCanvas(ctx)
     if not canvas then return nil, "no host canvas" end
     local cdo = cdoOf()
@@ -403,9 +457,129 @@ local function measuredRegion(ctx, name)
     return { l = { a = 0, o = l }, t = { a = 0, o = t }, r = { a = 0, o = r }, b = { a = 0, o = b } }
 end
 
+-- Story 20: the computed map's inputs, read live from the chain MapWidget.MapUI -> SizeBox (NN_FieldMapPlane) ->
+-- ScaleBox (NN_FieldMapViewport) -> VerticalBox (VerticalBox_3) -> HorizontalBox (HorizontalBox_1, stretched in the
+-- host canvas), plus the canvas size from the viewport. Every link and the layout's shape are checked (Design Notes
+-- of story 20); anything else returns nil and what was off. Never calls <Core>_RectIn, never a StaticFindObject miss.
+local SIZE_AUTO, SIZE_FILL = 0, 1           -- ESlateSizeRule
+local ALIGN_FILL, ALIGN_CENTER = 0, 2       -- EHorizontalAlignment / EVerticalAlignment
+local STRETCH_TO_FIT, DOWN_ONLY = 2, 1      -- EStretch::ScaleToFit, EStretchDirection::DownOnly
+local WLL_PATH = "/Script/UMG.Default__WidgetLayoutLibrary"
+
+local function parentOf(w, cls)
+    local okP, p = pcall(C.call0, w, "GetParent")
+    if not (okP and C.valid(p)) then return nil, "the parent of a " .. tostring(className(w)) .. " is missing" end
+    local n = className(p)
+    if n ~= cls then return nil, string.format("found a %s where the chain needs a %s", tostring(n), cls) end
+    return p
+end
+local function pad(m)
+    return { L = tonumber(m.Left), T = tonumber(m.Top), R = tonumber(m.Right), B = tonumber(m.Bottom) }
+end
+-- A box slot in Fill size with Fill alignment both ways: its padding and fill value, or nil and why.
+local function fillSlot(w, slotCls, what)
+    local okS, s = pcall(C.prop, w, "Slot")
+    if not (okS and s ~= nil and className(s) == slotCls) then return nil, what .. " is not in a " .. slotCls end
+    local ok, rule, val, ha, va, p = pcall(function()
+        local sz = s.Size
+        return tonumber(sz.SizeRule), tonumber(sz.Value), tonumber(s.HorizontalAlignment), tonumber(s.VerticalAlignment), pad(s.Padding)
+    end)
+    if not ok then return nil, what .. "'s slot could not be read" end
+    if rule ~= SIZE_FILL then return nil, string.format("%s's size rule is %s, not Fill", what, tostring(rule)) end
+    if ha ~= ALIGN_FILL or va ~= ALIGN_FILL then return nil, string.format("%s's alignment is %s/%s, not Fill", what, tostring(ha), tostring(va)) end
+    return p, val
+end
+
+local function readMapInputs(ctx)
+    local mw = ctxMap(ctx)
+    if not mw then return nil, "no map page" end
+    local okU, mu = pcall(C.prop, mw, "MapUI")
+    if not (okU and C.valid(mu)) then return nil, "MapWidget.MapUI is missing" end
+    local sb, why = parentOf(mu, "SizeBox")
+    if not sb then return nil, why end
+    local sc; sc, why = parentOf(sb, "ScaleBox")
+    if not sc then return nil, why end
+    local vb; vb, why = parentOf(sc, "VerticalBox")
+    if not vb then return nil, why end
+    local hb; hb, why = parentOf(vb, "HorizontalBox")
+    if not hb then return nil, why end
+    local i = {}
+    -- HorizontalBox_1: stretched on both axes in a CanvasPanelSlot; two children, VerticalBox_3 first.
+    local okS, hs = pcall(C.prop, hb, "Slot")
+    if not (okS and hs ~= nil and className(hs) == "CanvasPanelSlot") then return nil, "the HorizontalBox is not in a CanvasPanelSlot" end
+    local okR, an, off = pcall(function() return hs:GetAnchors(), hs:GetOffsets() end)
+    if not (okR and an and off) then return nil, "the HorizontalBox's slot could not be read" end
+    i.an = { minX = an.Minimum.X, minY = an.Minimum.Y, maxX = an.Maximum.X, maxY = an.Maximum.Y }
+    i.off = { L = off.Left, T = off.Top, R = off.Right, B = off.Bottom }
+    if i.an.minX == i.an.maxX or i.an.minY == i.an.maxY then return nil, "the HorizontalBox is not stretched on both axes" end
+    local okC, n, c0, c1 = pcall(function() return hb:GetChildrenCount(), hb:GetChildAt(0), hb:GetChildAt(1) end)
+    if not (okC and n == 2 and C.valid(c0) and C.valid(c1)) then return nil, "the HorizontalBox has " .. tostring(n) .. " children, not 2" end
+    if c0:GetAddress() ~= vb:GetAddress() then return nil, "the map's VerticalBox is not the HorizontalBox's first child" end
+    i.p3, i.f3 = fillSlot(vb, "HorizontalBoxSlot", "the map's column")
+    if not i.p3 then return nil, i.f3 end
+    i.p4, i.f4 = fillSlot(c1, "HorizontalBoxSlot", "the right column")
+    if not i.p4 then return nil, i.f4 end
+    -- VerticalBox_3: the header (Auto) then the ScaleBox (Fill).
+    local okV, vn, h0w, h1w = pcall(function() return vb:GetChildrenCount(), vb:GetChildAt(0), vb:GetChildAt(1) end)
+    if not (okV and vn == 2 and C.valid(h0w) and C.valid(h1w)) then return nil, "the map's VerticalBox has " .. tostring(vn) .. " children, not 2" end
+    if h1w:GetAddress() ~= sc:GetAddress() then return nil, "the ScaleBox is not the VerticalBox's second child" end
+    local okH, hsl = pcall(C.prop, h0w, "Slot")
+    if not (okH and hsl ~= nil and className(hsl) == "VerticalBoxSlot") then return nil, "the header is not in a VerticalBoxSlot" end
+    local okHR, hrule, hp = pcall(function() return tonumber(hsl.Size.SizeRule), pad(hsl.Padding) end)
+    if not okHR then return nil, "the header's slot could not be read" end
+    if hrule ~= SIZE_AUTO then return nil, string.format("the header's size rule is %s, not Auto", tostring(hrule)) end
+    i.ph = { T = hp.T, B = hp.B }
+    local pm, why2 = fillSlot(sc, "VerticalBoxSlot", "the ScaleBox")
+    if not pm then return nil, why2 end
+    i.pm = pm
+    -- ScaleBox: ScaleToFit, DownOnly; its SizeBox centred, with both overrides set.
+    local okB, st, dir = pcall(function() return tonumber(sc.Stretch), tonumber(sc.StretchDirection) end)
+    if not (okB and st == STRETCH_TO_FIT and dir == DOWN_ONLY) then
+        return nil, string.format("the ScaleBox is stretch %s direction %s, not ScaleToFit/DownOnly", tostring(st), tostring(dir))
+    end
+    local okSS, ss = pcall(C.prop, sb, "Slot")
+    if not (okSS and ss ~= nil and className(ss) == "ScaleBoxSlot") then return nil, "the SizeBox is not in a ScaleBoxSlot" end
+    local okA, ha, va = pcall(function() return tonumber(ss.HorizontalAlignment), tonumber(ss.VerticalAlignment) end)
+    if not (okA and ha == ALIGN_CENTER and va == ALIGN_CENTER) then return nil, string.format("the SizeBox is aligned %s/%s, not centred", tostring(ha), tostring(va)) end
+    local okO, ow, oh, w0, h0 = pcall(function() return sb.bOverride_WidthOverride, sb.bOverride_HeightOverride, sb.WidthOverride, sb.HeightOverride end)
+    if not (okO and ow == true and oh == true) then return nil, "the SizeBox's width and height overrides are not both set" end
+    i.w0, i.h0 = tonumber(w0), tonumber(h0)
+    -- The header's height: a layout prepass, then its desired size.
+    local okD, hdr = pcall(function() h0w:ForceLayoutPrepass() return h0w:GetDesiredSize().Y end)
+    if not okD then return nil, "the header's height could not be read" end
+    i.hdr = tonumber(hdr)
+    -- The canvas size: the viewport's size over its scale.
+    local wll = C.found(WLL_PATH)
+    if not wll then return nil, "WidgetLayoutLibrary not found" end
+    local okW, vs, sc2 = pcall(function() return wll:GetViewportSize(ctx.j), wll:GetViewportScale(ctx.j) end)
+    if not (okW and vs) then return nil, "the viewport size could not be read" end
+    sc2 = tonumber(sc2)
+    if not finite(sc2) or sc2 <= 0 then return nil, "the viewport scale is " .. tostring(sc2) end
+    i.W, i.H = tonumber(vs.X) / sc2, tonumber(vs.Y) / sc2
+    return i
+end
+
+-- The computed map rect (edges) for this context, or nil and why. ctx.mapInputs keeps the inputs (the probe's line).
+local function computedMap(ctx)
+    local i, why = readMapInputs(ctx)
+    ctx.mapInputs = i
+    if not i then return nil, why end
+    return P.mapRect(i)
+end
+P._computedMap = computedMap
+
 -- Per open: which measured regions have been valid (re-read every tick until then), and the journal tick counter.
 local regionOk = {}
 local jtickNo = 0
+-- Story 20, per open: how the map region is read. "computed" until the drawn rect was valid and equal on two
+-- consecutive journal ticks (mapLastDrawn: the previous tick's drawn key), then "measured" (the drawn rect, story 19's
+-- cadence); "measured" at once when it can't be computed.
+local mapMode, mapLastDrawn = "computed", nil
+
+local function rectStr(r)
+    return string.format("(%.1f,%.1f)-(%.1f,%.1f)", r.l.o, r.t.o, r.r.o, r.b.o)
+end
+P._rectStr = rectStr
 
 local function readRegion(ctx, name)
     local kind = REGIONS[name].kind
@@ -417,9 +591,38 @@ local function readRegion(ctx, name)
         if not R then return nil, wr end
         return P.union(L, R)
     end
+    if kind == "computed" and mapMode == "computed" then
+        local r, why = computedMap(ctx)
+        if r then return r end
+        C.warnOnce("region-compute:" .. name, "journal region '%s' can't be computed (%s); it is measured instead (collapsed until painted)", name, tostring(why))
+        mapMode = "measured"
+    end
     local r, why = measuredRegion(ctx, name)
     regionOk[name] = r ~= nil or nil
     return r, why
+end
+
+-- Story 20: the computed map checked once against the drawn one. Called on every journal tick while the map is still
+-- computed and an element uses it: once the drawn rect is valid and equal on two consecutive ticks, it becomes the
+-- region (one WARN per Lua state when an edge differs by more than 1 unit) and this context's cached rect is replaced,
+-- so the tick re-places what it moves.
+local function verifyMap(ctx)
+    if mapMode ~= "computed" or ctx.prepaint then return end
+    local comp = P.region("map", ctx)
+    if mapMode ~= "computed" then return end -- it just turned out not computable
+    local okD, drawn = pcall(measuredRegion, ctx, "map")
+    if not (okD and drawn) then mapLastDrawn = nil return end
+    local key = P.rectKey(drawn)
+    if key ~= mapLastDrawn then mapLastDrawn = key return end
+    mapMode = "measured"
+    regionOk.map = true
+    if comp then
+        local off = math.max(math.abs(comp.l.o - drawn.l.o), math.abs(comp.t.o - drawn.t.o), math.abs(comp.r.o - drawn.r.o), math.abs(comp.b.o - drawn.b.o))
+        if off > 1 then
+            C.warnOnce("region-verify:map", "journal region 'map' computed %s but drawn %s (%.1f units apart); following the drawn rect", rectStr(comp), rectStr(drawn), off)
+        end
+    end
+    ctx.rects.map, ctx.why.map = drawn, nil
 end
 
 -- The region's rectangle in this context, or nil and why. Read once per context; never raises.
@@ -639,6 +842,7 @@ function P.journalReset()
     for k in pairs(stackRect) do stackRect[k] = nil end
     jtickNo = 0
     cdoMissed = false
+    mapMode, mapLastDrawn = "computed", nil -- story 20: computed again until verified on the new Journal
 end
 
 local function nearDrawn(hud, name)
@@ -652,14 +856,26 @@ local function nearDrawn(hud, name)
     return true
 end
 
-local function isMeasured(name) return name ~= nil and REGIONS[name] ~= nil and REGIONS[name].kind == "measured" end
+-- Regions read on journal ticks: measured ones, and the computed map (re-read every tick until verified, then measured).
+local function isMeasured(name)
+    local spec = name ~= nil and REGIONS[name] or nil
+    return spec ~= nil and (spec.kind == "measured" or spec.kind == "computed")
+end
 
 -- Journal regions on one journal tick: re-reads the measured regions that are due (each at most once: ctx caches) and
--- re-places what a changed rectangle moves.
+-- re-places what a changed rectangle moves. Story 20: first, the computed map's one check against the drawn rect.
 local function regionTick(j, live, ctx)
     jtickNo = jtickNo + 1
     local due = jtickNo % REGION_TICKS == 0
     local restacks = nil -- stack key -> an element of that stack
+    if mapMode == "computed" then
+        for _, el in ipairs(C.order) do
+            if not el.removed and el.place.host == "journal" and (el.place.near == "map" or el.place.region == "map") then
+                verifyMap(ctx)
+                break
+            end
+        end
+    end
     for _, el in ipairs(C.order) do
         if not el.removed and el.place.host == "journal" then
             local pl = el.place
@@ -769,4 +985,5 @@ P.place = nil
 P._GAP, P._CORNERS, P._GAP_NAMES = GAP, CORNERS, GAP_NAMES
 P._REGIONS, P._REGION_NAMES, P._regionOk = REGIONS, REGION_NAMES, regionOk
 function P._jtick() return jtickNo end
+function P._mapMode() return mapMode end
 return P
