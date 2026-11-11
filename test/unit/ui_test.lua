@@ -1120,7 +1120,7 @@ function regionTests() -- a function: the main chunk is at Lua's 200-locals limi
     ok(X.isShown(rc) and X.isShown(pc), "exact: shown before the first paint")
     ok(RECTIN_CALLS == 2, "measured: map read once in the open's placement (two RectIn calls)", RECTIN_CALLS)
     RECTIN_CALLS = 0
-    tick(); tick() -- the attach log line takes the first tick; then not painted: re-read every tick (map once for both elements)
+    tick() -- story 20: the attach line was written at opened; not painted: re-read every tick (map once for both elements)
     ok(RECTIN_CALLS == 2 and widgetOfId("nm").vis == 1, "measured: re-read every tick while invalid, once per region", RECTIN_CALLS)
     paint(jr)
     tick()
@@ -1552,6 +1552,318 @@ PN.remove(bp)
 ok(C.els.b1 == nil and C.els.bt == nil and #HOOKS == 1, "remove: the panel with its buttons; the hook stays registered")
 end
 buttonTests()
+
+-- ---------------------------------------------------------------- story 20: journal elements in the first frame
+function constructTests() -- a function: the main chunk is at Lua's 200-locals limit
+    -- pure: P.mapRect from the V8.2 slots (MapWidget.json: HorizontalBox_1's CanvasPanelSlot_8, HBox slot Right 100)
+    local function inputs(W, H, hdr)
+        return { W = W, H = H, hdr = hdr or 37, w0 = 736, h0 = 611, f3 = 1, f4 = 1,
+            an = { minX = 0.076562464, minY = 0.116666704, maxX = 0.93046874, maxY = 0.8138889 },
+            off = { L = 8.852921, T = 9.873833, R = 16.200806, B = 19.838684 },
+            p3 = { L = 0, T = 0, R = 100, B = 0 }, p4 = { L = 0, T = 0, R = 0, B = 0 }, ph = { T = 0, B = 0 }, pm = { L = 0, T = 0, R = 0, B = 0 } }
+    end
+    local function within(a, b, e) return math.abs(a - b) <= e end
+    local r, why, s = P.mapRect(inputs(1916, 1079))
+    ok(r and within(r.l.o, 165, 0.5) and within(r.t.o, 210.2, 0.5) and within(r.r.o, 901, 0.5) and within(r.b.o, 821.2, 0.5) and s == 1
+        and r.l.a == 0 and r.b.a == 0, "mapRect: 1916x1079, header 37 -> the drawn (165,210)-(901,821)", r and P._rectStr(r) or why)
+    -- the column and the area, independently: plane centred in the area below the header, at most 736x611
+    local function check(W, H, label, wantShrink)
+        local i = inputs(W, H)
+        local L, Rr = i.an.minX * W + i.off.L, i.an.maxX * W - i.off.R
+        local T, B = i.an.minY * H + i.off.T, i.an.maxY * H - i.off.B
+        local colW = (Rr - L - 100) / 2
+        local areaT = T + 37
+        local rr, _, sc = P.mapRect(i)
+        local w, h = rr.r.o - rr.l.o, rr.b.o - rr.t.o
+        ok(within(sc, math.min(1, colW / 736, (B - areaT) / 611), 1e-9) and within(w, 736 * sc, 1e-6) and within(h, 611 * sc, 1e-6)
+            and within((rr.l.o + rr.r.o) / 2, L + colW / 2, 1e-6) and within((rr.t.o + rr.b.o) / 2, (areaT + B) / 2, 1e-6)
+            and (sc < 1) == wantShrink, "mapRect: " .. label, string.format("s=%.4f %s", sc, P._rectStr(rr)))
+    end
+    check(2580, 1080, "2580x1080 (21:9): scale 1, centred in its column", false)
+    check(1728, 1080, "1728x1080 (16:10): shrinks (s < 1) to the column, centred", true)
+    check(1440, 1080, "1440x1080 (4:3): shrinks more, centred", true)
+    local bad = inputs(1916, 1079, 0)
+    ok(P.mapRect(bad) == nil, "mapRect: header 0 -> not computable")
+    bad = inputs(0 / 0, 1079)
+    ok(P.mapRect(bad) == nil, "mapRect: a NaN canvas -> not computable")
+    bad = inputs(1916, 1079); bad.p3.R = math.huge
+    ok(P.mapRect(bad) == nil, "mapRect: an infinite padding -> not computable")
+    bad = inputs(100, 100)
+    ok(P.mapRect(bad) == nil, "mapRect: no room -> not computable")
+
+    -- the live chain on fake Journals: MapUI -> SizeBox -> ScaleBox -> VerticalBox_3 -> HorizontalBox_1
+    local function cw(path, cls, parent)
+        local x = classed(obj({ children = {} }, path), cls)
+        x.GetParent = function() return parent end
+        x.GetChildrenCount = function(self) return #self.children end
+        x.GetChildAt = function(self, i) return self.children[i + 1] end
+        return x
+    end
+    local function boxSlot(cls, rule, padR) return classed({ Size = { SizeRule = rule, Value = 1 }, Padding = { Left = 0, Top = 0, Right = padR or 0, Bottom = 0 }, HorizontalAlignment = 0, VerticalAlignment = 0 }, cls) end
+    PREPASS = 0
+    local function addChain(j)
+        classed(j, "Journal_C")
+        local mw, p = j.MapWidget, j.__path .. ".WidgetTree_1."
+        local hb = cw(p .. "HorizontalBox_1", "HorizontalBox")
+        hb.Slot = canvasSlot(0.076562464, 0.116666704, 0.93046874, 0.8138889)
+        hb.Slot.off = { Left = 8.852921, Top = 9.873833, Right = 16.200806, Bottom = 19.838684 }
+        local vb = cw(p .. "VerticalBox_3", "VerticalBox", hb)
+        vb.Slot = boxSlot("HorizontalBoxSlot", 1, 100)
+        local vb4 = cw(p .. "VerticalBox_4", "VerticalBox", hb)
+        vb4.Slot = boxSlot("HorizontalBoxSlot", 1)
+        hb.children = { vb, vb4 }
+        local hdr = cw(p .. "Border", "Border", vb)
+        hdr.Slot = boxSlot("VerticalBoxSlot", 0)
+        hdr.ForceLayoutPrepass = function() PREPASS = PREPASS + 1 end
+        hdr.GetDesiredSize = function() return vec(755, 37) end
+        local sc = cw(p .. "NN_FieldMapViewport", "ScaleBox", vb)
+        sc.Slot = boxSlot("VerticalBoxSlot", 1)
+        sc.Stretch, sc.StretchDirection = 2, 1
+        vb.children = { hdr, sc }
+        local sb = cw(p .. "NN_FieldMapPlane", "SizeBox", sc)
+        sb.Slot = classed({ HorizontalAlignment = 2, VerticalAlignment = 2 }, "ScaleBoxSlot")
+        sb.WidthOverride, sb.HeightOverride, sb.bOverride_WidthOverride, sb.bOverride_HeightOverride = 736, 611, true, true
+        mw.MapUI.GetParent = function() return sb end
+        -- the Journal's own frames (Journal.json): CanvasPanel_17 (root) -> WidgetSwitcher_0 (CanvasPanelSlot_0,
+        -- stretched, offsets L 3.21 T 1.81 R 2.89 B 0.24) -> MapWidget (WidgetSwitcherSlot, Fill, no padding)
+        local jroot = cw(j.__path .. ".WidgetTree.CanvasPanel_17", "CanvasPanel")
+        j.WidgetTree = { RootWidget = jroot }
+        local sw = j.WidgetSwitcher_0
+        classed(sw, "WidgetSwitcher")
+        sw.GetParent = function() return jroot end
+        sw.Slot = canvasSlot(0, 0, 1, 1)
+        sw.Slot.off = { Left = 3.2112427, Top = 1.8057861, Right = 2.8947754, Bottom = 0.23620605 }
+        mw.GetParent = function() return sw end
+        mw.Slot = classed({ HorizontalAlignment = 0, VerticalAlignment = 0, Padding = { Left = 0, Top = 0, Right = 0, Bottom = 0 } }, "WidgetSwitcherSlot")
+        classed(mw, "MapWidget_C")
+        mw.chain = { hb = hb, vb = vb, sc = sc, sb = sb, hdr = hdr, sw = sw, jroot = jroot }
+        return j
+    end
+    -- the raw viewport: the map page canvas (1916x1079) plus WidgetSwitcher_0's offsets (6.106 x 2.042)
+    local VP = { w = 1916 + 6.1060181, h = 1079 + 2.0419922, s = 1 }
+    obj({ GetViewportSize = function() return vec(VP.w, VP.h) end, GetViewportScale = function() return VP.s end }, "/Script/UMG.Default__WidgetLayoutLibrary")
+    -- the hook: the Journal class loads through GetAsset; its Construct function is then found (a hit)
+    local JCLASS = obj({}, "/Game/Graphics/Journal/Journal.Journal_C")
+    local JFN = obj({}, "/Game/Graphics/Journal/Journal.Journal_C:Construct")
+    local CPATH = "/Game/Graphics/Journal/Journal.Journal_C:Construct"
+    local function constructHooks() local n = 0 for _, hk in ipairs(HOOKS) do if hk.path == CPATH then n = n + 1 end end return n end
+    local function construct(getter)
+        for _, hk in ipairs(HOOKS) do if hk.path == CPATH then hk.fn({ get = getter }) end end
+    end
+    local function constructJ(j) construct(function() return j end) end
+    local helpers = objects["/Script/AssetRegistry.Default__AssetRegistryHelpers"]
+    local getAsset = helpers.GetAsset
+    local assets = 0
+    helpers.GetAsset = function(...) assets = assets + 1 return getAsset(...) end
+    local creates = 0
+    local create = WBL.Create
+    WBL.Create = function(...) creates = creates + 1 return create(...) end
+    local sfo, misses = StaticFindObject, 0
+    StaticFindObject = function(path) local o = sfo(path) if o == INVALID_SFO then misses = misses + 1 end return o end
+
+    -- RegisterHook failing: one WARN; the poll path attaches as before
+    local kn = X.create{ id = "kn", text = "under the map", place = { host = "journal", near = "map", side = "below", gap = "tight" } }
+    local kc = X.create{ id = "kc", text = "c", place = { host = "journal", corner = "bottom-right" } }
+    local kh = X.create{ id = "kh", text = "h", place = { host = "journal", corner = "top-left", region = "map-header", inset = "tight" } }
+    local reg = RegisterHook
+    RegisterHook = function() error("hook refused") end
+    X._constructHookRecheck(); tick()
+    ok(countLogs("^WARN journal elements: RegisterHook%(/Game/Graphics/Journal/Journal%.Journal_C:Construct%) failed: .*hook refused; they attach when the poll sees the Journal") == 1
+        and constructHooks() == 0, "construct hook: RegisterHook failing -> one WARN")
+    local jp = addChain(openNew(40))
+    tick()
+    ok(tagsIn(canvasOfJ(jp)):find("kc", 1, true) and tagsIn(canvasOfJ(jp)):find("kn", 1, true), "construct hook: none -> the poll attaches at opened", tagsIn(canvasOfJ(jp)))
+    ok(countLogs("^DEBUG ui journal attach n=%d+ in %d+ us .*%(Journal opened%)$") >= 1, "construct hook: none -> the attach line says Journal opened")
+    jp.inViewport = false; tick()
+    RegisterHook = reg
+    X._constructHookRecheck(); tick()
+    ok(constructHooks() == 1, "construct hook: registered from the poll tick", constructHooks())
+    X._constructHookRecheck(); tick()
+    ok(constructHooks() == 1, "construct hook: the same function (address) is not hooked twice", constructHooks())
+
+    -- a real open: Construct (not in the viewport yet), then the poll's opened
+    local j1 = addChain(newJournal(41)); created(j1)
+    local a0, m0, r0, c0 = assets, misses, RECTIN_CALLS, creates
+    constructJ(j1)
+    local cv = canvasOfJ(j1)
+    ok(assets == a0 and misses == m0 and RECTIN_CALLS == r0, "construct: no GetAsset, no StaticFindObject miss, no RectIn in the hook", (assets - a0) .. "/" .. (misses - m0) .. "/" .. (RECTIN_CALLS - r0))
+    ok(creates - c0 == 3 and tagsIn(cv):find("kc", 1, true) and tagsIn(cv):find("kh", 1, true) and tagsIn(cv):find("kn", 1, true), "construct: every element attached in the hook", tagsIn(cv))
+    local wn = widgetOfId("kn")
+    ok(wn.vis == 4 and wn.Slot.alignment.X == 0.5 and within(wn.Slot.position.X, 533.3, 0.5) and within(wn.Slot.position.Y, 821.2 + 8, 0.5),
+        "construct: near map placed from the computed rect, shown", wn.vis .. " " .. wn.Slot.position.X .. "," .. wn.Slot.position.Y)
+    ok(widgetOfId("kc").vis == 4 and widgetOfId("kc").Slot.anchors.Minimum.X == 0.959, "construct: an exact-region corner placed, shown")
+    ok(widgetOfId("kh").vis == 1, "construct: a content-sized region element collapsed until measured")
+    ok(countLogs("ui journal attach n=3 .*%(construct%)") == 0, "construct: no attach line inside the hook")
+    -- the poll's opened: no reset, no re-attach, no re-place; the attach line now, reason construct
+    P._regionOk.sentinel = true
+    local slotKey, uo = C.els.kn.slotKey, C.stats.uobjectCalls
+    j1.inViewport = true
+    c0 = creates
+    tick()
+    ok(creates == c0 and P._regionOk.sentinel == true and C.els.kn.slotKey == slotKey and C.stats.uobjectCalls == uo, "opened after construct: no re-attach, no reset, no re-place", (creates - c0) .. " " .. tostring(P._regionOk.sentinel) .. " " .. (C.stats.uobjectCalls - uo))
+    ok(countLogs("^DEBUG ui journal attach n=3 in %d+ us %(canvas %d+; 'kn' .*%): 'kn' created .*%(construct%)$") == 1, "opened after construct: the attach line, reason construct")
+    P._regionOk.sentinel = nil
+    ok(X.isShown(kn) and X.isShown(kc) and not X.isShown(kh), "opened after construct: shown as placed")
+    -- verify once: the drawn rect equal on two ticks, within 1 unit -> no WARN, the drawn rect from then on
+    local mp = j1.MapWidget.parts
+    RECTS[mp.map] = R(165, 210, 901, 821)
+    RECTS[mp["map-header"]] = R(156, 136, 911, 173)
+    tick()
+    ok(P._mapMode() == "computed" and within(widgetOfId("kn").Slot.position.Y, 829.2, 0.5) and widgetOfId("kh").vis == 4, "verify: one drawn read is not enough; the content-sized element shows once measured")
+    tick()
+    ok(P._mapMode() == "measured" and widgetOfId("kn").Slot.position.Y == 821 + 8, "verify: two equal drawn reads -> the drawn rect (a sub-unit move)", widgetOfId("kn").Slot.position.Y)
+    ok(countLogs("computed .* but drawn") == 0, "verify: within 1 unit -> no WARN")
+    -- Construct twice for the same Journal: no second widget
+    c0 = creates
+    local n0 = #cv.children
+    constructJ(j1)
+    ok(creates == c0 and #cv.children == n0, "construct twice: no second widget", (creates - c0) .. " " .. (#cv.children - n0))
+
+    -- the next open: Construct of a new Journal before the poll saw the old one close -> closed keeps the new widgets
+    j1.inViewport = false
+    local j2 = addChain(newJournal(42)); created(j2)
+    constructJ(j2)
+    j2.inViewport = true
+    tick() -- closed (j1)
+    local w2 = widgetOfId("kn")
+    ok(w2 and w2.parent == canvasOfJ(j2) and C.els.kn.ref ~= nil, "closed of the old Journal: the new Journal's widgets keep their handles")
+    c0 = creates
+    tick() -- opened (j2)
+    ok(creates == c0 and X.isShown(kn) and X.isShown(kc), "opened (j2): reused, shown", creates - c0)
+    -- drawn != computed by more than 1 (after two equal reads): one WARN with both rects, re-placed at the drawn rect
+    RECTS[j2.MapWidget.parts.map] = R(200, 250, 936, 861)
+    tick(); tick()
+    ok(countLogs("^WARN journal region 'map' computed %(165%.3,210%.1%)%-%(901%.3,821%.1%) but drawn %(200%.0,250%.0%)%-%(936%.0,861%.0%)") == 1
+        and widgetOfId("kn").Slot.position.Y == 861 + 8, "verify: drawn differs by more than 1 -> one WARN with both rects, re-placed", widgetOfId("kn").Slot.position.Y)
+    j2.inViewport = false; tick()
+
+    -- hook bodies that return at once: nil, not a Journal, remote or no owner, no MapWidget
+    c0 = creates
+    construct(function() return nil end)
+    construct(function() return HUDS[#HUDS] end)
+    local jr = addChain(newJournal(43)); created(jr)
+    jr.GetOwningPlayer = function() return obj({ IsLocalController = function() return false end }) end
+    constructJ(jr)
+    jr.GetOwningPlayer = function() return nil end
+    constructJ(jr)
+    local jm = classed(newJournal(44), "Journal_C"); created(jm)
+    jm.MapWidget = nil
+    constructJ(jm)
+    ok(creates == c0 and #canvasOfJ(jr).children == 0, "construct: nil, a HUD, a remote owner, no owner, no MapWidget -> nothing attached", creates - c0)
+    ok(countLogs("^WARN the Journal has no MapWidget") == 1, "construct: no MapWidget -> _canvasOf's one WARN")
+    -- a context that raises: caught, one WARN
+    construct(function() error("bad context") end)
+    construct(function() error("bad context") end)
+    ok(countLogs("^WARN journal Construct hook failed: .*bad context") == 1, "construct: a raising body -> one WARN")
+
+    -- attach raising inside the hook: caught; the poll attaches it at opened
+    local j3 = addChain(newJournal(45)); created(j3)
+    WBL.Create = function() error("create refused") end
+    constructJ(j3)
+    WBL.Create = function(...) creates = creates + 1 return create(...) end
+    ok(#canvasOfJ(j3).children == 0 and countLogs("^WARN attach kn: .*create refused") == 1, "construct: attach raising -> caught, one WARN")
+    j3.inViewport = true; tick()
+    ok(tagsIn(canvasOfJ(j3)):find("kn", 1, true) and X.isShown(kn), "construct: attach raising -> attached at opened", tagsIn(canvasOfJ(j3)))
+    j3.inViewport = false; tick()
+
+    -- a class not cached: left to opened (GetAsset there), never loaded in the hook
+    kill(TEXTCLASS)
+    local j4 = addChain(newJournal(46)); created(j4)
+    a0 = assets
+    constructJ(j4)
+    ok(assets == a0 and #canvasOfJ(j4).children == 0, "uncached class: nothing attached in the hook, no GetAsset", assets - a0)
+    TEXTCLASS.__alive = true; objects[TEXTCLASS.__path] = TEXTCLASS
+    j4.inViewport = true; tick()
+    ok(tagsIn(canvasOfJ(j4)):find("kn", 1, true) and X.isShown(kn), "uncached class: attached at opened")
+    j4.inViewport = false; tick()
+
+    -- the chain broken (the ScaleBox retyped): map measured, one WARN per Lua state, collapsed until painted
+    local j5 = addChain(newJournal(47)); created(j5)
+    classed(j5.MapWidget.chain.sc, "Overlay")
+    constructJ(j5)
+    local _, why5 = P._computedMap(P.journalCtx(j5, canvasOfJ(j5), true))
+    ok(widgetOfId("kn").vis == 1 and countLogs("^WARN journal region 'map' can't be computed %(.*%); it is measured instead %(collapsed until painted%)") == 1
+        and why5 == "found a Overlay where the chain needs a ScaleBox", "chain broken: the map element collapsed until painted; one WARN per Lua state (the region tests' chainless Journals gave it)", why5)
+    j5.inViewport = true; tick()
+    RECTS[j5.MapWidget.parts.map] = R(165, 210, 901, 821); tick()
+    ok(widgetOfId("kn").vis == 4 and widgetOfId("kn").Slot.position.Y == 829, "chain broken: measured once painted")
+    j5.inViewport = false; tick()
+    local j6 = addChain(newJournal(48)); created(j6)
+    classed(j6.MapWidget.chain.sc, "Overlay")
+    constructJ(j6)
+    ok(countLogs("can't be computed") == 1, "chain broken: still one WARN on the next Journal")
+    j6.inViewport = true; tick(); j6.inViewport = false; tick()
+    -- a layout of another shape (a third child in HorizontalBox_1): not computable either, no new WARN (once per state)
+    local j7 = addChain(newJournal(49)); created(j7)
+    local ch = j7.MapWidget.chain
+    ch.hb.children[3] = ch.vb
+    local ctx7 = P.journalCtx(j7, canvasOfJ(j7), true)
+    local r7, why7 = P._computedMap(ctx7)
+    ok(r7 == nil and tostring(why7):find("3 children", 1, true), "chain: another shape -> not computable, why", why7)
+    ch.hb.children[3] = nil
+    ch.hdr.GetDesiredSize = function() return vec(755, 0) end
+    r7, why7 = P._computedMap(P.journalCtx(j7, canvasOfJ(j7), true))
+    ok(r7 == nil and tostring(why7):find("hdr is 0", 1, true), "chain: header height 0 -> not computable", why7)
+    ch.hdr.GetDesiredSize = function() return vec(755, 37) end
+    -- the canvas: the raw viewport less WidgetSwitcher_0's live slot offsets, not the viewport itself
+    local ctx8 = P.journalCtx(j7, canvasOfJ(j7), true)
+    local r8 = P._computedMap(ctx8)
+    ok(r8 and within(ctx8.mapInputs.W, 1916, 1e-3) and within(ctx8.mapInputs.H, 1079, 1e-3) and within(r8.l.o, 165.3, 0.1) and within(r8.t.o, 210.1, 0.1),
+        "canvas: viewport less WidgetSwitcher_0's offsets -> the drawn canvas and map", r8 and string.format("%.2fx%.2f %s", ctx8.mapInputs.W, ctx8.mapInputs.H, P._rectStr(r8)))
+    ch.sw.Slot.off.Left = 13.2112427
+    r8 = P._computedMap(P.journalCtx(j7, canvasOfJ(j7), true))
+    ok(r8 and within(r8.l.o, 162.4, 0.1), "canvas: offsets read live every time (10 more on the left: the canvas 10 narrower)", r8 and P._rectStr(r8))
+    ch.sw.Slot.off.Left = 3.2112427
+    VP.s = 2; VP.w, VP.h = VP.w * 2, VP.h * 2
+    local ctx9 = P.journalCtx(j7, canvasOfJ(j7), true)
+    P._computedMap(ctx9)
+    ok(ctx9.mapInputs and within(ctx9.mapInputs.W, 1916, 1e-3), "canvas: viewport size over its scale first, then the offsets")
+    VP.s = 1; VP.w, VP.h = VP.w / 2, VP.h / 2
+    local swSlot = ch.sw.Slot
+    ch.sw.Slot = canvasSlot(0.5, 0.5, 0.5, 0.5)
+    r8, why7 = P._computedMap(P.journalCtx(j7, canvasOfJ(j7), true))
+    ok(r8 == nil and tostring(why7):find("not stretched on both axes", 1, true), "canvas: a point-anchored WidgetSwitcher_0 -> not computable", why7)
+    ch.sw.Slot = classed({}, "GridSlot")
+    r8, why7 = P._computedMap(P.journalCtx(j7, canvasOfJ(j7), true))
+    ok(r8 == nil and tostring(why7):find("in a GridSlot, not a stretched slot", 1, true), "canvas: another slot type -> not computable", why7)
+    ch.sw.Slot = swSlot
+    j7.MapWidget.Slot.HorizontalAlignment = 2
+    r8, why7 = P._computedMap(P.journalCtx(j7, canvasOfJ(j7), true))
+    ok(r8 == nil and tostring(why7):find("WidgetSwitcherSlot's alignment is 2/0, not Fill", 1, true), "canvas: a centred switcher slot -> not computable", why7)
+    j7.MapWidget.Slot.HorizontalAlignment = 0
+    ch.sw.GetParent = function() return nil end
+    r8, why7 = P._computedMap(P.journalCtx(j7, canvasOfJ(j7), true))
+    ok(r8 == nil and tostring(why7):find("doesn't reach the Journal's root", 1, true), "canvas: a chain that misses the Journal's root -> not computable", why7)
+    ch.sw.GetParent = function() return ch.jroot end
+    ok(P._computedMap(P.journalCtx(j7, canvasOfJ(j7), true)) ~= nil, "canvas: restored -> computable")
+
+    -- button click hook: registered from the poll tick, never inside the Construct hook. Start as a Lua state with no
+    -- click hook yet (buttonTests registered one: drop it) and the button class not loaded.
+    local BN, CLICK = require("nucleus.ui.button"), C.CLICK_FN
+    local function clickHooks() local n = 0 for _, hk in ipairs(HOOKS) do if hk.path == CLICK then n = n + 1 end end return n end
+    for k = #HOOKS, 1, -1 do if HOOKS[k].path == CLICK then table.remove(HOOKS, k) end end
+    BN._S.hooked = false
+    kill(BUTTONCLASS)
+    local kb = BN.create{ id = "kb", label = "b", place = { host = "journal", corner = "top-right" }, onClick = function() end }
+    ok(clickHooks() == 0, "click hook: class not loaded -> none registered at create", clickHooks())
+    BUTTONCLASS.__alive = true; objects[BUTTONCLASS.__path] = BUTTONCLASS
+    ok(X._classOf("button") ~= nil, "click hook: the button class loaded and cached")
+    local jb = addChain(newJournal(50)); created(jb)
+    constructJ(jb)
+    ok(widgetOfId("kb") and widgetOfId("kb").parent == canvasOfJ(jb) and clickHooks() == 0,
+        "click hook: the button attached in Construct, no RegisterHook inside the hook", clickHooks())
+    X._constructHookRecheck(); tick()
+    ok(clickHooks() == 1 and BN._S.hooked == true, "click hook: registered once by the poll tick after Construct", clickHooks())
+    BN.remove(kb)
+    ok(X._inHook() == false, "construct: the hook flag is cleared")
+    for _, h in ipairs({ kn, kc, kh }) do X.remove(h) end
+    StaticFindObject = sfo
+    helpers.GetAsset = getAsset
+    WBL.Create = create
+    kill(JCLASS); kill(JFN)
+end
+INVALID_SFO = StaticFindObject("/nothing/at/all")
+constructTests()
 
 H.unwatch(token); H.unwatch(throws)
 ok(asyncUsed == 0, "poller: never LoopAsync or ExecuteInGameThread", asyncUsed)

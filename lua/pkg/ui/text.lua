@@ -205,6 +205,7 @@ local function tagOf(id) return TAG_PREFIX .. C.modTag .. ":" .. id end
 -- isn't loaded that misses, and a miss in the pinned UE4SS scans every object (4-5 ms per call on V8.1.2, twice per HUD
 -- event with two elements). GetAsset returns the loaded class at once and loads it otherwise.
 local classRefs = {}
+local inHookNow = function() return false end -- story 20: X._inHook, set below
 local function classOf(kind)
     local K = KIND[kind]
     local r = classRefs[kind]
@@ -214,6 +215,8 @@ local function classOf(kind)
         pcall(C.free, r)
         classRefs[kind] = nil
     end
+    -- Story 20: inside the Journal's Construct hook only a cached class is used: never GetAsset (a load there is fatal).
+    if inHookNow() then return nil end
     local t = C.pt()
     local helpers = StaticFindObject("/Script/AssetRegistry.Default__AssetRegistryHelpers")
     local ok, got = pcall(function()
@@ -427,6 +430,7 @@ local function attachOne(el, hostObj, container, byId, reason, report, steps)
         local cls = classOf(el.kind)
         C.pa("attach.class", t)
         if not cls then
+            if inHookNow() then return false end -- story 20: not cached; attached at the poll's opened
             C.warnOnce("pak:" .. el.id, "%s '%s' stays pending: %s is not loaded (is Content/Paks/LogicMods/%s.pak installed?)", el.kind, el.id, KIND[el.kind].cls, C.NAME)
             return false
         end
@@ -542,16 +546,18 @@ attachChildren = function(p, pw, hostObj, fresh, reason, report, steps)
 end
 
 -- The journal context (story 19 regions) for one call on a host, or nil on the HUD.
-local function ctxFor(host, obj, canvas) return host == "journal" and P.journalCtx(obj, canvas) or nil end
+local function ctxFor(host, obj, canvas, prepaint) return host == "journal" and P.journalCtx(obj, canvas, prepaint) or nil end
 
 -- Places every live element of one host: each corner stack (story 19: per region) re-stacks once, near and absolute
--- elements on their own. Journal regions are read at most once (one context).
-local function placeAll(host, hostObj, canvas, prepass)
+-- elements on their own. Journal regions are read at most once (one context). Story 20: prepaint, inside the Journal's
+-- Construct (measured regions read as not painted); only (a set of elements, or nil for all): just those, and the
+-- corner stacks they are in.
+local function placeAll(host, hostObj, canvas, prepass, prepaint, only)
     local live = liveIn(canvas)
-    local ctx = ctxFor(host, hostObj, canvas)
+    local ctx = ctxFor(host, hostObj, canvas, prepaint)
     local stacks = {}
     for _, el in ipairs(C.order) do
-        if not el.removed and el.place.host == host then
+        if not el.removed and el.place.host == host and (only == nil or only[el]) then
             local w = live(el)
             if w then
                 if el.place.corner then stacks[P.skeyOf(el.place.corner, el.place.region)] = el.place
@@ -807,6 +813,7 @@ local function onTick(hud)
     local ok, err = pcall(onTickBody, hud)
     endTick()
     if not ok then error(err, 0) end
+    X._ensureConstructHook() -- story 20: a no-op once checked for this HUD
 end
 
 -- ---------------------------------------------------------------- the Journal host (story 13)
@@ -832,12 +839,102 @@ local function stepsText(s)
 end
 X._stepsText = stepsText
 
+-- Story 20: Journals whose elements were attached in their Construct post-hook, by path: what that attach did, for the
+-- attach line written at the poll's opened. Cleared at that Journal's closed / lost; an opened forgets the others.
+local constructed = {}
+local inHook = false             -- inside the Construct hook: classes from the cache only (classOf), no hook registered
+function X._inHook() return inHook end
+inHookNow = X._inHook
+
+-- Attaches the journal elements into the Journal's canvas (story 13; shared by the Construct hook and opened since
+-- story 20). skipLive: leave elements whose widget is already live in this canvas (with all their panel children)
+-- alone. Returns n (elements, panel children included), pending ids (or nil), the report and per-element steps, and
+-- the set of elements it attached (for placement).
+local function liveChildrenMissing(p)
+    for _, ch in ipairs(p.children) do
+        if not ch.removed and not liveWidget(ch) then return true end
+    end
+    return false
+end
+local function attachJournal(j, canvas, byId, reason, skipLive, jpath)
+    local report = { build = C.debugOn() }
+    local steps = {}
+    local n, pending, did = 0, nil, {}
+    local live = liveIn(canvas)
+    for _, el in ipairs(C.order) do
+        if not el.removed and el.place.host == "journal" then
+            n = n + 1
+            if not (skipLive and live(el) and not (el.kind == "panel" and liveChildrenMissing(el))) then
+                local ok, res = pcall(attachOne, el, j, canvas, byId, reason, report, steps)
+                if not ok or not res then
+                    el.attached = false
+                    pending = pending or {}
+                    if #pending < 8 then pending[#pending + 1] = "'" .. el.id .. "'" end
+                else
+                    did[el] = true
+                    el.jpath = jpath
+                end
+                if not ok then C.warnOnce("attach:" .. el.id, "attach %s: %s", el.id, tostring(res):match("^[^\n]*")) end
+            end
+            if el.kind == "panel" then
+                for _, ch in ipairs(el.children) do
+                    if not ch.removed then
+                        n = n + 1
+                        if ch.attached then ch.jpath = jpath
+                        else
+                            ch.retryAt = nil -- a Journal attach retries it at the next opened, not RETRY_TICKS later
+                            pending = pending or {}
+                            if #pending < 8 then pending[#pending + 1] = "'" .. ch.id .. "'" end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return n, pending, report, steps, did
+end
+
+local function attachLine(n, dt, s, report, pending, reason)
+    if pending then
+        return { info = true, text = string.format("ui journal attach left %s pending until the next open (%d element(s), %d us)", table.concat(pending, ", "), n, dt) }
+    elseif C.debugOn() then
+        return { text = string.format("ui journal attach n=%d in %d us (%s): %s (%s)", n, dt, stepsText(s), table.concat(report, ", "), tostring(reason)) }
+    end
+    return nil
+end
+
+local probeLine -- story 20's probe, below
 local function onJournal(j, info)
     if info.event == "opened" then
+        local okP, errP = pcall(probeLine, info) -- debug only; never stops the attach
+        if not okP then C.warnOnce("journal probe", "journal probe line failed: %s", tostring(errP):match("^[^\n]*")) end
+        X._ensureConstructHook() -- story 20: when no HUD tick has checked it yet
+        if journalLog then flushJournalLog() end -- an earlier event's line goes first
         local t0 = C.micros()
         local canvas = J._canvasOf(j)
         if not canvas then return end -- J._canvasOf warned once; the elements stay pending until the next open
         local tCanvas = C.micros() - t0
+        local cons = constructed[info.path]
+        for p in pairs(constructed) do if p ~= info.path then constructed[p] = nil end end
+        if cons then
+            -- Story 20: attached in Construct, before the first paint. Its regions are this Journal's already (no
+            -- reset), and nothing still live in its canvas is attached or placed again: only what the hook left (a
+            -- class that wasn't cached) or what was created since.
+            local n, pending, report, steps, did = attachJournal(j, canvas, {}, info.reason, true, info.path)
+            local tp = C.micros()
+            if next(did) then placeAll("journal", j, canvas, true, false, did) end
+            local now = C.micros()
+            local line
+            if pending then line = attachLine(n, now - t0, nil, nil, pending, info.reason)
+            elseif cons.line then
+                local extra = #report > 0 and ("; at opened: " .. table.concat(report, ", ") .. " (" .. tostring(info.reason) .. ")") or ""
+                line = { info = cons.line.info, text = cons.line.text .. extra }
+            elseif next(did) then
+                line = attachLine(n, now - t0, { canvas = tCanvas, place = now - tp, items = steps }, report, nil, info.reason)
+            end
+            if line then journalLog = line; flushJournalLog() end
+            return
+        end
         P.journalReset() -- story 19: a new Journal; its measured regions are unknown until its first paint
         -- A new Journal holds none of our widgets, so nothing is scanned. Only when the same Journal comes back
         -- (never seen on V8.1.2) are its children scanned for our tags, so nothing is duplicated.
@@ -849,32 +946,7 @@ local function onJournal(j, info)
                 for _, o in ipairs(orphans) do removeWidget(o.w) end
             end
         end
-        local report = { build = C.debugOn() }
-        local steps = {}
-        local n, pending = 0, nil
-        for _, el in ipairs(C.order) do
-            if not el.removed and el.place.host == "journal" then
-                n = n + 1
-                local ok, res = pcall(attachOne, el, j, canvas, byId, info.reason, report, steps)
-                if not ok or not res then
-                    el.attached = false
-                    pending = pending or {}
-                    if #pending < 8 then pending[#pending + 1] = "'" .. el.id .. "'" end
-                end
-                if not ok then C.warnOnce("attach:" .. el.id, "attach %s: %s", el.id, tostring(res):match("^[^\n]*")) end
-                if el.kind == "panel" then
-                    for _, ch in ipairs(el.children) do
-                        if not ch.removed then
-                            n = n + 1
-                            if not ch.attached then
-                                pending = pending or {}
-                                if #pending < 8 then pending[#pending + 1] = "'" .. ch.id .. "'" end
-                            end
-                        end
-                    end
-                end
-            end
-        end
+        local n, pending, report, steps = attachJournal(j, canvas, byId, info.reason, false, info.path)
         if n == 0 then return end
         local tp = C.micros()
         placeAll("journal", j, canvas, true)
@@ -882,32 +954,165 @@ local function onJournal(j, info)
         local dt = now - t0
         local s = { canvas = tCanvas, place = now - tp, items = steps }
         J._recordAttach(dt, n, s)
-        if pending then
-            journalLog = { info = true, text = string.format("ui journal attach left %s pending until the next open (%d element(s), %d us)", table.concat(pending, ", "), n, dt) }
-        elseif C.debugOn() then
-            journalLog = { text = string.format("ui journal attach n=%d in %d us (%s): %s (%s)", n, dt, stepsText(s), table.concat(report, ", "), tostring(info.reason)) }
-        end
+        -- Story 20: written now, so the next journal tick reads regions (it used to wait for a tick of its own).
+        journalLog = attachLine(n, dt, s, report, pending, info.reason)
+        if journalLog then flushJournalLog() end
     else
         -- closed or lost: the Journal is out of the viewport for good (each open is a new one). Its widgets are never
-        -- touched, only our handles to them are freed; the elements keep their state for the next open.
+        -- touched, only our handles to them are freed; the elements keep their state for the next open. Story 20: a
+        -- newer Journal already attached in its Construct (opened on the next tick) keeps its elements and regions.
+        local newer = nil
+        for p in pairs(constructed) do if p ~= info.path then newer = p end end
+        constructed[info.path] = nil
         local freed = 0
-        P.journalReset()
+        if not newer then P.journalReset() end
         forHost("journal", function(el)
+            if newer and el.jpath == newer and el.ref then return end
             if el.ref then freed = freed + 1 end
             freeRef(el)
             el.attached, el.slotKey, el.appliedVis, el.stackHeight, el.padKey = false, nil, nil, nil, nil
-            el.nearRect = nil
+            el.nearRect, el.jpath = nil, nil
         end)
         if freed > 0 and C.debugOn() then journalLog = { text = string.format("ui journal %s: freed %d widget handle(s) (%s)", info.event, freed, tostring(info.reason)) } end
     end
 end
 
+-- Story 20: the Construct post-hook's attach (body of onConstruct, under pcall there). Only a live Journal_C of a
+-- local controller with its map canvas; then every journal element whose class is cached, placed with the pre-paint
+-- rules (exact regions and the computed map; content-sized regions collapsed until measured). Calls no dependent's
+-- code; journal.watch events stay on the poll.
+local function constructAttach(j, canvas, path)
+    local t0 = C.micros()
+    J._track(path, j)
+    local again = constructed[path] ~= nil
+    P.journalReset() -- this Journal's regions: the computed map, content-sized ones unknown until painted
+    local byId = {}
+    if again then -- a second Construct of the same Journal: reuse what is there, never a second widget
+        local okS, b, orphans = pcall(scan, canvas, onHost("journal"))
+        if okS then
+            byId = b
+            for _, o in ipairs(orphans) do removeWidget(o.w) end
+        end
+    end
+    local tCanvas = C.micros() - t0
+    inHook = true
+    local ok, n, pending, report, steps = pcall(attachJournal, j, canvas, byId, "construct", false, path)
+    inHook = false
+    if not ok then error(n, 0) end
+    local tp = C.micros()
+    placeAll("journal", j, canvas, true, true)
+    local now = C.micros()
+    local dt = now - t0
+    local s = { canvas = tCanvas, place = now - tp, items = steps }
+    J._recordAttach(dt, n, s)
+    -- Pending ones (a class not cached) are attached at opened; the line is written there.
+    constructed[path] = { line = not pending and attachLine(n, dt, s, report, nil, "construct") or nil }
+end
+
 local function liveRef(el) return el.ref and C.deref(el.ref) or nil end
 local function onJournalTick(j)
-    if journalLog then flushJournalLog() return end
+    if journalLog then flushJournalLog() end -- story 20: the flush no longer takes the tick's place work
+    X._probeTick(j)
     -- Corner stacks re-measured for a few ticks after the open (Slate measures late); story 19: measured regions
     -- re-read until valid, then every 4 ticks.
     P.tick("journal", j, liveRef)
+end
+
+-- ---------------------------------------------------------------- story 20: the Journal's Construct post-hook
+-- Registered from a poll tick (never inside a hook), once a journal element exists and AssetRegistryHelpers:GetAsset
+-- returned the Journal class, keyed by the function's address: a class reloaded after a map change is hooked again
+-- (re-checked when a new HUD is prepared). A failed registration logs one WARN; the poll path keeps working.
+local CONSTRUCT_FN = C.JOURNAL_CLASS .. ":Construct"
+local JH = { key = nil, checked = false, tries = 0 }
+X._pollHooks = {}                -- fn() run with the Construct hook check (button.lua: its click hook)
+local onConstruct                -- below
+
+local function anyJournalElement()
+    for _, el in ipairs(C.order) do
+        if not el.removed and C.hostOf(el) == "journal" then return true end
+    end
+    return false
+end
+
+local function ensureConstructHook()
+    if JH.checked or not anyJournalElement() then return end
+    JH.checked = true
+    for _, f in ipairs(X._pollHooks) do pcall(f) end
+    local helpers = C.found("/Script/AssetRegistry.Default__AssetRegistryHelpers")
+    local okA, cls = pcall(function()
+        return helpers:GetAsset({ PackageName = FName(C.JOURNAL_PKG), AssetName = FName(C.JOURNAL_SHORT) })
+    end)
+    if not (okA and C.valid(cls)) then return end -- not loaded: retried on the next prepared HUD (never per tick: a miss scans every object)
+    local fn = C.found(CONSTRUCT_FN)
+    if not fn then return end
+    local okK, key = pcall(C.addr, fn)
+    if not okK then return end
+    if JH.key == key then return end
+    JH.tries = JH.tries + 1
+    local okH, err = pcall(RegisterHook, CONSTRUCT_FN, function(ctx) onConstruct(ctx) end)
+    if okH then
+        JH.key = key
+        if C.log then C.log.debug("ui journal Construct hook registered on %s", CONSTRUCT_FN) end
+    else
+        C.warnOnce("construct hook", "journal elements: RegisterHook(%s) failed: %s; they attach when the poll sees the Journal", CONSTRUCT_FN, tostring(err):match("^[^\n]*"))
+    end
+end
+X._ensureConstructHook = ensureConstructHook
+function X._constructHook() return { key = JH.key, checked = JH.checked, tries = JH.tries } end
+function X._constructHookRecheck() JH.checked = false end -- tests: what a new HUD's prepare does
+
+-- The probe (story 20's gate; DEBUG only): what the hook saw, logged at the poll's opened, then the drawn map and
+-- canvas on the first 4 journal ticks.
+local probe = nil
+probeLine = function(info)
+    local p = probe
+    if not (p and C.debugOn()) then return end
+    if p.path ~= info.path then return end
+    local i = p.inputs
+    C.log.debug("JPROBE construct inViewport=%s hdr=%s canvas=%s map=%s%s; opened %d us after Construct",
+        tostring(p.inVp), i and string.format("%.2f", i.hdr) or "?", i and string.format("%.1fx%.1f", i.W, i.H) or "?",
+        p.rect and P._rectStr(p.rect) or "?", p.why and (" (" .. tostring(p.why) .. ")") or "", C.micros() - p.us)
+    p.ticks = 0
+end
+function X._probeTick(j)
+    local p = probe
+    if not (p and p.ticks and p.ticks < 4 and C.debugOn()) then return end
+    p.ticks = p.ticks + 1
+    local canvas = J._canvasOf(j)
+    if not canvas then return end
+    local ctx = P.journalCtx(j, canvas)
+    local okM, mu = pcall(function() return j.MapWidget.MapUI end)
+    local m = okM and C.valid(mu) and P._rectIn(ctx, mu) or nil
+    local c = P._rectIn(ctx, canvas)
+    C.log.debug("JPROBE tick %d drawn map=%s canvas=%s", p.ticks, m and P._rectStr(m) or "?", c and P._rectStr(c) or "?")
+end
+
+local function constructBody(ctx)
+    local j = ctx:get()
+    if not C.valid(j) then return end
+    local okN, cn = pcall(function() return j:GetClass():GetFName():ToString() end)
+    if not (okN and cn == C.JOURNAL_SHORT) then return end
+    local okO, pc = pcall(C.call0, j, "GetOwningPlayer")
+    if not (okO and C.valid(pc)) then return end
+    local okL, isLocal = pcall(C.call0, pc, "IsLocalController")
+    if not (okL and isLocal == true) then return end
+    if not anyJournalElement() then return end
+    local canvas = J._canvasOf(j)
+    if not canvas then return end
+    local us = C.micros()
+    local path = C.pathOf(j)
+    constructAttach(j, canvas, path)
+    if C.debugOn() then
+        local okV, inVp = pcall(C.call0, j, "IsInViewport")
+        local pctx = P.journalCtx(j, canvas, true)
+        local r, why = P._computedMap(pctx)
+        probe = { path = path, us = us, inVp = okV and inVp, inputs = pctx.mapInputs, rect = r, why = why }
+    end
+end
+
+onConstruct = function(ctx)
+    local ok, err = pcall(constructBody, ctx)
+    if not ok then C.warnOnce("construct body", "journal Construct hook failed: %s; the poll attaches that Journal's elements", tostring(err):match("^[^\n]*")) end
 end
 
 local journalWatching = false
@@ -929,6 +1134,8 @@ local function ensureWatching()
         local need = {}
         for _, el in ipairs(C.order) do need[el.kind] = true end
         for kind in pairs(need) do classOf(kind) end
+        JH.checked = false -- story 20: a new HUD (often a new world): is the Journal class the hooked one?
+        ensureConstructHook()
     end)
 end
 local function ensureHost(el)

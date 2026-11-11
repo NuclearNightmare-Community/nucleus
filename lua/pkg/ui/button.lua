@@ -71,6 +71,8 @@ end
 -- Registers the hook once the button class is loaded; false (and one WARN) while it can't.
 local function ensureHook()
     if S.hooked then return true end
+    -- Story 20: never registered from inside the Journal's Construct hook; the poll tick registers it (below).
+    if X._inHook and X._inHook() then return false end
     if not X._classOf("button") then
         C.warnOnce("button hook class", "button clicks can't be hooked yet: %s is not loaded (is Content/Paks/LogicMods/%s.pak installed?); retried at the next attach", C.BUTTON_CLASS, C.NAME)
         return false
@@ -84,6 +86,15 @@ local function ensureHook()
         C.warnOnce("button hook", "button clicks: RegisterHook(%s) failed: %s", C.CLICK_FN, firstLine(pre))
     end
     return S.hooked
+end
+
+-- Story 20: buttons can be attached inside the Journal's Construct hook, where no hook is registered: the poll tick
+-- that checks the Construct hook registers the click hook first, once a button exists.
+X._pollHooks[#X._pollHooks + 1] = function()
+    if S.hooked then return end
+    for _, el in ipairs(C.order) do
+        if el.kind == "button" and not el.removed then ensureHook() return end
+    end
 end
 
 -- ---------------------------------------------------------------- the kind (text.lua's engine)

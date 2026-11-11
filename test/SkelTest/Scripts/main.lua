@@ -2326,11 +2326,12 @@ local J_TOP = { "jt", "jpanel" }       -- in the map canvas
 local J_KIDS = { "jb1", "jb2" }        -- in jpanel's VBox
 local OPENS = 10
 
-local function jrecorder(_, info)
+local function jrecorder(j, info)
     JEV.list[#JEV.list + 1] = { event = info.event, reason = info.reason, path = info.path, page = info.page }
     JEV.count[info.event] = (JEV.count[info.event] or 0) + 1
     if info.event == "opened" then JS.openedAt = core.clock.micros() end
     say("JEVENT %d %s reason=%s page=%s journal=%s", #JEV.list, info.event, tostring(info.reason), tostring(info.page), tostring(info.path))
+    if info.event == "opened" then JS.first = JS.rgn and JS.firstFrame(j) or nil end
 end
 local function jcount(e) return JEV.count[e] or 0 end
 
@@ -2352,7 +2353,11 @@ end
 -- Story 19: the Journal regions as the test measures them itself, in the host canvas's units, through core's
 -- <Core>_RectIn: every region's widget reached the way the story names it (binder: the union of the two papers).
 local RG = { "ammo", "binder", "cover", "map", "map-header", "match", "page-left", "page-right", "tasks" }
-local RG_MEASURED = { map = true, ["map-header"] = true, match = true, tasks = true, ammo = true }
+-- Content-sized regions: measured after the first paint, collapsed until then (story 20: map is computed before it).
+local RG_MEASURED = { ["map-header"] = true, match = true, tasks = true, ammo = true }
+-- Story 20: elements on exact regions and the computed map, attached in the Journal's Construct: drawn before the poll
+-- sees the Journal, so shown with a valid drawn rect at the opened event.
+local RG_FIRST = { "jn", "jc", "jr-cover", "jr-binder", "jr-page-left", "jr-page-right", "jr-map" }
 local RG_TEXT = { ammo = "A", binder = "B", cover = "C", map = "M", ["map-header"] = "H", match = "P", ["page-left"] = "L", ["page-right"] = "R", tasks = "T" }
 local function rectIn(canvas, w)
     local cdo = found(ACTOR_CDO)
@@ -2389,6 +2394,19 @@ local function regionRects(j, canvas)
     return out
 end
 local function rvalid(r) return r ~= nil and r.r - r.l > 1 and r.b - r.t > 1 end
+-- Story 20, at the opened event: which RG_FIRST elements are shown with a valid drawn rect (a field, not a local: the
+-- main chunk is near Lua's locals limit).
+JS.firstFrame = function(j)
+    local canvas = j and mapCanvasOf(j)
+    local out = { good = 0, bad = {} }
+    for _, id in ipairs(RG_FIRST) do
+        local ew = canvas and taggedIn(canvas, id)
+        local r = ew and rectIn(canvas, ew)
+        if JS.rgn[id] and core.ui.text.isShown(JS.rgn[id]) and rvalid(r) then out.good = out.good + 1
+        else out.bad[#out.bad + 1] = string.format("%s shown=%s rect=%s", id, tostring(JS.rgn[id] and core.ui.text.isShown(JS.rgn[id])), rsA(r)) end
+    end
+    return out
+end
 local function w1(a, b) return a ~= nil and b ~= nil and math.abs(a - b) <= 1 end
 
 -- The game state's lobby countdown, cut to 2 s on this (listen server) host: the character opens the map only when
@@ -2556,7 +2574,10 @@ local function openMap(phase, viaKey)
     end)
     step(phase .. ": regions shown check", function()
         if not JS.rgn then return end
-        check(#JS.rgnBad == 0, "JRCOLLAPSE %s no measured-region element shown while its region was not painted (%d polls; shown early: %s)", phase, JS.rgnPolls, table.concat(JS.rgnBad, ","))
+        local f = JS.first
+        check(f ~= nil and f.good == #RG_FIRST, "JRFIRST %s %d of %d exact- and map-region elements shown with a valid drawn rect at the opened event (drawn before the poll saw the Journal)%s",
+            phase, f and f.good or 0, #RG_FIRST, f and #f.bad > 0 and (": " .. table.concat(f.bad, "; ")) or "")
+        check(#JS.rgnBad == 0, "JRCOLLAPSE %s no content-sized-region element shown while its region was not painted (%d polls; shown early: %s)", phase, JS.rgnPolls, table.concat(JS.rgnBad, ","))
         local us = JS.rgnShownUs
         check(us ~= nil and us <= 2500000, "JRSHOWN %s every region element shown %.2f s after the opened event (within 2.5 s: 4 journal ticks of 500 ms plus one tick of poll jitter)", phase, (us or -1) / 1e6)
     end)
