@@ -2313,7 +2313,7 @@ end
 -- IA_Map is bound to (read from IMC_Default) goes to run.ps1 as "key <letter>", which posts it to the game window, so
 -- the game's own input path opens it. Each open must be a new Journal_C with exactly one widget per element in the
 -- map page's canvas; the first open also logs the Journal's widget tree (which canvas is the map page). Then a death
--- and revive (RemoveAllWidgets as the death does, the radio's reinforcement through the game's own code), a map
+-- and revive (the game's own, V8.1.5+: a real kill, then the radio's reinforcement of the dead body; JR.jRevive), a map
 -- change, a GC count of live core widgets, and the cost lines. Never keeps a Journal or widget across steps.
 local JOURNAL_CLASS_PATH = "/Game/Graphics/Journal/Journal.Journal_C"
 local JEV = { list = {}, count = {} }
@@ -2719,6 +2719,98 @@ local function gcCount(phase)
     end)
 end
 
+-- ---------------------------------------------------------------- journal: a real death and revive (V8.1.5+)
+-- Ported from the workspace's mods/waypoints driver (README "The driver's kill (V8.1.5+)", its revive scenario). Since
+-- V8.1.5 neither DeathEvent() nor the radio acts on a living character: DeathEvent's MoreDeathFX starts with the native
+-- gate NNDeathFadeLibrary:CanBeginTerminalDeathEffects (false while Health > 0), and the radio's native
+-- AdmitRadioCandidate checks the queued dead body. So, solo host: the game state's EOGLock holds the match (stands in
+-- for a living teammate; else the last death ends it), one CallDamageEvent(1000) on the own pawn kills it, the game's
+-- whole death runs (DIED right away; the controller's pawn becomes Spectator_C about 12 s later), then
+-- BP_Radio_C:ReinforceSpecficPlayer(dead body) spawns and possesses a new character, as the computer's reinforcement
+-- button does. Only if the character is still possessed after KILL_FALLBACK s does the test set Health 0 and call
+-- DeathEvent itself (a FALLBACK line, not a check). EOGLock is released once the new pawn has a visible HUD.
+-- One local table (the main chunk is at Lua's 200-local limit).
+local JR = { KILL_FALLBACK = 30, KILL_TIMEOUT = 60, SPECTATOR = "Spectator_C" }
+function JR.classOf(o) local ok, n = pcall(function() return o:GetClass():GetFName():ToString() end) return ok and n or "?" end
+function JR.myPawn() local c = pc() if not valid(c) then return nil end local p = c:K2_GetPawn() return valid(p) and p or nil end
+function JR.hpOf(p) local ok, h = pcall(function() return p.Health end) return ok and tonumber(h) or nil end
+-- NNDeathFadeLibrary:CanBeginTerminalDeathEffects called as a UFunction on the class default object: "true", "false",
+-- "?" (not found) or "error".
+function JR.deathGate(p)
+    local nn = "/Script/NuclearNightmare."
+    local lib, f = StaticFindObject(nn .. "Default__NNDeathFadeLibrary"), StaticFindObject(nn .. "NNDeathFadeLibrary:CanBeginTerminalDeathEffects")
+    if not (valid(lib) and valid(f)) then return "?" end
+    local ok, r = pcall(function() return f(lib, p) end)
+    return ok and tostring(r) or "error"
+end
+function JR.holdMatch(phase, on)
+    local okG, gs = pcall(function() return GS():GetGameState(pc()) end)
+    local ok = okG and valid(gs) and pcall(function() gs.EOGLock = on end)
+    say("SOLO %s EOGLock=%s ok=%s", phase, tostring(on), tostring(ok))
+end
+function JR.jRevive(phase)
+    step(phase .. ": hold the match and kill", function()
+        JR.holdMatch(phase, true)
+        local target = JR.myPawn()
+        if not target then check(false, "KILL %s the own pawn found", phase) return end
+        JS.killed, JS.pawnBefore = pathOf(target), pathOf(target)
+        JS.dying, JS.left = nil, nil
+        local t0, stuck = os.clock(), false
+        say("KILL %s before guard=%s hp=%s", phase, JR.deathGate(target), tostring(JR.hpOf(target)))
+        local ok, err = pcall(function() target:CallDamageEvent(1000) end)
+        say("KILL %s %s CallDamageEvent(1000) ok=%s %s", phase, JS.killed, tostring(ok), ok and "" or firstLine(err))
+        return function()
+            local t = os.clock() - t0
+            if not JS.dying then
+                local body = found(JS.killed)
+                local g, h = body and JR.deathGate(body), body and JR.hpOf(body)
+                if h and h <= 0 and g == "true" then JS.dying = t; say("DYING %s +%.1f s guard=%s hp=%s", phase, t, g, tostring(h)) end
+            end
+            local p = JR.myPawn()
+            if p and pathOf(p) == JS.killed then
+                if not stuck and t > JR.KILL_FALLBACK then
+                    stuck = true
+                    local body = found(JS.killed)
+                    if body then
+                        local okH = pcall(function() body.Health = 0 end)
+                        local okD, eD = pcall(function() body:DeathEvent() end)
+                        say("KILL %s FALLBACK still possessed after %.0f s: Health 0 (ok=%s) + DeathEvent ok=%s %s", phase, t, tostring(okH), tostring(okD), okD and "" or firstLine(eD))
+                    end
+                end
+                return false
+            end
+            if not p then return false end -- between pawns
+            JS.left = { t = t, class = JR.classOf(p), path = pathOf(p) }
+            say("LEFT %s +%.1f s the controller's pawn is %s (%s) fallback=%s", phase, t, JS.left.class, JS.left.path, tostring(stuck))
+            return true
+        end, JR.KILL_TIMEOUT, phase .. " death (the controller leaves the character)"
+    end)
+    step(phase .. ": died", function()
+        check(JS.dying ~= nil, "DIED %s the character took the game's death: Health <= 0 and the terminal-death gate open%s", phase,
+            JS.dying and string.format(" (+%.1f s)", JS.dying) or "")
+        local l = JS.left
+        check(l ~= nil and l.class == JR.SPECTATOR, "SPECTATOR %s the controller's pawn became %s%s", phase, JR.SPECTATOR,
+            l and string.format(" (%s at +%.1f s)", l.class, l.t) or " (it never left the character)")
+    end)
+    step(phase .. ": reinforce", function()
+        local body = found(JS.killed)
+        local radio = FindFirstOf("BP_Radio_C")
+        if not (body and valid(radio)) then check(false, "REINFORCE %s dead body and radio found", phase) return end
+        local okR, eR = pcall(function() radio:ReinforceSpecficPlayer(body) end)
+        say("REINFORCE %s ReinforceSpecficPlayer(dead body %s) ok=%s %s", phase, JS.killed:match("[^.]+$"), tostring(okR), okR and "" or firstLine(eR))
+        return function()
+            local np = JR.myPawn()
+            return np ~= nil and pathOf(np) ~= JS.pawnBefore and JR.classOf(np) ~= JR.SPECTATOR and core.ui.hud.isVisible()
+        end, 90, phase .. ": a new pawn with a visible HUD"
+    end)
+    step(phase .. ": release the match", function()
+        JR.holdMatch(phase, false)
+        local np = JR.myPawn()
+        say("NEWPAWN %s %s (was %s)", phase, np and pathOf(np) or "none", tostring(JS.pawnBefore))
+        return after(3), 5, "settle"
+    end)
+end
+
 local function buildJournal()
     step("journal: watch and create", function()
         UIS.t0 = os.time()
@@ -2782,28 +2874,8 @@ local function buildJournal()
         end
         check(core.ui.text.isShown(JS.rgn.jn) == false, "JRPENDING the region elements are created while the map is closed (%d)", (function() local k = 0 for _ in pairs(JS.rgn) do k = k + 1 end return k end)())
     end)
-    -- AC 2: a death and revive, then the map again.
-    step("revive: death's RemoveAllWidgets", function()
-        local okR = pcall(function() WLL():RemoveAllWidgets(pc()) end)
-        say("DEATHSIM revive RemoveAllWidgets ok=%s", tostring(okR))
-        JS.pawnBefore = pathOf(pc():K2_GetPawn())
-        return after(3), 8, "HUD lost"
-    end)
-    step("revive: reinforce", function()
-        local c = pc()
-        local p = c:K2_GetPawn()
-        local gs = GS():GetGameState(c)
-        local radio = FindFirstOf("BP_Radio_C")
-        if not (valid(gs) and valid(radio) and valid(p)) then check(false, "REINFORCE game state, radio and pawn found") return end
-        local okQ, eQ = pcall(function() gs:UpdateRespawnQue(c, p) end)
-        local okR, eR = pcall(function() radio:ReinforceSpecficPlayer(p) end)
-        say("REINFORCE UpdateRespawnQue ok=%s %s; ReinforceSpecficPlayer ok=%s %s", tostring(okQ), okQ and "" or firstLine(eQ), tostring(okR), okR and "" or firstLine(eR))
-        return function()
-            local np = pc():K2_GetPawn()
-            return valid(np) and pathOf(np) ~= JS.pawnBefore and core.ui.hud.isVisible()
-        end, 90, "revive: a new pawn with a visible HUD"
-    end)
-    step("revive: settle", function() say("NEWPAWN revive %s (was %s)", pathOf(pc():K2_GetPawn()), tostring(JS.pawnBefore)) return after(3), 5, "settle" end)
+    -- AC 2: a death and revive (the game's own, V8.1.5+), then the map again.
+    JR.jRevive("revive")
     openMap("revive-open", true)
     jclick("revive-open")
     closeMap("revive-close", true)
