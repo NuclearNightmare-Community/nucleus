@@ -159,7 +159,7 @@ foreach ($p in 'menu1', 'match1') {
                     # story 19: journal regions (the I/O matrix's error rows; a corner in and near each region), elements(host)
                     'ui-elements-bogus', 'ui-elements-two', 'ui-elements-hud', 'ui-elements-journal',
                     'ui-place-region-hud', 'ui-place-inset-hud', 'ui-place-region-spine', 'ui-place-region-num', 'ui-place-inset-huge',
-                    'ui-place-inset-num', 'ui-place-near-region-key', 'ui-place-near-inset-key', 'ui-place-abs-region-key',
+                    'ui-place-inset-num', 'ui-place-near-region-key', 'ui-place-near-inset-key', 'ui-place-abs-region-key', 'ui-place-abs-inset-key',
                     'ui-place-near-hud-map', 'ui-place-journal-near-corner',
                     'ui-place-region-ammo', 'ui-place-region-binder', 'ui-place-region-cover', 'ui-place-region-map',
                     'ui-place-region-map-header', 'ui-place-region-match', 'ui-place-region-page-left', 'ui-place-region-page-right',

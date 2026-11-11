@@ -1095,6 +1095,27 @@ function regionTests() -- a function: the main chunk is at Lua's 200-locals limi
         "near an exact region: the right page's left edge midpoint, x -16")
     sl = widgetOfId("bd").Slot
     ok(sl.anchors.Minimum.X == 0.943 and sl.anchors.Minimum.Y == 0.1 and sl.position.X == -16, "binder: the right page's right edge")
+    local rin0 = RECTIN_CALLS -- the re-places below read the measured regions too; not part of the open's count
+    -- moving an element to another region in the same corner re-stacks the one it left
+    P.place(rc, { host = "journal", corner = "bottom-left", region = "page-right", inset = "tight" })
+    ok(widgetOfId("rc2").Slot.position.Y == -8 and widgetOfId("rc").Slot.anchors.Minimum.X == 0.514 and widgetOfId("rc").Slot.position.Y == -8,
+        "region move: the left stack closes up, the element sits in page-right", widgetOfId("rc2").Slot.position.Y)
+    -- exact-region slot offsets: left/top add, right/bottom subtract (the -Right / -Bottom signs)
+    local rslot = jr.MapWidget.NN_RightFieldPaper.Slot
+    rslot.off = { Left = 5, Top = 6, Right = 7, Bottom = 9 }
+    P.place(rc, { host = "journal", corner = "bottom-right", region = "page-right", inset = "tight" })
+    sl = widgetOfId("rc").Slot
+    ok(sl.anchors.Minimum.X == 0.943 and sl.anchors.Minimum.Y == 0.831 and sl.position.X == -7 - 8 and sl.position.Y == -9 - 8,
+        "slot offsets: page-right bottom-right is -Right - inset, -Bottom - inset", sl.position.X .. "," .. sl.position.Y)
+    P.place(npr, { host = "journal", near = "page-right", side = "right" })
+    sl = widgetOfId("npr").Slot
+    ok(sl.anchors.Minimum.X == 0.943 and near(sl.anchors.Minimum.Y, (0.1 + 0.831) / 2) and sl.alignment.X == 0 and sl.alignment.Y == 0.5
+        and sl.position.X == -7 + 16 and sl.position.Y == (6 - 9) / 2, "slot offsets: near page-right, right side", sl.position.X .. "," .. sl.position.Y)
+    rslot.off = { Left = 0, Top = 0, Right = 0, Bottom = 0 }
+    P.place(rc, { host = "journal", corner = "bottom-left", region = "page-left", inset = "tight" })
+    P.place(npr, { host = "journal", near = "page-right", side = "left" })
+    ok(widgetOfId("rc").Slot.position.Y == -8 and widgetOfId("rc2").Slot.position.Y == -(8 + 20 + 16) and widgetOfId("npr").Slot.position.X == -16, "slot offsets: restored")
+    RECTIN_CALLS = rin0
     ok(widgetOfId("nm").vis == 1 and widgetOfId("cm").vis == 1 and X.isShown(nm) == false, "measured: collapsed until painted")
     ok(X.isShown(rc) and X.isShown(pc), "exact: shown before the first paint")
     ok(RECTIN_CALLS == 2, "measured: map read once in the open's placement (two RectIn calls)", RECTIN_CALLS)
@@ -1134,6 +1155,31 @@ function regionTests() -- a function: the main chunk is at Lua's 200-locals limi
         ok(widgetOfId("npr").vis == 4 and sl.position.X == r.l and sl.position.Y == r.b + 8, "near " .. name)
     end
     jr.inViewport = false; tick()
+    -- core's ModActor missing for one open: one WARN, measured elements collapsed, exact ones shown, the CDO looked up
+    -- once per open (a miss is a full object scan in the game), not once per tick
+    local CDO_PATH = "/Game/Mods/Nucleus/ModActor.Default__ModActor_C"
+    local sfo, lookups = StaticFindObject, 0
+    StaticFindObject = function(p) if p == CDO_PATH then lookups = lookups + 1 end return sfo(p) end
+    kill(CDO)
+    local jx = openNew(23)
+    tick(); paint(jx)
+    for _ = 1, 6 do tick() end
+    ok(countLogs("^WARN journal regions: Nucleus's ModActor is not loaded") == 1 and widgetOfId("nm").vis == 1 and X.isShown(rc) and X.isShown(pc),
+        "no ModActor: one WARN, measured collapsed, exact shown")
+    ok(lookups == 1, "no ModActor: looked up once this open, not per tick", lookups)
+    jx.inViewport = false; tick()
+    CDO.__alive = true; objects[CDO_PATH] = CDO
+    StaticFindObject = sfo
+    -- _RectIn raising (an old pak): one WARN, collapsed
+    local rectIn = CDO.Nucleus_RectIn
+    CDO.Nucleus_RectIn = function() error("no such function") end
+    local jy = openNew(24)
+    tick(); paint(jy)
+    for _ = 1, 6 do tick() end
+    ok(countLogs("^WARN journal regions: Nucleus_RectIn failed %(is Nucleus's pak current%?%): .*no such function") == 1 and widgetOfId("nm").vis == 1 and X.isShown(rc),
+        "RectIn failing: one WARN, measured collapsed")
+    jy.inViewport = false; tick()
+    CDO.Nucleus_RectIn = rectIn
     -- a missing region widget: one WARN per region, collapsed, nothing raises; other regions unaffected
     local jm = openNew(22)
     jm.MapWidget.MapUI = nil

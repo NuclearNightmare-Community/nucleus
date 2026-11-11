@@ -283,7 +283,9 @@ function P.rectKey(r)
 end
 
 -- binder: per edge, the outer edge of the two page papers (left of page-left, right of page-right, the smaller top,
--- the larger bottom). Each edge comes from one paper, so it stays exact; edges compare by anchor, then by offset.
+-- the larger bottom). Each edge comes from one paper and edges compare by anchor, then by offset: exact while the
+-- papers share an edge's anchor or have zero offsets (V8.2.1: both); with different anchors and non-zero offsets the
+-- anchor comparison can pick the inner edge at some aspects.
 local function less(e, f) return e.a < f.a or (e.a == f.a and e.o < f.o) end
 function P.union(L, R)
     return { l = L.l, r = R.r, t = less(R.t, L.t) and R.t or L.t, b = less(L.b, R.b) and R.b or L.b }

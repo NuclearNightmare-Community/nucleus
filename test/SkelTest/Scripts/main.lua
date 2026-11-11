@@ -974,6 +974,7 @@ local function uiCases(phase)
     pc_("near-region-key", "{ host = 'journal', near = 'map', region = 'map' }", { host = "journal", near = "map", region = "map" }, E.err(PL .. "region is not allowed with near (valid keys: align, gap, host, near, offset, side)"))
     pc_("near-inset-key", "{ host = 'journal', near = 'map', inset = 'tight' }", { host = "journal", near = "map", inset = "tight" }, E.err(PL .. "inset is not allowed with near"))
     pc_("abs-region-key", "{ host = 'journal', absolute, region = 'map' }", { host = "journal", absolute = { x = 0, y = 0 }, region = "map" }, E.err(PL .. "region is not allowed with absolute (valid keys: absolute, host)"))
+    pc_("abs-inset-key", "{ host = 'journal', absolute, inset = 'tight' }", { host = "journal", absolute = { x = 0, y = 0 }, inset = "tight" }, E.err(PL .. "inset is not allowed with absolute (valid keys: absolute, host)"))
     pc_("near-hud-map", "{ near = 'map' }", { near = "map" }, E.err(PL .. "unknown near element 'map' (valid: crosshair)"))
     pc_("journal-near-corner", "{ host = 'journal', near = 'map', corner }", { host = "journal", near = "map", corner = "top-left" }, E.err(PL .. "an intent needs exactly one of corner, near or absolute (got corner and near)"))
     for _, r in ipairs({ "ammo", "binder", "cover", "map", "map-header", "match", "page-left", "page-right", "tasks" }) do
@@ -2557,7 +2558,7 @@ local function openMap(phase, viaKey)
         if not JS.rgn then return end
         check(#JS.rgnBad == 0, "JRCOLLAPSE %s no measured-region element shown while its region was not painted (%d polls; shown early: %s)", phase, JS.rgnPolls, table.concat(JS.rgnBad, ","))
         local us = JS.rgnShownUs
-        check(us ~= nil and us <= 2500000, "JRSHOWN %s every region element shown %.2f s after the opened event (within 4 journal ticks of 500 ms)", phase, (us or -1) / 1e6)
+        check(us ~= nil and us <= 2500000, "JRSHOWN %s every region element shown %.2f s after the opened event (within 2.5 s: 4 journal ticks of 500 ms plus one tick of poll jitter)", phase, (us or -1) / 1e6)
     end)
     step(phase .. ": settle", function() return afterMs(1200), 3, "layout" end)
     step(phase .. ": check", function()
@@ -2872,7 +2873,12 @@ local function buildJournal()
             JS.rgn[id] = core.ui.text.create{ id = id, text = RG_TEXT[name], place = { host = "journal", corner = "top-left", region = name, inset = "tight" } }
             JS.rgnOf[id] = name
         end
-        check(core.ui.text.isShown(JS.rgn.jn) == false, "JRPENDING the region elements are created while the map is closed (%d)", (function() local k = 0 for _ in pairs(JS.rgn) do k = k + 1 end return k end)())
+        local k, shown = 0, {}
+        for id, rh in pairs(JS.rgn) do
+            k = k + 1
+            if core.ui.text.isShown(rh) ~= false then shown[#shown + 1] = id end
+        end
+        check(#shown == 0, "JRPENDING the region elements are created while the map is closed (%d)%s", k, #shown > 0 and ("; shown: " .. table.concat(shown, ",")) or "")
     end)
     -- AC 2: a death and revive (the game's own, V8.1.5+), then the map again.
     JR.jRevive("revive")
