@@ -907,8 +907,7 @@ local probeLine -- story 20's probe, below
 local function onJournal(j, info)
     if info.event == "opened" then
         local okP, errP = pcall(probeLine, info) -- debug only; never stops the attach
-        if not okP then C.warnOnce("journal probe", "journal probe line failed: %s", tostring(errP):match("^[^
-]*")) end
+        if not okP then C.warnOnce("journal probe", "journal probe line failed: %s", tostring(errP):match("^[^\n]*")) end
         X._ensureConstructHook() -- story 20: when no HUD tick has checked it yet
         if journalLog then flushJournalLog() end -- an earlier event's line goes first
         local t0 = C.micros()
