@@ -640,7 +640,8 @@ local function readRegion(ctx, name)
         return P.union(L, R)
     end
     if kind == "computed" and mapMode == "computed" then
-        local r, why = computedMap(ctx)
+        local okC, r, why = pcall(computedMap, ctx)
+        if not okC then r, why = nil, tostring(r):match("^[^\n]*") end -- a raise is not computable either
         if r then return r end
         C.warnOnce("region-compute:" .. name, "journal region '%s' can't be computed (%s); it is measured instead (collapsed until painted)", name, tostring(why))
         mapMode = "measured"

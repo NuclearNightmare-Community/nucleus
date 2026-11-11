@@ -1837,7 +1837,24 @@ function constructTests() -- a function: the main chunk is at Lua's 200-locals l
     ch.sw.GetParent = function() return ch.jroot end
     ok(P._computedMap(P.journalCtx(j7, canvasOfJ(j7), true)) ~= nil, "canvas: restored -> computable")
 
-    -- button click hook: registered from the poll tick, never inside the Construct hook
+    -- button click hook: registered from the poll tick, never inside the Construct hook. Start as a Lua state with no
+    -- click hook yet (buttonTests registered one: drop it) and the button class not loaded.
+    local BN, CLICK = require("nucleus.ui.button"), C.CLICK_FN
+    local function clickHooks() local n = 0 for _, hk in ipairs(HOOKS) do if hk.path == CLICK then n = n + 1 end end return n end
+    for k = #HOOKS, 1, -1 do if HOOKS[k].path == CLICK then table.remove(HOOKS, k) end end
+    BN._S.hooked = false
+    kill(BUTTONCLASS)
+    local kb = BN.create{ id = "kb", label = "b", place = { host = "journal", corner = "top-right" }, onClick = function() end }
+    ok(clickHooks() == 0, "click hook: class not loaded -> none registered at create", clickHooks())
+    BUTTONCLASS.__alive = true; objects[BUTTONCLASS.__path] = BUTTONCLASS
+    ok(X._classOf("button") ~= nil, "click hook: the button class loaded and cached")
+    local jb = addChain(newJournal(50)); created(jb)
+    constructJ(jb)
+    ok(widgetOfId("kb") and widgetOfId("kb").parent == canvasOfJ(jb) and clickHooks() == 0,
+        "click hook: the button attached in Construct, no RegisterHook inside the hook", clickHooks())
+    X._constructHookRecheck(); tick()
+    ok(clickHooks() == 1 and BN._S.hooked == true, "click hook: registered once by the poll tick after Construct", clickHooks())
+    BN.remove(kb)
     ok(X._inHook() == false, "construct: the hook flag is cleared")
     for _, h in ipairs({ kn, kc, kh }) do X.remove(h) end
     StaticFindObject = sfo

@@ -906,7 +906,7 @@ end
 local probeLine -- story 20's probe, below
 local function onJournal(j, info)
     if info.event == "opened" then
-        probeLine(info)
+        pcall(probeLine, info) -- debug only; never stops the attach
         X._ensureConstructHook() -- story 20: when no HUD tick has checked it yet
         if journalLog then flushJournalLog() end -- an earlier event's line goes first
         local t0 = C.micros()
@@ -1041,7 +1041,7 @@ local function ensureConstructHook()
     local okA, cls = pcall(function()
         return helpers:GetAsset({ PackageName = FName(C.JOURNAL_PKG), AssetName = FName(C.JOURNAL_SHORT) })
     end)
-    if not (okA and C.valid(cls)) then return end -- not loaded: tried again on the next prepared HUD or open
+    if not (okA and C.valid(cls)) then return end -- not loaded: retried on the next prepared HUD (never per tick: a miss scans every object)
     local fn = C.found(CONSTRUCT_FN)
     if not fn then return end
     local okK, key = pcall(C.addr, fn)
