@@ -4,6 +4,24 @@ All notable changes to Nucleus are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+Version 0.6.0 in `mod.json`, not released yet. Game: Nuclear Nightmare V8.2.1 (build 26512322). UE4SS: v3.0.1-1181-g83330635.
+
+For players: mods that put buttons or text on the map (the Journal) can now place them on the binder itself, on a page, under the map square or beside the match, task and ammo panels, instead of in the corners of the screen around it.
+
+### Added
+
+- Named Journal regions for `core.ui.place`: `cover`, `binder`, `page-left`, `page-right`, `map`, `map-header`, `match`, `tasks` and `ammo`. A journal intent can put an element in a corner of a region (`{ host = "journal", corner = ..., region = ..., inset = ... }`) or next to one (`{ host = "journal", near = <region>, side, align, gap }`). `inset` takes the gap names (`tight`, `normal`, `loose`) and defaults to `gap`; the first element of a region corner sits `inset` from both edges and each later one stacks `gap` after it.
+- The cover, the two pages and the binder are exact: they follow the binder's own anchors, so they hold at any resolution and before the map is drawn. The map square, the header bar and the match, task and ammo panels are measured once the map is drawn; an element placed by one of them stays hidden until then (at most about 2 s after the map opens) and follows the panel when it moves.
+- `core.ui.elements(host)`: `elements("journal")` lists the nine regions; `elements()` and `elements("hud")` return the HUD's elements as before.
+- `core.has("ui.journal.regions")` is true.
+- The Blueprint helper `Nucleus_RectIn(Canvas, Widget, Frac)` on Nucleus's ModActor: a point of a widget's rectangle in a canvas's local units.
+- A region whose widget is missing or has changed after a game patch logs one `WARN` naming it, and its elements stay hidden; nothing raises.
+
+### Changed
+
+- A plain journal `corner` (no `region`) is now a corner of `cover`, the dark binder cover, instead of a corner of the screen outside the binder. Mods that used a journal corner need no change; their elements move onto the binder. Keep wide elements out of `cover`'s bottom corners: the strip under the pages holds the player's perks.
+- A journal `near` names a region: `{ host = "journal", near = "crosshair" }` now raises `unknown near region 'crosshair' (valid: ...)` instead of `near is not available on host 'journal'`, and `elements(1)` raises `unknown host 1 (valid: hud, journal)` instead of `expected 0 arguments, got 1`. HUD placement is unchanged.
+
 ## [0.5.0] - 2026-11-09
 
 Soft release to a few testers, not released publicly. Game: Nuclear Nightmare V8.2.1 (build 26512322). UE4SS: v3.0.1-1181-g83330635.

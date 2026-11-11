@@ -852,11 +852,21 @@ local function uiCases(phase)
         E.ret("a positive integer token", function(r) return math.type(r[1]) == "integer" and r[1] > 0 end))
     case(P .. "journal-stats", "ui.journal.stats() [control]", f(U.journal.stats), E.ret("a table, closed", function(r) return type(r[1]) == "table" and r[1].open == false end))
     case(P .. "create-journal-near", "ui.text.create{ id = 'bj', place = { host = 'journal', near = 'crosshair' } }",
-        f(T.create, { id = "bj", place = { host = "journal", near = "crosshair" } }), E.err(UI .. ".place: near is not available on host 'journal'"))
+        f(T.create, { id = "bj", place = { host = "journal", near = "crosshair" } }), E.err(UI .. ".place: unknown near region 'crosshair' (valid: ammo, binder, cover, map, map-header, match, page-left, page-right, tasks)"))
 
     -- UI-3 elements()
     case(P .. "elements-ok", "ui.elements() [control]", f(U.elements), E.ret("{ crosshair = ... }", function(r) return type(r[1]) == "table" and type(r[1].crosshair) == "string" and r[1].mic == nil end))
-    case(P .. "elements-arg", "ui.elements(1)", f(U.elements, 1), E.err(UI .. ".elements: expected 0 arguments, got 1"))
+    case(P .. "elements-arg", "ui.elements(1)", f(U.elements, 1), E.err(UI .. ".elements: unknown host 1 (valid: hud, journal)"))
+    -- story 19: elements(host)
+    case(P .. "elements-bogus", "ui.elements('bogus')", f(U.elements, "bogus"), E.err(UI .. ".elements: unknown host 'bogus' (valid: hud, journal)"))
+    case(P .. "elements-two", "ui.elements('hud', 2)", f(U.elements, "hud", 2), E.err(UI .. ".elements: expected 0 or 1 arguments, got 2"))
+    case(P .. "elements-hud", "ui.elements('hud') [control]", f(U.elements, "hud"), E.ret("{ crosshair = ... }", function(r) return type(r[1]) == "table" and type(r[1].crosshair) == "string" and r[1].map == nil end))
+    case(P .. "elements-journal", "ui.elements('journal') [control]", f(U.elements, "journal"), E.ret("the nine journal regions", function(r)
+        if type(r[1]) ~= "table" or r[1].crosshair ~= nil then return false end
+        local n = 0
+        for _, d in pairs(r[1]) do if type(d) ~= "string" then return false end n = n + 1 end
+        return n == 9 and r[1].map ~= nil and r[1]["page-left"] ~= nil
+    end))
 
     -- UI-2 create: the argument, id, text, place, unknown keys
     local CR = UI .. ".text.create: "
@@ -952,7 +962,24 @@ local function uiCases(phase)
     pc_("gap-num", "{ corner, gap = 16 }", { corner = "top-left", gap = 16 }, E.err(PL .. "unknown gap 16"))
     pc_("host", "{ host = 'Journal', corner }", { host = "Journal", corner = "top-left" }, E.err(PL .. "unknown host 'Journal' (valid: hud, journal)"))
     pc_("host-num", "{ host = 5, corner }", { host = 5, corner = "top-left" }, E.err(PL .. "unknown host 5 (valid: hud, journal)"))
-    pc_("host-journal-near", "{ host = 'journal', near = 'crosshair' }", { host = "journal", near = "crosshair" }, E.err(PL .. "near is not available on host 'journal' (it has no named elements yet; use corner or absolute)"))
+    pc_("host-journal-near", "{ host = 'journal', near = 'crosshair' }", { host = "journal", near = "crosshair" }, E.err(PL .. "unknown near region 'crosshair' (valid: ammo, binder, cover, map, map-header, match, page-left, page-right, tasks)"))
+    -- story 19: journal regions (the I/O matrix's error rows)
+    local RN = "(valid: ammo, binder, cover, map, map-header, match, page-left, page-right, tasks)"
+    pc_("region-hud", "{ corner, region = 'map' }", { corner = "top-left", region = "map" }, E.err(PL .. "region is not available on host 'hud' (journal only)"))
+    pc_("inset-hud", "{ corner, inset = 'tight' }", { corner = "top-left", inset = "tight" }, E.err(PL .. "inset is not available on host 'hud' (journal only)"))
+    pc_("region-spine", "{ host = 'journal', corner, region = 'spine' }", { host = "journal", corner = "top-left", region = "spine" }, E.err(PL .. "unknown region 'spine' " .. RN))
+    pc_("region-num", "{ host = 'journal', corner, region = 1 }", { host = "journal", corner = "top-left", region = 1 }, E.err(PL .. "unknown region 1 " .. RN))
+    pc_("inset-huge", "{ host = 'journal', corner, inset = 'huge' }", { host = "journal", corner = "top-left", inset = "huge" }, E.err(PL .. "unknown inset 'huge' (valid: tight, normal, loose)"))
+    pc_("inset-num", "{ host = 'journal', corner, inset = 8 }", { host = "journal", corner = "top-left", inset = 8 }, E.err(PL .. "unknown inset 8 (valid: tight, normal, loose)"))
+    pc_("near-region-key", "{ host = 'journal', near = 'map', region = 'map' }", { host = "journal", near = "map", region = "map" }, E.err(PL .. "region is not allowed with near (valid keys: align, gap, host, near, offset, side)"))
+    pc_("near-inset-key", "{ host = 'journal', near = 'map', inset = 'tight' }", { host = "journal", near = "map", inset = "tight" }, E.err(PL .. "inset is not allowed with near"))
+    pc_("abs-region-key", "{ host = 'journal', absolute, region = 'map' }", { host = "journal", absolute = { x = 0, y = 0 }, region = "map" }, E.err(PL .. "region is not allowed with absolute (valid keys: absolute, host)"))
+    pc_("near-hud-map", "{ near = 'map' }", { near = "map" }, E.err(PL .. "unknown near element 'map' (valid: crosshair)"))
+    pc_("journal-near-corner", "{ host = 'journal', near = 'map', corner }", { host = "journal", near = "map", corner = "top-left" }, E.err(PL .. "an intent needs exactly one of corner, near or absolute (got corner and near)"))
+    for _, r in ipairs({ "ammo", "binder", "cover", "map", "map-header", "match", "page-left", "page-right", "tasks" }) do
+        pc_("region-" .. r, "{ host = 'journal', corner = 'top-left', region = '" .. r .. "', inset = 'tight' } [control]", { host = "journal", corner = "top-left", region = r, inset = "tight" }, E.none)
+        pc_("near-" .. r, "{ host = 'journal', near = '" .. r .. "', side = 'below' } [control]", { host = "journal", near = r, side = "below" }, E.none)
+    end
     pc_("side-corner", "{ corner, side = 'left' }", { corner = "top-left", side = "left" }, E.err(PL .. "side is not allowed with corner"))
     pc_("off-str", "{ corner, offset = 'x' }", { corner = "top-left", offset = "x" }, E.err(PL .. "offset must be a table"))
     pc_("off-a", "{ corner, offset = { x = 'a' } }", { corner = "top-left", offset = { x = "a" } }, E.err(PL .. "offset.x must be a number, got 'a'"))
@@ -2301,6 +2328,7 @@ local OPENS = 10
 local function jrecorder(_, info)
     JEV.list[#JEV.list + 1] = { event = info.event, reason = info.reason, path = info.path, page = info.page }
     JEV.count[info.event] = (JEV.count[info.event] or 0) + 1
+    if info.event == "opened" then JS.openedAt = core.clock.micros() end
     say("JEVENT %d %s reason=%s page=%s journal=%s", #JEV.list, info.event, tostring(info.reason), tostring(info.page), tostring(info.path))
 end
 local function jcount(e) return JEV.count[e] or 0 end
@@ -2319,6 +2347,48 @@ local function absRect(w)
     end)
     return ok and s or "?"
 end
+
+-- Story 19: the Journal regions as the test measures them itself, in the host canvas's units, through core's
+-- <Core>_RectIn: every region's widget reached the way the story names it (binder: the union of the two papers).
+local RG = { "ammo", "binder", "cover", "map", "map-header", "match", "page-left", "page-right", "tasks" }
+local RG_MEASURED = { map = true, ["map-header"] = true, match = true, tasks = true, ammo = true }
+local RG_TEXT = { ammo = "A", binder = "B", cover = "C", map = "M", ["map-header"] = "H", match = "P", ["page-left"] = "L", ["page-right"] = "R", tasks = "T" }
+local function rectIn(canvas, w)
+    local cdo = found(ACTOR_CDO)
+    if not (cdo and valid(canvas) and valid(w)) then return nil end
+    local ok, r = pcall(function()
+        local fn = cdo[CORE .. "_RectIn"]
+        local a, b = fn(cdo, canvas, w, { X = 0, Y = 0 }), fn(cdo, canvas, w, { X = 1, Y = 1 })
+        return { l = a.X, t = a.Y, r = b.X, b = b.Y }
+    end)
+    return ok and r or nil
+end
+local function regionWidget(mw, name)
+    if name == "cover" then return mw.NN_BinderCover end
+    if name == "page-left" then return mw.NN_LeftFieldPaper end
+    if name == "page-right" then return mw.NN_RightFieldPaper end
+    if name == "map" then return mw.MapUI end
+    if name == "ammo" then return mw.NN_AmmoCarbonBacking end
+    if name == "map-header" then return mw.TextBlock_86:GetParent():GetParent() end
+    if name == "match" then return mw.StackBox_1:GetParent():GetParent() end
+    if name == "tasks" then return mw.GraphicsScroll:GetParent():GetParent():GetParent() end
+end
+local function regionRects(j, canvas)
+    local out = {}
+    local okM, mw = pcall(function() return j.MapWidget end)
+    if not (okM and valid(mw)) then return out end
+    for _, name in ipairs(RG) do
+        if name ~= "binder" then
+            local ok, w = pcall(regionWidget, mw, name)
+            out[name] = ok and valid(w) and rectIn(canvas, w) or nil
+        end
+    end
+    local L, R = out["page-left"], out["page-right"]
+    if L and R then out.binder = { l = L.l, t = math.min(L.t, R.t), r = R.r, b = math.max(L.b, R.b) } end
+    return out
+end
+local function rvalid(r) return r ~= nil and r.r - r.l > 1 and r.b - r.t > 1 end
+local function w1(a, b) return a ~= nil and b ~= nil and math.abs(a - b) <= 1 end
 
 -- The game state's lobby countdown, cut to 2 s on this (listen server) host: the character opens the map only when
 -- LobbyMinutes and LobbySeconds are both 0.
@@ -2462,6 +2532,33 @@ local function openMap(phase, viaKey)
             if not got then say("JOPEN %s falling back to the game's own calls from Lua", phase) openViaLua() return after(2), 5, "lua open" end
         end
     end)
+    -- Story 19: once the region elements exist, poll (every 250 ms) until all are shown; a measured-region element
+    -- must never be shown while the test's own reading of its region is still invalid (not painted).
+    step(phase .. ": regions shown", function()
+        if not JS.rgn then return end
+        JS.rgnBad, JS.rgnShownUs, JS.rgnPolls = {}, nil, 0
+        return function()
+            local j = core.ui.journal.find()
+            local canvas = j and mapCanvasOf(j)
+            if not canvas then return false end
+            JS.rgnPolls = JS.rgnPolls + 1
+            local rr = regionRects(j, canvas)
+            local all = true
+            for id, region in pairs(JS.rgnOf) do
+                local shown = core.ui.text.isShown(JS.rgn[id])
+                if shown and RG_MEASURED[region] and not rvalid(rr[region]) then JS.rgnBad[#JS.rgnBad + 1] = id end
+                if not shown then all = false end
+            end
+            if all then JS.rgnShownUs = core.clock.micros() - (JS.openedAt or 0) end
+            return all
+        end, 6, phase .. " region elements shown"
+    end)
+    step(phase .. ": regions shown check", function()
+        if not JS.rgn then return end
+        check(#JS.rgnBad == 0, "JRCOLLAPSE %s no measured-region element shown while its region was not painted (%d polls; shown early: %s)", phase, JS.rgnPolls, table.concat(JS.rgnBad, ","))
+        local us = JS.rgnShownUs
+        check(us ~= nil and us <= 2500000, "JRSHOWN %s every region element shown %.2f s after the opened event (within 4 journal ticks of 500 ms)", phase, (us or -1) / 1e6)
+    end)
     step(phase .. ": settle", function() return afterMs(1200), 3, "layout" end)
     step(phase .. ": check", function()
         local j = core.ui.journal.find()
@@ -2496,10 +2593,38 @@ local function openMap(phase, viaKey)
         check(core.ui.text.isShown(JS.h.jt) == true, "JSHOWN %s 'jt' isShown=true while the map is open", phase)
         local w = taggedIn(canvas, "jt")
         if w then
-            local slot = w.Slot
-            local an, al, pos = slot:GetAnchors(), slot:GetAlignment(), slot:GetPosition()
-            check(near(an.Minimum.X, 1) and near(an.Minimum.Y, 0) and near(al.X, 1) and near(pos.X, -16) and near(pos.Y, 16) and w:IsVisible(),
-                "JCORNER %s 'jt' top-right of the map canvas: anchors=(%.0f,%.0f) position=(%.0f,%.0f) screen=%s canvas=%s", phase, an.Minimum.X, an.Minimum.Y, pos.X, pos.Y, absRect(w), absRect(canvas))
+            -- Story 19 (0.6.0): a plain journal corner is the cover's; checked on the drawn rect, in canvas units.
+            local cover = regionRects(j, canvas).cover
+            local r = rectIn(canvas, w)
+            check(rvalid(cover) and rvalid(r) and w1(r.r, cover.r - 16) and w1(r.t, cover.t + 16) and w:IsVisible(),
+                "JCORNER %s 'jt' in the cover's top-right, 16 inward: jt=%s cover=%s (canvas units) screen=%s canvas=%s", phase, rsA(r), rsA(cover), absRect(w), absRect(canvas))
+        end
+        -- Story 19: the region elements, once they exist (JREGION lines and checks, all within 1 canvas unit).
+        if JS.rgn then
+            local rr = regionRects(j, canvas)
+            local cr = rectIn(canvas, canvas)
+            say("JREGION %s canvas %s", phase, rsA(cr))
+            for _, name in ipairs(RG) do say("JREGION %s region %s %s", phase, name, rsA(rr[name])) end
+            local er = {}
+            for id in pairs(JS.rgn) do
+                local ew = taggedIn(canvas, id)
+                er[id] = ew and rectIn(canvas, ew) or nil
+                say("JREGION %s element %s %s", phase, id, rsA(er[id]))
+            end
+            local m, pl, n = rr.map, rr["page-left"], er.jn
+            check(rvalid(m) and rvalid(pl) and rvalid(n) and w1(n.t, m.b + 8) and w1((n.l + n.r) / 2, (m.l + m.r) / 2)
+                and n.l >= pl.l - 1 and n.r <= pl.r + 1 and n.t >= pl.t - 1 and n.b <= pl.b + 1,
+                "JRNEAR %s 'jn' under the map square, centred, 8 below (jn=%s map=%s), inside page-left %s", phase, rsA(n), rsA(m), rsA(pl))
+            local c, jc = rr.cover, er.jc
+            check(rvalid(c) and rvalid(jc) and w1(jc.r, c.r - 16) and w1(jc.b, c.b - 16),
+                "JRCOVER %s 'jc' at the cover's bottom-right - (16,16): jc=%s cover=%s", phase, rsA(jc), rsA(c))
+            local good, bad = 0, {}
+            for _, name in ipairs(RG) do
+                local id, r, e = "jr-" .. name, rr[name], er["jr-" .. name]
+                if rvalid(r) and rvalid(e) and w1(e.l, r.l + 8) and w1(e.t, r.t + 8) then good = good + 1
+                else bad[#bad + 1] = string.format("%s=%s in %s", id, rsA(e), rsA(r)) end
+            end
+            check(good == #RG, "JRCORNERS %s %d of %d 'jr-<region>' texts at their region's top-left + (8,8)%s", phase, good, #RG, #bad > 0 and (": " .. table.concat(bad, "; ")) or "")
         end
         local st = core.ui.journal.stats()
         JS.attach[#JS.attach + 1] = st.attachLast
@@ -2580,15 +2705,17 @@ local function gcCount(phase)
     step(phase .. ": gc count", function()
         local n, journals = 0, 0
         local mine = {}
-        for _, id in ipairs(J_IDS) do mine[core.ui.text.tagOf(id)] = true end
+        local ids = 0
+        for _, id in ipairs(J_IDS) do mine[core.ui.text.tagOf(id)] = true; ids = ids + 1 end
+        for id in pairs(JS.rgn or {}) do mine[core.ui.text.tagOf(id)] = true; ids = ids + 1 end
         for _, short in ipairs({ TEXT_SHORT, PANEL_SHORT, BUTTON_SHORT }) do
             for _, w in ipairs(FindAllOf(short) or {}) do
                 if valid(w) and mine[tagOfWidget(w) or ""] then n = n + 1 end
             end
         end
         for _, j in ipairs(FindAllOf("Journal_C") or {}) do if valid(j) and not pathOf(j):find("Default__", 1, true) then journals = journals + 1 end end
-        check(n <= #J_IDS, "JGC %s %d live journal element widget(s) after %d opens and a GC (at most %d: one Journal's worth); %d Journal_C alive",
-            phase, n, JS.opens, #J_IDS, journals)
+        check(n <= ids, "JGC %s %d live journal element widget(s) after %d opens and a GC (at most %d: one Journal's worth); %d Journal_C alive",
+            phase, n, JS.opens, ids, journals)
     end)
 end
 
@@ -2599,7 +2726,9 @@ local function buildJournal()
         UIS.jthrow = core.ui.journal.watch(function() error("test journal watcher throws on purpose") end)
         JS.h = {}
         JS.h.jt = core.ui.text.create{ id = "jt", text = CORE .. " journal", place = { host = "journal", corner = "top-right" } }
-        JS.h.jpanel = core.ui.panel.create{ id = "jpanel", place = { host = "journal", corner = "bottom-right" } }
+        -- Story 19: the panel sits in the right page's bottom-right; the cover's bottom-right (a plain journal corner
+        -- since 0.6.0) borders the perk strip, which no test element may cover.
+        JS.h.jpanel = core.ui.panel.create{ id = "jpanel", place = { host = "journal", corner = "bottom-right", region = "page-right", inset = "tight" } }
         JS.clicks = {}
         for i, id in ipairs(J_KIDS) do
             JS.h[id] = core.ui.button.create{ id = id, label = "Button " .. i, place = { panel = JS.h.jpanel },
@@ -2639,6 +2768,20 @@ local function buildJournal()
         say("JSTEPS %d opens, average per step: %s", #JS.steps, stepsAvg(JS.steps))
     end)
     gcCount("opens")
+    -- Story 19: the Journal regions, from here on checked on every open (revive, map change).
+    step("regions: create", function()
+        JS.rgn, JS.rgnOf = {}, {}
+        JS.rgn.jn = core.ui.text.create{ id = "jn", text = CORE .. " under the map", place = { host = "journal", near = "map", side = "below", gap = "tight" } }
+        JS.rgnOf.jn = "map"
+        JS.rgn.jc = core.ui.text.create{ id = "jc", text = "jc", place = { host = "journal", corner = "bottom-right" } }
+        JS.rgnOf.jc = "cover"
+        for _, name in ipairs(RG) do
+            local id = "jr-" .. name
+            JS.rgn[id] = core.ui.text.create{ id = id, text = RG_TEXT[name], place = { host = "journal", corner = "top-left", region = name, inset = "tight" } }
+            JS.rgnOf[id] = name
+        end
+        check(core.ui.text.isShown(JS.rgn.jn) == false, "JRPENDING the region elements are created while the map is closed (%d)", (function() local k = 0 for _ in pairs(JS.rgn) do k = k + 1 end return k end)())
+    end)
     -- AC 2: a death and revive, then the map again.
     step("revive: death's RemoveAllWidgets", function()
         local okR = pcall(function() WLL():RemoveAllWidgets(pc()) end)
@@ -2698,6 +2841,7 @@ local function buildJournal()
             JS.opens, JS.opens, JS.clicks.jb1 or 0, JS.clicks.jb2 or 0, bs.hookTries, bs.clicks, bs.dropped, bs.debounced, bs.ignored)
         core.ui.text.remove(JS.h.jt)
         core.ui.panel.remove(JS.h.jpanel) -- and its children
+        for _, rh in pairs(JS.rgn or {}) do core.ui.text.remove(rh) end
         core.ui.journal.unwatch(UIS.jthrow)
         core.ui.journal.unwatch(UIS.jrec)
     end)

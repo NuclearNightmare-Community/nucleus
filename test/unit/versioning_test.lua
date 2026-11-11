@@ -7,7 +7,7 @@
 -- (on this workspace's machine: MiKTeX's texlua.exe, which is Lua 5.3).
 local ROOT = (arg and arg[0] or ""):match("^(.*)[/\\]test[/\\]unit[/\\][^/\\]+$") or "."
 
-local VERSION = { name = "Nucleus", version = "0.5.0", floor = "0.1.0" }
+local VERSION = { name = "Nucleus", version = "0.6.0", floor = "0.1.0" }
 package.preload["nucleus.version"] = function() return VERSION end
 table.insert(package.searchers, 2, function(name)
     local rest = name:match("^nucleus%.(.+)$")
@@ -101,8 +101,8 @@ ok(S.parse("1.2.3").major == 1 and S.parse(">=1.2.3") == nil and S.parse(5) == n
 -- ---------------------------------------------------------------- features
 local F = require("nucleus.features")
 local declared = F.declared()
-local want = { "call", "clock", "deref", "free", "map.setup", "ref", "ui", "ui.button", "ui.debug", "ui.elements", "ui.hud", "ui.journal", "ui.panel", "ui.place", "ui.text" }
-eq(table.concat(declared, ","), table.concat(want, ","), "declared(): the 0.5.0 feature list (map.setup hand-named), sorted")
+local want = { "call", "clock", "deref", "free", "map.setup", "ref", "ui", "ui.button", "ui.debug", "ui.elements", "ui.hud", "ui.journal", "ui.journal.regions", "ui.panel", "ui.place", "ui.text" }
+eq(table.concat(declared, ","), table.concat(want, ","), "declared(): the 0.6.0 feature list (map.setup and ui.journal.regions hand-named), sorted")
 for i = 2, #declared do ok(declared[i - 1] < declared[i], "declared() is sorted and unique at " .. i) end
 -- the rule
 do
@@ -171,7 +171,7 @@ function StaticFindObject(path)
     if path == "/Game/Mods/Nucleus/ModActor.ModActor_C" then return cls end
     return INVALID
 end
-Nucleus_NativeVersion = function() return "0.5.0", "v3.0.1-1181-g83330635" end
+Nucleus_NativeVersion = function() return "0.6.0", "v3.0.1-1181-g83330635" end
 Nucleus_ClockMicros = function() return 0 end
 
 local Cl = require("nucleus.client")

@@ -6,7 +6,7 @@
 local ROOT = (arg and arg[0] or ""):match("^(.*)[/\\]test[/\\]unit[/\\][^/\\]+$") or "."
 
 -- ---------------------------------------------------------------- module loading as Mods/Nucleus/Scripts/nucleus/*
-package.preload["nucleus.version"] = function() return { name = "Nucleus", version = "0.5.0", floor = "0.1.0" } end
+package.preload["nucleus.version"] = function() return { name = "Nucleus", version = "0.6.0", floor = "0.1.0" } end
 table.insert(package.searchers, 2, function(name)
     local rest = name:match("^nucleus%.(.+)$")
     if not rest then return nil end
@@ -349,7 +349,19 @@ local bad = {
     { { near = "crosshair", align = "middle" }, "unknown align 'middle'" },
     { { host = "Journal", corner = "top-left" }, "unknown host 'Journal' (valid: hud, journal)" },
     { { host = 5, corner = "top-left" }, "unknown host 5 (valid: hud, journal)" },
-    { { host = "journal", near = "crosshair" }, "near is not available on host 'journal' (it has no named elements yet; use corner or absolute)" },
+    { { host = "journal", near = "crosshair" }, "unknown near region 'crosshair' (valid: ammo, binder, cover, map, map-header, match, page-left, page-right, tasks)" },
+    -- story 19: the I/O matrix's error rows
+    { { corner = "top-left", region = "map" }, "region is not available on host 'hud' (journal only)" },
+    { { corner = "top-left", inset = "tight" }, "inset is not available on host 'hud' (journal only)" },
+    { { host = "journal", corner = "top-left", region = "spine" }, "unknown region 'spine' (valid: ammo, binder, cover, map, map-header, match, page-left, page-right, tasks)" },
+    { { host = "journal", corner = "top-left", region = 1 }, "unknown region 1 (valid: ammo, binder, cover, map, map-header, match, page-left, page-right, tasks)" },
+    { { host = "journal", corner = "top-left", inset = "huge" }, "unknown inset 'huge' (valid: tight, normal, loose)" },
+    { { host = "journal", corner = "top-left", inset = 8 }, "unknown inset 8 (valid: tight, normal, loose)" },
+    { { host = "journal", near = "map", region = "map" }, "region is not allowed with near (valid keys: align, gap, host, near, offset, side)" },
+    { { host = "journal", near = "map", inset = "tight" }, "inset is not allowed with near" },
+    { { host = "journal", absolute = {}, region = "map" }, "region is not allowed with absolute (valid keys: absolute, host)" },
+    { { near = "map" }, "unknown near element 'map' (valid: crosshair)" },
+    { { host = "journal", near = "map", corner = "top-left" }, "an intent needs exactly one of corner, near or absolute (got corner and near)" },
 }
 for i, b in ipairs(bad) do raises(function() P.validate(b[1]) end, PL .. b[2], "validate bad " .. i) end
 ok(pcall(P.validate, { corner = "top-left", offset = { x = 4096, y = -4096 } }), "validate: offset at the bound")
@@ -647,6 +659,12 @@ local CDO = obj({}, "/Game/Mods/Nucleus/ModActor.Default__ModActor_C")
 local absFail = nil -- a widget whose rectangle read raises
 function CDO.Nucleus_AbsTopLeft(_, x) if x == absFail then error("geometry read failed") end local r = ABS[x] or R(0, 0, 0, 0) return vec(r.l, r.t) end
 function CDO.Nucleus_AbsBottomRight(_, x) local r = ABS[x] or R(0, 0, 0, 0) return vec(r.r, r.b) end
+function CDO.Nucleus_RectIn(_, canvas, x, frac)
+    RECTIN_CALLS = RECTIN_CALLS + 1
+    assert(canvas and canvas.AddChildToCanvas, "RectIn: the host canvas")
+    local r = RECTS[x] or R(0, 0, 0, 0)
+    return vec(r.l + (r.r - r.l) * frac.X, r.t + (r.b - r.t) * frac.Y)
+end
 for _, n in ipairs({ "Image", "TextBlock", "Border", "Button", "UserWidget", "PanelWidget", "WidgetSwitcher" }) do obj({ name = n }, "/Script/UMG." .. n) end
 local function gw(kind, rect, isa)
     local x = { __class = kind, vis = 0, opacity = 1, isa = { [kind] = true } }
@@ -819,6 +837,45 @@ C.log.debugEnabled = true
 -- ---------------------------------------------------------------- story 13: the Journal's map page as a host
 -- Fake Journal_C: MapWidget (its WidgetTree.RootWidget a CanvasPanel), WidgetSwitcher_0 showing MapWidget.
 local CANVASCLASS = objects["/Script/UMG.CanvasPanel"] or obj({ name = "CanvasPanel" }, "/Script/UMG.CanvasPanel")
+-- Story 19: MapWidget's binder parts. Exact regions are CanvasPanelSlots with the V8.2.1 anchors; measured ones are
+-- widgets with a GetParent chain, measured by CDO.Nucleus_RectIn from RECTS (canvas units; zero until "painted").
+RECTS = setmetatable({}, { __mode = "k" })
+RECTIN_CALLS = 0
+function classed(o, cls) o.GetClass = function() return { GetFName = function() return { ToString = function() return cls end } end } end return o end
+function canvasSlot(minX, minY, maxX, maxY)
+    local sl = classed({ an = { Minimum = vec(minX, minY), Maximum = vec(maxX, maxY) }, off = { Left = 0, Top = 0, Right = 0, Bottom = 0 } }, "CanvasPanelSlot")
+    function sl:GetAnchors() return self.an end
+    function sl:GetOffsets() return self.off end
+    return sl
+end
+function addBinder(map, p)
+    local function wd(name, cls, parent)
+        local x = classed(obj({}, p .. "." .. name), cls)
+        x.GetParent = function() return parent end
+        return x
+    end
+    map.NN_BinderCover = wd("NN_BinderCover", "Image"); map.NN_BinderCover.Slot = canvasSlot(0.052, 0.064, 0.959, 0.987)
+    map.NN_LeftFieldPaper = wd("NN_LeftFieldPaper", "Image"); map.NN_LeftFieldPaper.Slot = canvasSlot(0.068, 0.1, 0.489, 0.831)
+    map.NN_RightFieldPaper = wd("NN_RightFieldPaper", "Image"); map.NN_RightFieldPaper.Slot = canvasSlot(0.514, 0.1, 0.943, 0.831)
+    map.MapUI = wd("MapUI", "MapUI_C")
+    map.NN_AmmoCarbonBacking = wd("NN_AmmoCarbonBacking", "Image")
+    local border = wd("Border", "Border")
+    map.TextBlock_86 = wd("TextBlock_86", "TextBlock", wd("HorizontalBox_32", "HorizontalBox", border))
+    local vb5 = wd("VerticalBox_5", "VerticalBox")
+    map.StackBox_1 = wd("StackBox_1", "StackBox", wd("VerticalBox_6", "VerticalBox", vb5))
+    local hb3 = wd("HorizontalBox_3", "HorizontalBox")
+    map.GraphicsScroll = wd("GraphicsScroll", "ScrollBox", wd("Overlay_0", "Overlay", wd("VerticalBox_0", "VerticalBox", hb3)))
+    map.parts = { map = map.MapUI, ammo = map.NN_AmmoCarbonBacking, ["map-header"] = border, match = vb5, tasks = hb3 }
+end
+-- Paints a Journal: every measured region gets its rectangle (16:9 canvas, 1920x1080).
+function paint(j)
+    local m = j.MapWidget.parts
+    RECTS[m.map] = R(167, 211, 903, 822)
+    RECTS[m["map-header"]] = R(156, 136, 913, 173)
+    RECTS[m.match] = R(1003, 136, 1790, 300)
+    RECTS[m.tasks] = R(1003, 308, 1790, 640)
+    RECTS[m.ammo] = R(1003, 650, 1790, 850)
+end
 local VP_CALLS = 0
 local function newJournal(n)
     local path = "/Engine/Transient.GameEngine_1:GameInstance_1.Journal_C_" .. n
@@ -828,6 +885,7 @@ local function newJournal(n)
     function root:IsA(c) return c and c.name == "CanvasPanel" end
     local map = obj({ WidgetTree = { RootWidget = root } }, path .. ".WidgetTree_1.MapWidget")
     j.MapWidget = map
+    addBinder(map, path .. ".WidgetTree_1")
     local other = obj({}, path .. ".WidgetTree_1.Other")
     j.WidgetSwitcher_0 = obj({ active = map }, path .. ".WidgetTree_1.WidgetSwitcher_0")
     function j.WidgetSwitcher_0:GetActiveWidget() return self.active end
@@ -887,9 +945,9 @@ local cv1 = canvasOfJ(j1)
 ok(tagsIn(cv1) == "ja,jb,jc", "journal: one widget per element in the map canvas", tagsIn(cv1))
 ok(J.isOpen() == true and J.find() == j1 and X.isShown(ja) == true, "journal: isOpen, find, isShown")
 local wja = widgetOfId("ja")
-ok(wja.parent == cv1 and wja.Slot.anchors.Minimum.X == 1 and wja.Slot.position.X == -16 and wja.Slot.position.Y == 16, "journal: top-right of the map canvas")
+ok(wja.parent == cv1 and wja.Slot.anchors.Minimum.X == 0.959 and wja.Slot.anchors.Minimum.Y == 0.064 and wja.Slot.position.X == -16 and wja.Slot.position.Y == 16, "journal: a plain corner is the cover's top-right (0.6.0)")
 local wjb, wjc = widgetOfId("jb"), widgetOfId("jc")
-ok(wjb.Slot.anchors.Minimum.Y == 1 and wjb.Slot.position.Y == -16 and wjc.Slot.position.Y == -(16 + 20 + 16), "journal: bottom-right stack, per host", wjc.Slot.position.Y)
+ok(wjb.Slot.anchors.Minimum.Y == 0.987 and wjb.Slot.position.Y == -16 and wjc.Slot.position.Y == -(16 + 20 + 16), "journal: bottom-right stack, per host", wjc.Slot.position.Y)
 ok(J.stats().attachOpens == 1 and J.stats().attachElements == 3 and J.stats().attachLast > 0, "journal: attach timed per open")
 tick()
 ok(countLogs("^DEBUG ui journal attach n=3 in %d+ us %(canvas %d+; 'ja' %d+ %(create %d+%); .*; place %d+%): 'ja' created") == 1, "journal: one DEBUG attach line on the next tick, with its steps")
@@ -963,7 +1021,7 @@ P.place(mv, { host = "journal", corner = "top-left" })
 ok(not tagsIn(hudNow.OwningCanvas):find("mv", 1, true) and tagsIn(canvasOfJ(j6)):find("mv", 1, true), "place: hud -> journal while open", tagsIn(canvasOfJ(j6)))
 P.place(mv, { host = "hud", corner = "top-left" })
 ok(tagsIn(hudNow.OwningCanvas):find("mv", 1, true) and not tagsIn(canvasOfJ(j6)):find("mv", 1, true), "place: journal -> hud")
-raises(function() P.place(mv, { host = "journal", near = "crosshair" }) end, "near is not available on host 'journal'", "place: near on the journal")
+raises(function() P.place(mv, { host = "journal", near = "crosshair" }) end, "unknown near region 'crosshair'", "place: near on the journal")
 X.remove(mv)
 -- overlaps on a journal element walks the Journal; on a closed one, a reason
 local okOv, why = D.overlaps(ja)
@@ -980,6 +1038,124 @@ ok(#jev == before and tagsIn(canvasOfJ(j7)) == "ja,jb,jc", "journal: unwatched -
 j7.inViewport = false; tick()
 X.remove(ja); X.remove(jb); X.remove(jc)
 ok(J.stats().closes >= 6 and J.stats().findAllCalls == 1, "journal: counters; one seed FindAllOf", J.stats().findAllCalls)
+
+-- ---------------------------------------------------------------- story 19: Journal regions (CAP-10)
+function regionTests() -- a function: the main chunk is at Lua's 200-locals limit
+    -- pure: stack with inset (the HUD's numbers, where inset = gap, are the stack tests above), union, valid rects
+    local st = P.stack("top-left", {
+        { gap = 16, inset = 8, height = 20, offset = { x = 0, y = 0 } },
+        { gap = 16, inset = 8, height = 20, offset = { x = 0, y = 0 } },
+        { gap = 32, inset = 32, height = 20, offset = { x = 0, y = 0 } },
+    })
+    ok(st[1].x == 8 and st[1].y == 8 and st[2].x == 8 and st[2].y == 8 + 20 + 16 and st[3].x == 32 and st[3].y == 44 + 20 + 32, "regions: stack, first inset from both edges, then gap; each its own cross inset")
+    local hv = P.validate({ corner = "top-left", gap = "loose" })
+    ok(hv.insetUnits == 32 and hv.region == nil, "regions: on the HUD inset = gap, no region")
+    local jv = P.validate({ host = "journal", corner = "top-right" })
+    ok(jv.region == "cover" and jv.insetUnits == 16, "regions: a plain journal corner is the cover's; inset defaults to the gap")
+    jv = P.validate({ host = "journal", corner = "bottom-left", region = "page-left", inset = "tight", gap = "loose" })
+    ok(jv.region == "page-left" and jv.insetUnits == 8 and jv.gapUnits == 32, "regions: region and inset validate")
+    ok(P.validate({ host = "journal", near = "map", side = "below" }).near == "map", "regions: near a region validates")
+    local E = function(a, o) return { a = a, o = o } end
+    local u = P.union({ l = E(0.068, 0), t = E(0.1, 0), r = E(0.489, 0), b = E(0.831, 0) }, { l = E(0.514, 0), t = E(0.09, 0), r = E(0.943, 0), b = E(0.84, 0) })
+    ok(u.l.a == 0.068 and u.r.a == 0.943 and u.t.a == 0.09 and u.b.a == 0.84, "regions: binder is the outer edge of the two papers, per edge")
+    ok(P.validRect(0, 0, 2, 2) and not P.validRect(0, 0, 1, 5) and not P.validRect(0, 0, 0, 0) and not P.validRect(0, 0, 0 / 0, 5) and not P.validRect(0, 0, math.huge, 5),
+        "regions: a rect is valid when finite and over 1 unit both ways")
+
+    -- elements(host)
+    local eh = P.elements()
+    ok(type(eh.crosshair) == "string" and next(eh, next(eh)) == nil, "elements(): unchanged, crosshair only")
+    ok(type(P.elements("hud").crosshair) == "string", "elements('hud'): the same")
+    local ej, n = P.elements("journal"), 0
+    for k, d in pairs(ej) do n = n + 1; ok(type(d) == "string" and P._REGIONS[k] ~= nil, "elements('journal'): " .. k) end
+    ok(n == 9, "elements('journal'): nine regions", n)
+    raises(function() P.elements("bogus") end, "nucleus.ui.elements: unknown host 'bogus' (valid: hud, journal)", "elements('bogus')")
+    raises(function() P.elements(1) end, "nucleus.ui.elements: unknown host 1 (valid: hud, journal)", "elements(1)")
+    raises(function() P.elements("hud", 2) end, "nucleus.ui.elements: expected 0 or 1 arguments, got 2", "elements('hud', 2)")
+
+    -- placement on an open Journal (16:9)
+    local rc = X.create{ id = "rc", text = "c", place = { host = "journal", corner = "bottom-left", region = "page-left", inset = "tight" } }
+    local rc2 = X.create{ id = "rc2", text = "cc", place = { host = "journal", corner = "bottom-left", region = "page-left", inset = "tight" } }
+    local pc = X.create{ id = "pc", text = "p", place = { host = "journal", corner = "top-right" } }
+    local nm = X.create{ id = "nm", text = "under the map", place = { host = "journal", near = "map", side = "below", gap = "tight" } }
+    local cm = X.create{ id = "cm", text = "m", place = { host = "journal", corner = "top-left", region = "map", inset = "tight" } }
+    local npr = X.create{ id = "npr", text = "r", place = { host = "journal", near = "page-right", side = "left" } }
+    local bd = X.create{ id = "bd", text = "b", place = { host = "journal", corner = "top-right", region = "binder" } }
+    local jr = openNew(19)
+    RECTIN_CALLS = 0
+    tick() -- opened: attach and place; the measured regions aren't painted yet
+    local w = widgetOfId("rc")
+    local sl = w.Slot
+    ok(sl.anchors.Minimum.X == 0.068 and sl.anchors.Minimum.Y == 0.831 and sl.anchors.Maximum.X == 0.068 and sl.alignment.X == 0 and sl.alignment.Y == 1
+        and sl.position.X == 8 and sl.position.Y == -8, "region corner: page-left bottom-left, tight", sl.position.X .. "," .. sl.position.Y)
+    ok(widgetOfId("rc2").Slot.position.Y == -(8 + 20 + 16) and widgetOfId("rc2").Slot.position.X == 8, "region corner: the second stacks gap after the first", widgetOfId("rc2").Slot.position.Y)
+    sl = widgetOfId("pc").Slot
+    ok(sl.anchors.Minimum.X == 0.959 and sl.anchors.Minimum.Y == 0.064 and sl.alignment.X == 1 and sl.position.X == -16 and sl.position.Y == 16, "plain journal corner: the cover's top-right, gap inward")
+    sl = widgetOfId("npr").Slot
+    ok(sl.anchors.Minimum.X == 0.514 and near(sl.anchors.Minimum.Y, (0.1 + 0.831) / 2) and sl.alignment.X == 1 and sl.alignment.Y == 0.5 and sl.position.X == -16 and sl.position.Y == 0,
+        "near an exact region: the right page's left edge midpoint, x -16")
+    sl = widgetOfId("bd").Slot
+    ok(sl.anchors.Minimum.X == 0.943 and sl.anchors.Minimum.Y == 0.1 and sl.position.X == -16, "binder: the right page's right edge")
+    ok(widgetOfId("nm").vis == 1 and widgetOfId("cm").vis == 1 and X.isShown(nm) == false, "measured: collapsed until painted")
+    ok(X.isShown(rc) and X.isShown(pc), "exact: shown before the first paint")
+    ok(RECTIN_CALLS == 2, "measured: map read once in the open's placement (two RectIn calls)", RECTIN_CALLS)
+    RECTIN_CALLS = 0
+    tick(); tick() -- the attach log line takes the first tick; then not painted: re-read every tick (map once for both elements)
+    ok(RECTIN_CALLS == 2 and widgetOfId("nm").vis == 1, "measured: re-read every tick while invalid, once per region", RECTIN_CALLS)
+    paint(jr)
+    tick()
+    sl = widgetOfId("nm").Slot
+    ok(widgetOfId("nm").vis == 4 and X.isShown(nm), "measured: shown once painted")
+    ok(sl.anchors.Minimum.X == 0 and sl.anchors.Minimum.Y == 0 and sl.alignment.X == 0.5 and sl.alignment.Y == 0 and sl.position.X == (167 + 903) / 2 and sl.position.Y == 822 + 8,
+        "near map: centred tight under the map square", sl.position.X .. "," .. sl.position.Y)
+    sl = widgetOfId("cm").Slot
+    ok(widgetOfId("cm").vis == 4 and sl.anchors.Minimum.X == 0 and sl.position.X == 167 + 8 and sl.position.Y == 211 + 8, "corner in a measured region: the map's top-left + inset", widgetOfId("cm").vis .. " " .. sl.position.X .. "," .. sl.position.Y .. " " .. tostring(C.els.cm.nearWhy))
+    -- cadence: valid -> every 4 journal ticks; re-placed only when the rectangle changes
+    local calls0, uo0 = RECTIN_CALLS, C.stats.uobjectCalls
+    for _ = 1, 8 do tick() end
+    ok(RECTIN_CALLS - calls0 == 4, "measured: valid -> re-read every 4 ticks (map: 2 calls each)", RECTIN_CALLS - calls0)
+    ok(C.stats.uobjectCalls == uo0, "measured: an unchanged rect re-places nothing", C.stats.uobjectCalls - uo0)
+    RECTS[jr.MapWidget.parts.map] = R(200, 211, 936, 822)
+    for _ = 1, 4 do tick() end
+    ok(widgetOfId("nm").Slot.position.X == (200 + 936) / 2 and widgetOfId("cm").Slot.position.X == 208, "measured: a moved rect re-places its elements")
+    -- the rect goes invalid again (zero): collapsed
+    RECTS[jr.MapWidget.parts.map] = R(0, 0, 0, 0)
+    for _ = 1, 4 do tick() end
+    ok(widgetOfId("nm").vis == 1 and widgetOfId("cm").vis == 1, "measured: an invalid rect collapses again")
+    paint(jr); tick()
+    ok(widgetOfId("nm").vis == 4, "measured: valid again -> shown on the next tick")
+    -- every measured region, corner and near, places once painted
+    for _, name in ipairs({ "map-header", "match", "tasks", "ammo" }) do
+        P.place(cm, { host = "journal", corner = "top-left", region = name, inset = "tight" })
+        local r = RECTS[jr.MapWidget.parts[name]]
+        sl = widgetOfId("cm").Slot
+        ok(widgetOfId("cm").vis == 4 and sl.position.X == r.l + 8 and sl.position.Y == r.t + 8, "corner in " .. name)
+        P.place(npr, { host = "journal", near = name, side = "below", align = "start", gap = "tight" })
+        sl = widgetOfId("npr").Slot
+        ok(widgetOfId("npr").vis == 4 and sl.position.X == r.l and sl.position.Y == r.b + 8, "near " .. name)
+    end
+    jr.inViewport = false; tick()
+    -- a missing region widget: one WARN per region, collapsed, nothing raises; other regions unaffected
+    local jm = openNew(22)
+    jm.MapWidget.MapUI = nil
+    local warn0 = countLogs("^WARN journal region 'map': its widget is missing %(MapWidget%.MapUI%)")
+    tick(); paint(jm)
+    for _ = 1, 6 do tick() end
+    ok(countLogs("^WARN journal region 'map': its widget is missing %(MapWidget%.MapUI%)") == warn0 + 1 and widgetOfId("nm").vis == 1 and X.isShown(nm) == false, "missing region: one WARN, collapsed")
+    ok(X.isShown(rc), "missing region: the others still place")
+    -- a retyped one: the header bar's widget isn't a Border
+    jm.MapWidget.parts["map-header"].GetClass = classed({}, "SizeBox").GetClass
+    P.place(cm, { host = "journal", corner = "top-left", region = "map-header" })
+    tick(); tick()
+    ok(countLogs("^WARN journal region 'map%-header': found a SizeBox, not a Border") == 1 and widgetOfId("cm").vis == 1, "retyped region: one WARN, collapsed")
+    -- a slot that isn't stretched
+    jm.MapWidget.NN_BinderCover.Slot.an.Maximum = vec(0.052, 0.064)
+    P.place(pc, { host = "journal", corner = "top-left" })
+    ok(countLogs("^WARN journal region 'cover': its slot is not stretched on both axes") == 1 and widgetOfId("pc").vis == 1, "unstretched exact region: one WARN, collapsed")
+    jm.inViewport = false; tick()
+    for _, h in ipairs({ rc, rc2, pc, nm, cm, npr, bd }) do X.remove(h) end
+end
+
+regionTests()
 
 -- ---------------------------------------------------------------- story 14: panels (ui/panel.lua)
 local function panelTests() -- a function: the main chunk is at Lua's 200-locals limit
