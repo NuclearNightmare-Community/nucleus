@@ -1624,10 +1624,23 @@ function constructTests() -- a function: the main chunk is at Lua's 200-locals l
         sb.Slot = classed({ HorizontalAlignment = 2, VerticalAlignment = 2 }, "ScaleBoxSlot")
         sb.WidthOverride, sb.HeightOverride, sb.bOverride_WidthOverride, sb.bOverride_HeightOverride = 736, 611, true, true
         mw.MapUI.GetParent = function() return sb end
-        mw.chain = { hb = hb, vb = vb, sc = sc, sb = sb, hdr = hdr }
+        -- the Journal's own frames (Journal.json): CanvasPanel_17 (root) -> WidgetSwitcher_0 (CanvasPanelSlot_0,
+        -- stretched, offsets L 3.21 T 1.81 R 2.89 B 0.24) -> MapWidget (WidgetSwitcherSlot, Fill, no padding)
+        local jroot = cw(j.__path .. ".WidgetTree.CanvasPanel_17", "CanvasPanel")
+        j.WidgetTree = { RootWidget = jroot }
+        local sw = j.WidgetSwitcher_0
+        classed(sw, "WidgetSwitcher")
+        sw.GetParent = function() return jroot end
+        sw.Slot = canvasSlot(0, 0, 1, 1)
+        sw.Slot.off = { Left = 3.2112427, Top = 1.8057861, Right = 2.8947754, Bottom = 0.23620605 }
+        mw.GetParent = function() return sw end
+        mw.Slot = classed({ HorizontalAlignment = 0, VerticalAlignment = 0, Padding = { Left = 0, Top = 0, Right = 0, Bottom = 0 } }, "WidgetSwitcherSlot")
+        classed(mw, "MapWidget_C")
+        mw.chain = { hb = hb, vb = vb, sc = sc, sb = sb, hdr = hdr, sw = sw, jroot = jroot }
         return j
     end
-    local VP = { w = 1916, h = 1079, s = 1 }
+    -- the raw viewport: the map page canvas (1916x1079) plus WidgetSwitcher_0's offsets (6.106 x 2.042)
+    local VP = { w = 1916 + 6.1060181, h = 1079 + 2.0419922, s = 1 }
     obj({ GetViewportSize = function() return vec(VP.w, VP.h) end, GetViewportScale = function() return VP.s end }, "/Script/UMG.Default__WidgetLayoutLibrary")
     -- the hook: the Journal class loads through GetAsset; its Construct function is then found (a hit)
     local JCLASS = obj({}, "/Game/Graphics/Journal/Journal.Journal_C")
@@ -1791,6 +1804,38 @@ function constructTests() -- a function: the main chunk is at Lua's 200-locals l
     ch.hdr.GetDesiredSize = function() return vec(755, 0) end
     r7, why7 = P._computedMap(P.journalCtx(j7, canvasOfJ(j7), true))
     ok(r7 == nil and tostring(why7):find("hdr is 0", 1, true), "chain: header height 0 -> not computable", why7)
+    ch.hdr.GetDesiredSize = function() return vec(755, 37) end
+    -- the canvas: the raw viewport less WidgetSwitcher_0's live slot offsets, not the viewport itself
+    local ctx8 = P.journalCtx(j7, canvasOfJ(j7), true)
+    local r8 = P._computedMap(ctx8)
+    ok(r8 and within(ctx8.mapInputs.W, 1916, 1e-3) and within(ctx8.mapInputs.H, 1079, 1e-3) and within(r8.l.o, 165.3, 0.1) and within(r8.t.o, 210.1, 0.1),
+        "canvas: viewport less WidgetSwitcher_0's offsets -> the drawn canvas and map", r8 and string.format("%.2fx%.2f %s", ctx8.mapInputs.W, ctx8.mapInputs.H, P._rectStr(r8)))
+    ch.sw.Slot.off.Left = 13.2112427
+    r8 = P._computedMap(P.journalCtx(j7, canvasOfJ(j7), true))
+    ok(r8 and within(r8.l.o, 162.4, 0.1), "canvas: offsets read live every time (10 more on the left: the canvas 10 narrower)", r8 and P._rectStr(r8))
+    ch.sw.Slot.off.Left = 3.2112427
+    VP.s = 2; VP.w, VP.h = VP.w * 2, VP.h * 2
+    local ctx9 = P.journalCtx(j7, canvasOfJ(j7), true)
+    P._computedMap(ctx9)
+    ok(ctx9.mapInputs and within(ctx9.mapInputs.W, 1916, 1e-3), "canvas: viewport size over its scale first, then the offsets")
+    VP.s = 1; VP.w, VP.h = VP.w / 2, VP.h / 2
+    local swSlot = ch.sw.Slot
+    ch.sw.Slot = canvasSlot(0.5, 0.5, 0.5, 0.5)
+    r8, why7 = P._computedMap(P.journalCtx(j7, canvasOfJ(j7), true))
+    ok(r8 == nil and tostring(why7):find("not stretched on both axes", 1, true), "canvas: a point-anchored WidgetSwitcher_0 -> not computable", why7)
+    ch.sw.Slot = classed({}, "GridSlot")
+    r8, why7 = P._computedMap(P.journalCtx(j7, canvasOfJ(j7), true))
+    ok(r8 == nil and tostring(why7):find("in a GridSlot, not a stretched slot", 1, true), "canvas: another slot type -> not computable", why7)
+    ch.sw.Slot = swSlot
+    j7.MapWidget.Slot.HorizontalAlignment = 2
+    r8, why7 = P._computedMap(P.journalCtx(j7, canvasOfJ(j7), true))
+    ok(r8 == nil and tostring(why7):find("WidgetSwitcherSlot's alignment is 2/0, not Fill", 1, true), "canvas: a centred switcher slot -> not computable", why7)
+    j7.MapWidget.Slot.HorizontalAlignment = 0
+    ch.sw.GetParent = function() return nil end
+    r8, why7 = P._computedMap(P.journalCtx(j7, canvasOfJ(j7), true))
+    ok(r8 == nil and tostring(why7):find("doesn't reach the Journal's root", 1, true), "canvas: a chain that misses the Journal's root -> not computable", why7)
+    ch.sw.GetParent = function() return ch.jroot end
+    ok(P._computedMap(P.journalCtx(j7, canvasOfJ(j7), true)) ~= nil, "canvas: restored -> computable")
 
     -- button click hook: registered from the poll tick, never inside the Construct hook
     ok(X._inHook() == false, "construct: the hook flag is cleared")

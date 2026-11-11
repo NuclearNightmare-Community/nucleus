@@ -459,7 +459,7 @@ end
 
 -- Story 20: the computed map's inputs, read live from the chain MapWidget.MapUI -> SizeBox (NN_FieldMapPlane) ->
 -- ScaleBox (NN_FieldMapViewport) -> VerticalBox (VerticalBox_3) -> HorizontalBox (HorizontalBox_1, stretched in the
--- host canvas), plus the canvas size from the viewport. Every link and the layout's shape are checked (Design Notes
+-- host canvas), plus the map page canvas's size (canvasSize). Every link and the layout's shape are checked (Design Notes
 -- of story 20); anything else returns nil and what was off. Never calls <Core>_RectIn, never a StaticFindObject miss.
 local SIZE_AUTO, SIZE_FILL = 0, 1           -- ESlateSizeRule
 local ALIGN_FILL, ALIGN_CENTER = 0, 2       -- EHorizontalAlignment / EVerticalAlignment
@@ -488,6 +488,58 @@ local function fillSlot(w, slotCls, what)
     if rule ~= SIZE_FILL then return nil, string.format("%s's size rule is %s, not Fill", what, tostring(rule)) end
     if ha ~= ALIGN_FILL or va ~= ALIGN_FILL then return nil, string.format("%s's alignment is %s/%s, not Fill", what, tostring(ha), tostring(va)) end
     return p, val
+end
+
+-- The map page canvas's size (story 20): the viewport's size over its scale, reduced by every slot between the
+-- Journal's root widget and the MapWidget, read live (V8.2.1: WidgetSwitcher_0's stretched CanvasPanelSlot, offsets
+-- about 6.1 x 2.0 units, and the switcher's own slot). The MapWidget's root canvas fills the MapWidget. A stretched
+-- CanvasPanelSlot takes its anchor span minus its offsets; a WidgetSwitcherSlot or OverlaySlot with Fill alignment its
+-- padding; any other slot, a non-stretched one or a chain that doesn't end at the Journal's root is not computable.
+local MAX_FRAMES = 8
+local function canvasSize(ctx, mw)
+    local okR, root = pcall(function() return ctx.j.WidgetTree.RootWidget end)
+    if not (okR and C.valid(root)) then return nil, nil, "the Journal has no root widget" end
+    local rootAddr = root:GetAddress()
+    local frames, w = {}, mw
+    while w:GetAddress() ~= rootAddr do
+        if #frames >= MAX_FRAMES then return nil, nil, "the MapWidget is more than " .. MAX_FRAMES .. " widgets below the Journal's root" end
+        local okS, s = pcall(C.prop, w, "Slot")
+        local cls = okS and s ~= nil and className(s) or nil
+        local f
+        if cls == "CanvasPanelSlot" then
+            local okA, an, off = pcall(function() return s:GetAnchors(), s:GetOffsets() end)
+            if not (okA and an and off) then return nil, nil, "a " .. tostring(className(w)) .. "'s CanvasPanelSlot could not be read" end
+            f = { kind = "canvas", ax = an.Maximum.X - an.Minimum.X, ay = an.Maximum.Y - an.Minimum.Y,
+                dx = off.Left + off.Right, dy = off.Top + off.Bottom }
+            if not (finite(f.ax) and finite(f.ay) and f.ax > 0 and f.ay > 0) then
+                return nil, nil, "a " .. tostring(className(w)) .. " between the Journal's root and the map page is not stretched on both axes"
+            end
+        elseif cls == "WidgetSwitcherSlot" or cls == "OverlaySlot" then
+            local okP, ha, va, p = pcall(function() return tonumber(s.HorizontalAlignment), tonumber(s.VerticalAlignment), pad(s.Padding) end)
+            if not okP then return nil, nil, "a " .. cls .. " could not be read" end
+            if ha ~= ALIGN_FILL or va ~= ALIGN_FILL then return nil, nil, string.format("a %s's alignment is %s/%s, not Fill", cls, tostring(ha), tostring(va)) end
+            f = { kind = "pad", ax = 1, ay = 1, dx = p.L + p.R, dy = p.T + p.B }
+        else
+            return nil, nil, "a " .. tostring(className(w)) .. " between the Journal's root and the map page is in a " .. tostring(cls) .. ", not a stretched slot"
+        end
+        frames[#frames + 1] = f
+        local okP, p = pcall(C.call0, w, "GetParent")
+        if not (okP and C.valid(p)) then return nil, nil, "the map page's chain doesn't reach the Journal's root widget" end
+        w = p
+    end
+    local wll = C.found(WLL_PATH)
+    if not wll then return nil, nil, "WidgetLayoutLibrary not found" end
+    local okW, vs, sc = pcall(function() return wll:GetViewportSize(ctx.j), wll:GetViewportScale(ctx.j) end)
+    if not (okW and vs) then return nil, nil, "the viewport size could not be read" end
+    sc = tonumber(sc)
+    if not finite(sc) or sc <= 0 then return nil, nil, "the viewport scale is " .. tostring(sc) end
+    local W, H = tonumber(vs.X) / sc, tonumber(vs.Y) / sc
+    for k = #frames, 1, -1 do -- from the Journal's root down to the MapWidget
+        local f = frames[k]
+        W, H = f.ax * W - f.dx, f.ay * H - f.dy
+    end
+    if not (finite(W) and finite(H)) then return nil, nil, "the canvas size is not finite" end
+    return W, H
 end
 
 local function readMapInputs(ctx)
@@ -548,14 +600,10 @@ local function readMapInputs(ctx)
     local okD, hdr = pcall(function() h0w:ForceLayoutPrepass() return h0w:GetDesiredSize().Y end)
     if not okD then return nil, "the header's height could not be read" end
     i.hdr = tonumber(hdr)
-    -- The canvas size: the viewport's size over its scale.
-    local wll = C.found(WLL_PATH)
-    if not wll then return nil, "WidgetLayoutLibrary not found" end
-    local okW, vs, sc2 = pcall(function() return wll:GetViewportSize(ctx.j), wll:GetViewportScale(ctx.j) end)
-    if not (okW and vs) then return nil, "the viewport size could not be read" end
-    sc2 = tonumber(sc2)
-    if not finite(sc2) or sc2 <= 0 then return nil, "the viewport scale is " .. tostring(sc2) end
-    i.W, i.H = tonumber(vs.X) / sc2, tonumber(vs.Y) / sc2
+    -- The canvas size: the map page canvas's own frame (below).
+    local W, H, whyC = canvasSize(ctx, mw)
+    if not W then return nil, whyC end
+    i.W, i.H = W, H
     return i
 end
 
