@@ -361,6 +361,9 @@ C.bind{ mod = "TestMod", log = L, ref = ref, deref = deref, free = free, micros 
 F.lang = "zh-Hans"
 ok(S.pick({ en = "MODS", zh = "ZH" }) == "ZH", "language: zh-Hans falls back to its prefix zh")
 ok(S.pick({ en = "MODS", ["zh-Hans"] = "HANS", zh = "ZH" }) == "HANS", "language: the exact tag first")
+ok(S.pick({ en = "MODS", ["zh-hans"] = "HANS" }) == "HANS", "language: a tag in another case still matches")
+F.lang = "pt-BR"
+ok(S.pick({ en = "MODS", PT = "PT" }) == "PT", "language: the prefix in another case still matches")
 F.lang = "cs"
 ok(S.pick({ en = "MODS", zh = "ZH" }) == "MODS", "language: unknown -> en")
 F.lang = "en"
@@ -646,6 +649,24 @@ ok(e7w.ButtonText.ColorAndOpacity.SpecifiedColor.G == 1 and e7w.ButtonText.Color
 fireHook("UI_Button_Master_C:BP_OnUnhovered", e7w)
 ok(e7w.ButtonText.ColorAndOpacity.SpecifiedColor.G == 0.5, "override: textColor again on unhover")
 E.removeEntry(e7)
+-- bold / italic: the preset font's typeface names (Regular and Bold here), else one WARN and the preset's typeface
+local function liveEntry() for _, r in pairs(E._records) do if r.btn then return E._findChild(m9.VerticalBox_104, r.btn) end end end
+F.assets["/Game/Fonts/Remaster/AlumniSans-SemiBold_Font.AlumniSans-SemiBold_Font"].CompositeFont =
+    { DefaultTypeface = { Fonts = { { Name = fn("Regular") }, { Name = fn("Bold") } } } }
+local e8 = E.entry{ id = "m8", label = { en = "EIGHT" }, onClick = function() end, style = { preset = "options", bold = true } }
+local e8w = liveEntry()
+ok(e8w and e8w.ButtonText.Font.TypefaceFontName == "Bold", "override: bold sets the font's Bold typeface")
+E.removeEntry(e8)
+local e8i = E.entry{ id = "m8i", label = { en = "EIGHT" }, onClick = function() end, style = { preset = "options", italic = true } }
+local e8iw = liveEntry()
+ok(e8iw and e8iw.ButtonText.Font.TypefaceFontName == "Default" and countLogs("the preset's font has no italic typeface; style.italic refused") == 1,
+    "override: italic on a font without Italic: one WARN, the preset's typeface kept")
+E.removeEntry(e8i)
+-- an onClick that removes its own entry and then fails: its error is logged, not lost in the click hook
+local e9
+e9 = E.entry{ id = "m9", label = { en = "NINE" }, onClick = function() E.removeEntry(e9); error("boom") end }
+fireHook("CommonButtonBase:HandleButtonClicked", liveEntry())
+ok(countLogs("menu entry 'm9' onClick: ") == 1 and countLogs("menu click handling failed") == 0, "onClick that removes its entry and fails: its own WARN", logs[#logs])
 F.lang = "en"
 local WA = SC.open{ id = "A" }
 local WB = SC.open{ id = "B", close = false }
