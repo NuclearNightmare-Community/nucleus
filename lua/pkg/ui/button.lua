@@ -180,13 +180,14 @@ X.KIND.button = {
     end,
 }
 
--- Whether a container holds a button at any depth (story 21: a row in a list).
-local function holdsButton(el)
+-- Whether a container holds an element of a kind in set, at any depth (story 21: a row in a list).
+local function holds(el, set)
     for _, ch in ipairs(el.children or {}) do
-        if not ch.removed and (ch.kind == "button" or (ch.children and holdsButton(ch))) then return true end
+        if not ch.removed and (set[ch.kind] or (ch.children and holds(ch, set))) then return true end
     end
     return false
 end
+local BUTTONS, ROWS_LISTS = { button = true }, { row = true, list = true }
 
 -- Buttons need a host with a cursor; so do lists and rows (story 21), and a panel holding buttons. Called by the
 -- engine for every create and place.
@@ -196,8 +197,13 @@ X.checkHost = function(kind, host, fn, el)
     if NEEDS_CURSOR[kind] then
         C.fail("%s.%s: %s need a host with a cursor (%s); see input mode, story 16", C.UI, fn, NEEDS_CURSOR[kind], C.CURSOR_HOSTS)
     end
-    if kind == "panel" and el and holdsButton(el) then
-        C.fail("%s.%s: panel '%s' holds buttons, which need a host with a cursor (%s); see input mode, story 16", C.UI, fn, el.id, C.CURSOR_HOSTS)
+    if kind == "panel" and el then
+        if holds(el, BUTTONS) then
+            C.fail("%s.%s: panel '%s' holds buttons, which need a host with a cursor (%s); see input mode, story 16", C.UI, fn, el.id, C.CURSOR_HOSTS)
+        end
+        if holds(el, ROWS_LISTS) then
+            C.fail("%s.%s: panel '%s' holds rows or lists, which need a host with a cursor (%s); see input mode, story 16", C.UI, fn, el.id, C.CURSOR_HOSTS)
+        end
     end
 end
 
