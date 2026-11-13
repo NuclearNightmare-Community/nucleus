@@ -423,10 +423,11 @@ M._onClick(function(w)
     ent.clicks = ent.clicks + 1
     T.clicks = T.clicks + 1
     if C.debugOn() then C.log.debug("ui menu entry '%s' clicked (%d)", ent.id, ent.clicks) end
-    local ok, err = pcall(ent.onClick, ent.handle)
-    if not ok and not ent.warnedClick then
-        ent.warnedClick = true
-        C.log.warn("menu entry '%s' onClick: %s", ent.id, tostring(err):match("^[^\n]*"))
+    local e = ent -- onClick may call removeEntry, which clears ent
+    local ok, err = pcall(e.onClick, e.handle)
+    if not ok and not e.warnedClick then
+        e.warnedClick = true
+        C.log.warn("menu entry '%s' onClick: %s", e.id, tostring(err):match("^[^\n]*"))
     end
 end)
 

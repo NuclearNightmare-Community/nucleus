@@ -35,15 +35,28 @@ function S.language()
     return "en"
 end
 
--- The string for lang from a per-language table: the exact tag, then its prefix before "-", then en.
+-- The string for key k in t: the key as given, else one that differs only in case (tags are case-insensitive:
+-- "zh-hans" matches the game's "zh-Hans").
+local function get(t, k)
+    local v = t[k]
+    if type(v) == "string" then return v, k end
+    local lk = k:lower()
+    for key, s in pairs(t) do
+        if type(key) == "string" and type(s) == "string" and key:lower() == lk then return s, key end
+    end
+    return nil
+end
+
+-- The string for lang from a per-language table: the exact tag, then its prefix before "-", then en; tags are
+-- matched without regard to case.
 function S.pick(t, lang)
     lang = lang or S.language()
-    local v = t[lang]
-    if type(v) == "string" then return v, lang end
+    local v, k = get(t, lang)
+    if v then return v, k end
     local prefix = lang:match("^([^-]+)%-")
     if prefix then
-        v = t[prefix]
-        if type(v) == "string" then return v, prefix end
+        v, k = get(t, prefix)
+        if v then return v, k end
     end
     return t.en, "en"
 end
