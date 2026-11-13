@@ -656,6 +656,93 @@ ok(F.focus == wa2 and wa2.vis == 0 and SC.top() == WA, "close B: focus and input
 SC.close(WA)
 ok(F.focus == m9, "close A: focus back to the menu")
 
+-- ---------------------------------------------------------------- (a) a button in a row in a list: hidden containers drop clicks
+local function widgetTagged(id)
+    for _, o in pairs(handles) do
+        local t = type(o) == "table" and ((o.tip ~= nil and o.tip ~= "" and o.tip) or o.tag) or nil
+        if t and t:sub(-#id - 1) == ":" .. id and o.__alive then return o end
+    end
+    return nil
+end
+local WT = SC.open{ id = "T" }
+local lt = LS.create{ id = "lt", place = { screen = WT, corner = "top-left" }, size = { 300, 200 } }
+local rt = RS.create{ id = "rt", place = { list = lt } }
+local hits = 0
+B.create{ id = "bt", label = "GO", place = { row = rt, fill = 1 }, onClick = function() hits = hits + 1 end }
+local btw = widgetTagged("bt")
+ok(btw ~= nil, "nested button: its widget exists")
+local d0 = B.stats().dropped
+LS.setVisible(lt, false)
+clock = clock + 300000
+fireHook("WBP_NucleusButton_C:Nucleus_OnClicked", btw)
+ok(hits == 0 and B.stats().dropped == d0 + 1, "nested button: a hidden list drops the click", B.stats().dropped)
+LS.setVisible(lt, true); RS.setVisible(rt, false)
+clock = clock + 300000
+fireHook("WBP_NucleusButton_C:Nucleus_OnClicked", btw)
+ok(hits == 0 and B.stats().dropped == d0 + 2, "nested button: a hidden row drops the click")
+RS.setVisible(rt, true)
+clock = clock + 300000
+fireHook("WBP_NucleusButton_C:Nucleus_OnClicked", btw)
+ok(hits == 1, "nested button: visible again, the click runs")
+
+-- ---------------------------------------------------------------- (b) a panel holding a row (with or without a button) stays off the HUD
+local PNm = require("nucleus.ui.panel")
+local pb = PNm.create{ id = "pb", place = { host = "journal", corner = "top-left" } }
+local rb = RS.create{ id = "rb", place = { panel = pb } }
+B.create{ id = "bb2", label = "X", place = { row = rb }, onClick = function() end }
+raises(function() P.place(pb, { host = "hud", corner = "top-left" }) end, "nucleus.ui.place: panel 'pb' holds buttons, which need a host with a cursor (journal, menu, screen)", "panel with a row with a button: not to the HUD")
+local pr = PNm.create{ id = "pr", place = { host = "journal", corner = "bottom-left" } }
+RS.create{ id = "rr2", place = { panel = pr } }
+raises(function() P.place(pr, { host = "hud", corner = "top-left" }) end, "nucleus.ui.place: panel 'pr' holds rows or lists, which need a host with a cursor (journal, menu, screen)", "panel with only a row: not to the HUD")
+PNm.remove(pb); PNm.remove(pr)
+
+-- ---------------------------------------------------------------- (c) game look back to plain: engine font at 18, plain colours
+local mtw = widgetTagged("mt")
+ok(mtw and mtw.font and mtw.font.__asset == "AlumniSans-Regular_Font", "plain switch: the menu text starts in the game look")
+X.setStyle(mtext, { look = "plain" })
+ok(mtw.font.__asset == "Roboto" and mtw.size == 18 and mtw.color[1] == 1 and mtw.color[4] == 1 and mtw.color[5] == 0.85, "plain switch: text back to Roboto 18, white with its shadow")
+local gb = B.create{ id = "gb", label = "G", place = { screen = WT, corner = "bottom-left" }, onClick = function() end }
+local gbw = widgetTagged("gb")
+ok(gbw and gbw.mats ~= nil, "plain switch: the window button starts in the game look")
+X._setStyle(C.handleOf[gb], X.resolveStyle({ look = "plain" }, "button"))
+ok(gbw.labelLook[1].__asset == "Roboto" and gbw.labelLook[2] == 18 and gbw.labelLook[3] == 1 and gbw.labelLook[11] == 0.85 and gbw.colors ~= nil, "plain switch: button label Roboto 18 white with shadow, plain colours")
+SC.close(WT)
+X.setStyle(mtext, nil) -- back to the host default (game) for the asset-missing case below
+
+-- ---------------------------------------------------------------- (d) the dependent unloads: the entry leaves the live menu
+E.entry{ id = "un", label = { en = "UNLOAD" }, onClick = function() end }
+ok(#m9.VerticalBox_104.children == 6 and m9.Overlay_0.Slot.size.Y == 300, "unload: the entry was inserted")
+E._unload()
+ok(column(m9) == "START GAME,JOIN GAME,CUSTOMIZE,OPTIONS,QUIT" and m9.Overlay_0.Slot.size.Y == 250 and m9.NN_FieldNavigationBacking.Slot.size.Y == 282 and E.stats().entry == nil, "unload: the column and the backing back to stock")
+
+-- ---------------------------------------------------------------- (f) a lower window's widget gone: lost, the next one on top and focused
+local events2 = {}
+SC.watch(function(_, info) events2[#events2 + 1] = info.event .. ":" .. info.id end)
+local WA2 = SC.open{ id = "A" }
+SC.open{ id = "B" }
+local wa3, wb3 = screenOf("A"), screenOf("B")
+kill(wb3)
+tick()
+ok(events2[#events2] == "lost:B" and SC.top() == WA2 and wa3.vis == 0 and F.focus == wa3, "widget gone: B lost, A on top, hit-testable and focused", events2[#events2])
+SC.close(WA2)
+
+-- ---------------------------------------------------------------- (g) at most 64 window ids
+local nIds = 0
+for _ in pairs(C.windows) do nIds = nIds + 1 end
+for i = nIds + 1, 64 do SC.close(SC.open{ id = "id" .. i }) end
+raises(function() SC.open{ id = "id65" } end, "nucleus.ui.screen.open: this mod already has 64 window ids (at most 64)", "a 65th window id raises")
+
+-- ---------------------------------------------------------------- (e) a late watcher, hidden and shown, lost
+local mev = {}
+M.watch(function(m, info) mev[#mev + 1] = { e = info.event, r = info.reason, m = m } end)
+tick()
+ok(mev[1] and mev[1].e == "opened" and mev[1].r == "late watcher: menu already open" and mev[1].m == m9, "late watcher: opened on the next tick", mev[1] and mev[1].r)
+m9.opacity = 0; tick()
+m9.opacity = 1; tick()
+ok(mev[2] and mev[2].e == "hidden" and mev[3] and mev[3].e == "shown", "watcher: hidden then shown")
+kill(m9); tick()
+ok(mev[4] and mev[4].e == "lost" and mev[4].m == nil, "watcher: lost with menu nil")
+
 -- ---------------------------------------------------------------- asset missing: plain look, one WARN
 F.missing["/Game/Fonts/Remaster/AlumniSans-Regular_Font.AlumniSans-Regular_Font"] = true
 A._reset()

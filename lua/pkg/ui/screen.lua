@@ -200,7 +200,8 @@ local function ensureMenu()
                 if w then X._tickHost(C.windowHost(rec.id), w)
                 else
                     closeOne(rec, "its widget is gone", "lost")
-                    if #order > 0 then local top = C.windows[order[#order]] setTop(top, true) end
+                    local top = order[#order] and C.windows[order[#order]] or nil
+                    if top then setTop(top, true); focusWindow(top) else focusMenu() end
                 end
             end
         end

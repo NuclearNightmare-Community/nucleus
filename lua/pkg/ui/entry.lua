@@ -490,6 +490,7 @@ function E.entry(opts, ...)
     if mm and not M._inHook then
         local ok, err = pcall(insert, mm, path, "call")
         if not ok then C.warnOnce("entry insert", "ui menu entry: inserting failed: %s", tostring(err):match("^[^\n]*")) end
+        ensureHoverHooks() -- a menu exists here, so this is not a hook before the menu
     end
     return h
 end

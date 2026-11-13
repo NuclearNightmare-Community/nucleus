@@ -64,7 +64,7 @@ function A.get(key, cachedOnly)
     return got
 end
 
--- Loads every game-look asset (fonts and materials) and the menu's classes; extra(), when set, loads more (text.lua:
+-- Loads every game-look asset (fonts and materials) and the engine font; extra(), when set, loads more (text.lua:
 -- core's widget classes in use). Never raises.
 A.extra = nil
 function A.preload()
