@@ -750,14 +750,14 @@ buttonCases = function(P, f)
     case(P .. "button-label-bool", "ui.button.create{ label = true }", f(B.create, { id = "bb", label = true, place = jp, onClick = nop }), E.err(BC .. "label must be a string, a number or nil, got boolean"))
     case(P .. "button-label-65", "ui.button.create{ label = <65 chars> }", f(B.create, { id = "bb", label = string.rep("x", 65), place = jp, onClick = nop }), E.err(BC .. "label is 65 characters, at most 64"))
     case(P .. "button-host-hud", "ui.button.create{ place = { host = 'hud', corner = 'top-left' } }", f(B.create, { id = "bb", label = "x", place = { host = "hud", corner = "top-left" }, onClick = nop }),
-        E.err(BC .. "buttons need a host with a cursor (journal); see input mode, story 16"))
-    case(P .. "button-host-default", "ui.button.create{ no place: the HUD }", f(B.create, { id = "bb", label = "x", onClick = nop }), E.err(BC .. "buttons need a host with a cursor (journal)"))
+        E.err(BC .. "buttons need a host with a cursor (journal, menu, screen); see input mode, story 16"))
+    case(P .. "button-host-default", "ui.button.create{ no place: the HUD }", f(B.create, { id = "bb", label = "x", onClick = nop }), E.err(BC .. "buttons need a host with a cursor (journal, menu, screen)"))
     case(P .. "button-enabled-yes", "ui.button.create{ enabled = 'yes' }", f(B.create, { id = "bb", label = "x", place = jp, onClick = nop, enabled = "yes" }), E.err(BC .. "enabled must be a boolean or nil, got 'yes'"))
     case(P .. "button-enabled-num", "ui.button.create{ enabled = 1 }", f(B.create, { id = "bb", label = "x", place = jp, onClick = nop, enabled = 1 }), E.err(BC .. "enabled must be a boolean or nil, got 1"))
     case(P .. "button-style-pink", "ui.button.create{ style = { background = 'pink' } }", f(B.create, { id = "bb", label = "x", place = jp, onClick = nop, style = { background = "pink" } }), E.err(UI .. ".button: unknown background 'pink'"))
     case(P .. "button-place-str", "ui.button.create{ place = 'journal' }", f(B.create, { id = "bb", label = "x", place = "journal", onClick = nop }), E.err(BC .. "place must be a table or nil, got 'journal'"))
     local hp = PN.create{ id = "bhp", place = { absolute = { anchor = "center", x = 0, y = 220 } } }
-    case(P .. "button-in-hud-panel", "ui.button.create{ place = { panel = <panel on the HUD> } }", f(B.create, { id = "bb", label = "x", place = { panel = hp }, onClick = nop }), E.err(BC .. "buttons need a host with a cursor (journal)"))
+    case(P .. "button-in-hud-panel", "ui.button.create{ place = { panel = <panel on the HUD> } }", f(B.create, { id = "bb", label = "x", place = { panel = hp }, onClick = nop }), E.err(BC .. "buttons need a host with a cursor (journal, menu, screen)"))
     PN.remove(hp)
     local bb
     case(P .. "button-create-ok", "ui.button.create{ id = 'bb', place = journal } [control: pending on the closed Journal]", function()
@@ -766,11 +766,11 @@ buttonCases = function(P, f)
     end, E.ret("a handle { id = 'bb' }", function(r) return type(r[1]) == "table" and r[1].id == "bb" end))
     if not bb then return end
     case(P .. "button-isshown-closed", "ui.button.isShown(b) [control: the Journal is closed]", f(B.isShown, bb), E.ret("false", function(r) return r[1] == false end))
-    case(P .. "button-place-hud", "ui.place(b, { host = 'hud', corner = 'top-left' })", f(U.place, bb, { host = "hud", corner = "top-left" }), E.err(UI .. ".place: buttons need a host with a cursor (journal)"))
+    case(P .. "button-place-hud", "ui.place(b, { host = 'hud', corner = 'top-left' })", f(U.place, bb, { host = "hud", corner = "top-left" }), E.err(UI .. ".place: buttons need a host with a cursor (journal, menu, screen)"))
     local jpan = PN.create{ id = "bjp", place = { host = "journal", corner = "bottom-left" } }
     B.create{ id = "bb2", label = "z", place = { panel = jpan }, onClick = nop }
     case(P .. "button-panel-to-hud", "ui.place(<panel holding a button>, { host = 'hud', ... })", f(U.place, jpan, { host = "hud", corner = "top-left" }),
-        E.err(UI .. ".place: panel 'bjp' holds buttons, which need a host with a cursor (journal); see input mode, story 16"))
+        E.err(UI .. ".place: panel 'bjp' holds buttons, which need a host with a cursor (journal, menu, screen); see input mode, story 16"))
     PN.remove(jpan)
     case(P .. "button-setlabel-table", "ui.button.setLabel(b, {})", f(B.setLabel, bb, {}), E.err(UI .. ".button.setLabel: label must be a string, a number or nil, got table"))
     case(P .. "button-setlabel-65", "ui.button.setLabel(b, <65 chars>)", f(B.setLabel, bb, string.rep("z", 65)), E.err(UI .. ".button.setLabel: label is 65 characters, at most 64"))
@@ -794,6 +794,213 @@ buttonCases = function(P, f)
     case(P .. "button-removed-setlabel", "ui.button.setLabel(<removed>, 'x')", f(B.setLabel, bb, "x"), E.err(UI .. ".button: handle 'bb' was removed"))
     case(P .. "button-removed-isshown", "ui.button.isShown(<removed>)", f(B.isShown, bb), E.err(UI .. ".button: handle 'bb' was removed"))
     case(P .. "button-stats", "ui.button.stats() [control]", f(B.stats), E.ret("a table, hooked", function(r) return type(r[1]) == "table" and r[1].hooked == true and r[1].hookTries == 1 end))
+end
+
+-- Story 21 (Mod Manager story 2, core 0.7.0): the menu entry, the menu and screen hosts, lists, rows and the game look
+-- with bad values, on the game thread. The title-screen menu is not open in either world of this scenario (menu1 is
+-- the startup screen, match1 a match), so screen.open refuses everywhere here; its successful paths (and the ninth
+-- window) run in the menu scenario. Containers are made on the closed Journal (no widgets). Everything made is removed.
+local MM_CASE_IDS = {}
+local function mmCases(P, f)
+    local U = core.ui
+    local UI = CORE:lower() .. ".ui"
+    local nop = function() end
+    local function mcase(id, desc, fn, expect) MM_CASE_IDS[#MM_CASE_IDS + 1] = id; case(P .. id, desc, fn, expect) end
+    local ME_ = UI .. ".menu.entry: "
+    local L = { en = "SKEL BAD" }
+    local NIL = {}
+    local function entry(over)
+        local o = { id = "be", label = L, onClick = nop }
+        for k, v in pairs(over) do if v == NIL then o[k] = nil else o[k] = v end end
+        return f(U.menu.entry, o)
+    end
+    -- menu.entry: the argument, keys, id, label, onClick
+    mcase("mm-entry-none", "ui.menu.entry()", f(U.menu.entry), E.err(ME_ .. "expected a table { id = ..., label = ..., onClick = ..., style = ... }, got nil"))
+    mcase("mm-entry-str", "ui.menu.entry('x')", f(U.menu.entry, "x"), E.err(ME_ .. "expected a table { id = ..., label = ..., onClick = ..., style = ... }, got 'x'"))
+    mcase("mm-entry-unknown", "ui.menu.entry{ ..., place = {} }", entry({ place = {} }), E.err(ME_ .. "unknown key 'place' (valid: id, label, onClick, style)"))
+    mcase("mm-entry-noid", "ui.menu.entry{ no id }", entry({ id = NIL }), E.err(ME_ .. "id must be a string, got nil"))
+    mcase("mm-entry-space", "ui.menu.entry{ id = 'a b' }", entry({ id = "a b" }), E.err(ME_ .. "id 'a b' has characters outside A-Z a-z 0-9 _ . -"))
+    mcase("mm-entry-65", "ui.menu.entry{ id = <65 chars> }", entry({ id = string.rep("e", 65) }), E.err(ME_ .. "id is 65 characters, at most 64"))
+    local LB = 'label must be a table of strings by language, like { en = "MANAGE MODS" }, got '
+    mcase("mm-label-nil", "ui.menu.entry{ no label }", entry({ label = NIL }), E.err(ME_ .. LB .. "nil"))
+    mcase("mm-label-str", "ui.menu.entry{ label = 'MODS' }", entry({ label = "MODS" }), E.err(ME_ .. LB .. "'MODS'"))
+    mcase("mm-label-noen", "ui.menu.entry{ label = { es = 'MODS' } }", entry({ label = { es = "MODS" } }), E.err(ME_ .. "label needs an en string (the fallback)"))
+    mcase("mm-label-lower", "ui.menu.entry{ label = { en = 'Manage Mods' } }", entry({ label = { en = "Manage Mods" } }), E.err(ME_ .. "label.en must be upper case like the menu's own labels, got 'Manage Mods'"))
+    local many = { en = "MODS" }
+    for i = 1, 16 do many["l" .. string.char(96 + i)] = "X" end
+    mcase("mm-label-17", "ui.menu.entry{ label = <17 languages> }", entry({ label = many }), E.err(ME_ .. "label has 17 languages, at most 16"))
+    mcase("mm-label-empty", "ui.menu.entry{ label = { en = '' } }", entry({ label = { en = "" } }), E.err(ME_ .. "label.en must be a string of 1 to 64 bytes, got ''"))
+    mcase("mm-label-65", "ui.menu.entry{ label = { en = <65 bytes> } }", entry({ label = { en = string.rep("M", 65) } }), E.err(ME_ .. "label.en must be a string of 1 to 64 bytes"))
+    mcase("mm-label-num", "ui.menu.entry{ label = { en = 'MODS', es = 5 } }", entry({ label = { en = "MODS", es = 5 } }), E.err(ME_ .. "label.es must be a string of 1 to 64 bytes, got 5"))
+    mcase("mm-label-key-digit", "ui.menu.entry{ label = { en = 'MODS', zh1 = 'X' } }", entry({ label = { en = "MODS", zh1 = "X" } }), E.err(ME_ .. "label key 'zh1' is not a language tag (letters and -, at most 16 characters)"))
+    mcase("mm-label-key-long", "ui.menu.entry{ label = { en = 'MODS', <17-letter key> = 'X' } }", entry({ label = { en = "MODS", [string.rep("a", 17)] = "X" } }), E.err(ME_ .. "label key '" .. string.rep("a", 17) .. "' is not a language tag"))
+    mcase("mm-label-key-num", "ui.menu.entry{ label = { en = 'MODS', [1] = 'X' } }", entry({ label = { en = "MODS", [1] = "X" } }), E.err(ME_ .. "label key 1 is not a language tag"))
+    mcase("mm-onclick-nil", "ui.menu.entry{ no onClick }", entry({ onClick = NIL }), E.err(ME_ .. "onClick must be a function, got nil"))
+    mcase("mm-onclick-str", "ui.menu.entry{ onClick = 'f' }", entry({ onClick = "f" }), E.err(ME_ .. "onClick must be a function, got 'f'"))
+    -- style: presets and the bounded overrides
+    mcase("mm-style-preset", "ui.menu.entry{ style = 'big' }", entry({ style = "big" }), E.err(ME_ .. "unknown style preset 'big' (valid: options, primary)"))
+    mcase("mm-style-num", "ui.menu.entry{ style = 5 }", entry({ style = 5 }), E.err(ME_ .. "style must be a preset name or a table { preset = ..., ... }, got 5"))
+    mcase("mm-style-tpreset", "ui.menu.entry{ style = { preset = 'big' } }", entry({ style = { preset = "big" } }), E.err(ME_ .. "unknown style preset 'big' (valid: options, primary)"))
+    mcase("mm-style-key", "ui.menu.entry{ style = { size = 26 } }", entry({ style = { size = 26 } }), E.err(ME_ .. "unknown style key 'size' (valid: bold, fontSize, hoverColor, italic, preset, textColor)"))
+    mcase("mm-style-font-500", "ui.menu.entry{ style = { fontSize = 500 } }", entry({ style = { fontSize = 500 } }), E.err(ME_ .. "style.fontSize must be an integer from 16 to 28, got 500"))
+    mcase("mm-style-font-15", "ui.menu.entry{ style = { fontSize = 15 } }", entry({ style = { fontSize = 15 } }), E.err(ME_ .. "style.fontSize must be an integer from 16 to 28, got 15"))
+    mcase("mm-style-font-float", "ui.menu.entry{ style = { fontSize = 22.5 } }", entry({ style = { fontSize = 22.5 } }), E.err(ME_ .. "style.fontSize must be an integer from 16 to 28, got 22.5"))
+    mcase("mm-style-color-2", "ui.menu.entry{ style = { textColor = { 1, 2, 0, 1 } } }", entry({ style = { textColor = { 1, 2, 0, 1 } } }), E.err(ME_ .. "style.textColor.g must be a number from 0 to 1, got 2"))
+    mcase("mm-style-color-str", "ui.menu.entry{ style = { hoverColor = { r = 'x', g = 0, b = 0 } } }", entry({ style = { hoverColor = { r = "x", g = 0, b = 0 } } }), E.err(ME_ .. "style.hoverColor.r must be a number from 0 to 1, got 'x'"))
+    mcase("mm-style-bold", "ui.menu.entry{ style = { bold = 'yes' } }", entry({ style = { bold = "yes" } }), E.err(ME_ .. "style.bold must be a boolean, got 'yes'"))
+    mcase("mm-style-italic", "ui.menu.entry{ style = { italic = 1 } }", entry({ style = { italic = 1 } }), E.err(ME_ .. "style.italic must be a boolean, got 1"))
+    -- one entry per mod; removeEntry
+    local e1
+    mcase("mm-entry-ok", "ui.menu.entry{ id = 'be', style = { preset = 'options', textColor = { 1, 0.5, 0, 1 }, fontSize = 26 } } [control]", function()
+        e1 = U.menu.entry{ id = "be", label = { en = "SKEL BAD", es = "SKEL MALO", ["zh-Hans"] = "SKEL" }, onClick = nop, style = { preset = "options", textColor = { 1, 0.5, 0, 1 }, fontSize = 26 } }
+        return e1
+    end, E.ret("a handle { id = 'be' }", function(r) return type(r[1]) == "table" and r[1].id == "be" end))
+    if e1 then
+        mcase("mm-entry-second", "ui.menu.entry{ id = 'be2' } [a second entry]", entry({ id = "be2" }), E.err(ME_ .. "this mod already has a menu entry ('be'); remove it first"))
+        local RE = UI .. ".menu.removeEntry: not a menu entry handle (use the handle that menu.entry returned)"
+        mcase("mm-remove-nil", "ui.menu.removeEntry(nil)", f(U.menu.removeEntry, nil), E.err(RE))
+        mcase("mm-remove-num", "ui.menu.removeEntry(5)", f(U.menu.removeEntry, 5), E.err(RE))
+        mcase("mm-remove-forged", "ui.menu.removeEntry({ id = 'be' }) [forged]", f(U.menu.removeEntry, { id = "be" }), E.err(RE))
+        mcase("mm-remove-ok", "ui.menu.removeEntry(e) [control]", f(U.menu.removeEntry, e1), E.none)
+        mcase("mm-remove-again", "ui.menu.removeEntry(e) [again]", f(U.menu.removeEntry, e1), E.none)
+        mcase("mm-entry-after-remove", "ui.menu.entry{ id = 'be3', style = 'primary' } after removeEntry [control]", function()
+            local e = U.menu.entry{ id = "be3", label = L, onClick = nop, style = "primary" }
+            U.menu.removeEntry(e)
+            return e.id
+        end, E.ret("'be3'", function(r) return r[1] == "be3" end))
+    end
+    -- menu.isOpen, watch, unwatch
+    local MW = UI .. ".menu."
+    mcase("mm-isopen-arg", "ui.menu.isOpen(1)", f(U.menu.isOpen, 1), E.err(MW .. "isOpen: expected 0 arguments, got 1"))
+    mcase("mm-isopen-ok", "ui.menu.isOpen() [control: no title-screen menu]", f(U.menu.isOpen), E.ret("false", function(r) return r[1] == false end))
+    mcase("mm-watch-nil", "ui.menu.watch(nil)", f(U.menu.watch, nil), E.err(MW .. "watch: fn must be a function, got nil"))
+    mcase("mm-watch-str", "ui.menu.watch('x')", f(U.menu.watch, "x"), E.err(MW .. "watch: fn must be a function, got 'x'"))
+    mcase("mm-unwatch-forged", "ui.menu.unwatch(2^40)", f(U.menu.unwatch, 1 << 40), E.err(MW .. "unwatch: unknown token 1099511627776 (not one menu.watch returned)"))
+    mcase("mm-unwatch-str", "ui.menu.unwatch('x')", f(U.menu.unwatch, "x"), E.err(MW .. "unwatch: token must be an integer, got 'x'"))
+    mcase("mm-watch-ok", "ui.menu.watch(fn) then unwatch twice [control]", function() local t = U.menu.watch(nop) U.menu.unwatch(t) U.menu.unwatch(t) return t end,
+        E.ret("a positive integer token", function(r) return math.type(r[1]) == "integer" and r[1] > 0 end))
+    -- screen: no window without the title-screen menu; handles that aren't windows
+    local SW = UI .. ".screen."
+    mcase("mm-screen-open-none", "ui.screen.open()", f(U.screen.open), E.err(SW .. "open: expected a table { id = ..., close = ... }, got nil"))
+    mcase("mm-screen-open-unknown", "ui.screen.open{ id = 'w', modal = true }", f(U.screen.open, { id = "w", modal = true }), E.err(SW .. "open: unknown key 'modal' (valid: close, id)"))
+    mcase("mm-screen-open-noid", "ui.screen.open{}", f(U.screen.open, {}), E.err(SW .. "open: id must be a string, got nil"))
+    mcase("mm-screen-open-close", "ui.screen.open{ id = 'w', close = 'yes' }", f(U.screen.open, { id = "w", close = "yes" }), E.err(SW .. "open: close must be a boolean or nil, got 'yes'"))
+    mcase("mm-screen-open-nomenu", "ui.screen.open{ id = 'w' } [no title-screen menu]", f(U.screen.open, { id = "w" }), E.err(SW .. "open: the title-screen menu is not open (windows open only over it)"))
+    for _, d in ipairs({ { "close", "close", U.screen.close }, { "isopen", "isOpen", U.screen.isOpen } }) do
+        local key, nm, fn = d[1], d[2], d[3]
+        mcase("mm-screen-" .. key .. "-nil", "ui.screen." .. nm .. "(nil)", f(fn, nil), E.err(SW .. nm .. ": expected a window handle, got nil"))
+        mcase("mm-screen-" .. key .. "-num", "ui.screen." .. nm .. "(5)", f(fn, 5), E.err(SW .. nm .. ": expected a window handle, got 5"))
+        mcase("mm-screen-" .. key .. "-forged", "ui.screen." .. nm .. "({ id = 'w' }) [forged]", f(fn, { id = "w" }), E.err(SW .. nm .. ": not a window handle (use the handle that screen.open returned)"))
+    end
+    mcase("mm-screen-top-arg", "ui.screen.top(1)", f(U.screen.top, 1), E.err(SW .. "top: expected 0 arguments, got 1"))
+    mcase("mm-screen-top-ok", "ui.screen.top() [control: no window]", f(U.screen.top), E.nilret)
+    mcase("mm-screen-watch-nil", "ui.screen.watch(nil)", f(U.screen.watch, nil), E.err(SW .. "watch: fn must be a function, got nil"))
+    mcase("mm-screen-unwatch-forged", "ui.screen.unwatch(2^40)", f(U.screen.unwatch, 1 << 40), E.err(SW .. "unwatch: unknown token 1099511627776 (not one screen.watch returned)"))
+    mcase("mm-screen-unwatch-float", "ui.screen.unwatch(1.5)", f(U.screen.unwatch, 1.5), E.err(SW .. "unwatch: token must be an integer, got 1.5"))
+    mcase("mm-screen-watch-ok", "ui.screen.watch(fn) then unwatch twice [control]", function() local t = U.screen.watch(nop) U.screen.unwatch(t) U.screen.unwatch(t) return t end,
+        E.ret("a positive integer token", function(r) return math.type(r[1]) == "integer" and r[1] > 0 end))
+    -- hosts in intents and elements(host)
+    local PL = UI .. ".place: "
+    local T = U.text
+    mcase("mm-elements-menu", "ui.elements('menu') [control]", f(U.elements, "menu"), E.ret("{}", function(r) return type(r[1]) == "table" and next(r[1]) == nil end))
+    mcase("mm-elements-screen", "ui.elements('screen') [control]", f(U.elements, "screen"), E.ret("{}", function(r) return type(r[1]) == "table" and next(r[1]) == nil end))
+    mcase("mm-place-screen-num", "ui.text.create{ place = { screen = 5, corner } }", f(T.create, { id = "bm", place = { screen = 5, corner = "top-left" } }), E.err(PL .. "screen must be a window handle, got 5"))
+    mcase("mm-place-screen-forged", "ui.text.create{ place = { screen = { id = 'w' }, corner } }", f(T.create, { id = "bm", place = { screen = { id = "w" }, corner = "top-left" } }), E.err(PL .. "screen must be a window handle"))
+    mcase("mm-place-menu-near", "ui.text.create{ place = { host = 'menu', near = 'crosshair' } }", f(T.create, { id = "bm", place = { host = "menu", near = "crosshair" } }), E.err(PL .. "near is not available on host 'menu' (corner or absolute)"))
+    mcase("mm-place-menu-region", "ui.text.create{ place = { host = 'menu', corner, region = 'map' } }", f(T.create, { id = "bm", place = { host = "menu", corner = "top-left", region = "map" } }), E.err(PL .. "region is not available on host 'menu' (journal only)"))
+    mcase("mm-place-fill-alone", "ui.text.create{ place = { corner, fill = 2 } }", f(T.create, { id = "bm", place = { corner = "top-left", fill = 2 } }), E.err(PL .. "fill is allowed only with row"))
+    local tm
+    mcase("mm-text-menu-ok", "ui.text.create{ place = { host = 'menu', corner = 'top-left' } } [control: pending]", function()
+        tm = T.create{ id = "bm", text = "m", place = { host = "menu", corner = "top-left" } }
+        return T.isShown(tm)
+    end, E.ret("false (no title-screen menu)", function(r) return r[1] == false end))
+    -- look and font
+    local ST = UI .. ".text: "
+    mcase("mm-look-bad", "ui.text.create{ style = { look = 'shiny' } }", f(T.create, { id = "bm2", style = { look = "shiny" } }), E.err(ST .. "unknown look 'shiny' (valid: game, plain)"))
+    mcase("mm-font-bad", "ui.text.create{ style = { look = 'game', font = 'huge' } }", f(T.create, { id = "bm2", style = { look = "game", font = "huge" } }), E.err(ST .. "unknown font 'huge' (valid: title, heading, body, small)"))
+    mcase("mm-font-plain", "ui.text.create{ style = { look = 'plain', font = 'title' } }", f(T.create, { id = "bm2", style = { look = "plain", font = "title" } }), E.err(ST .. "font needs look = 'game' (got look 'plain')"))
+    if tm then
+        mcase("mm-font-game-ok", "ui.text.setStyle(t, { look = 'game', font = 'heading' }) [control]", f(T.setStyle, tm, { look = "game", font = "heading" }), E.none)
+        T.remove(tm)
+    end
+    -- lists
+    local LS, LC = U.list, UI .. ".list.create: "
+    local jp = { host = "journal", corner = "top-left" }
+    local sz = { w = 400, h = 300 }
+    mcase("mm-list-none", "ui.list.create()", f(LS.create), E.err(LC .. "expected a table"))
+    mcase("mm-list-unknown", "ui.list.create{ ..., rows = 3 }", f(LS.create, { id = "bl", place = jp, size = sz, rows = 3 }), E.err(LC .. "unknown key 'rows' (valid: gap, id, place, size, style)"))
+    mcase("mm-list-size-nil", "ui.list.create{ no size }", f(LS.create, { id = "bl", place = jp }), E.err(LC .. "size must be a table { w = 32..4096, h = 32..4096 }, got nil"))
+    mcase("mm-list-size-str", "ui.list.create{ size = '400x300' }", f(LS.create, { id = "bl", place = jp, size = "400x300" }), E.err(LC .. "size must be a table { w = 32..4096, h = 32..4096 }, got '400x300'"))
+    mcase("mm-list-size-w31", "ui.list.create{ size = { w = 31, h = 300 } }", f(LS.create, { id = "bl", place = jp, size = { w = 31, h = 300 } }), E.err(LC .. "size.w must be a number from 32 to 4096, got 31"))
+    mcase("mm-list-size-h4097", "ui.list.create{ size = { 400, 4097 } }", f(LS.create, { id = "bl", place = jp, size = { 400, 4097 } }), E.err(LC .. "size.h must be a number from 32 to 4096, got 4097"))
+    mcase("mm-list-size-nan", "ui.list.create{ size = { w = 0/0, h = 300 } }", f(LS.create, { id = "bl", place = jp, size = { w = 0 / 0, h = 300 } }), E.err(LC .. "size.w must be a number from 32 to 4096, got NaN"))
+    mcase("mm-list-hud", "ui.list.create{ place = { host = 'hud', corner } }", f(LS.create, { id = "bl", place = { host = "hud", corner = "top-left" }, size = sz }), E.err(LC .. "lists need a host with a cursor (journal, menu, screen); see input mode, story 16"))
+    mcase("mm-list-hud-default", "ui.list.create{ no place: the HUD }", f(LS.create, { id = "bl", size = sz }), E.err(LC .. "lists need a host with a cursor (journal, menu, screen)"))
+    local la
+    mcase("mm-list-ok", "ui.list.create{ id = 'bla', journal, size = { 400, 300 } } [control]", function()
+        la = LS.create{ id = "bla", place = jp, size = { 400, 300 }, gap = "tight" }
+        return la
+    end, E.ret("a handle { id = 'bla' }", function(r) return type(r[1]) == "table" and r[1].id == "bla" end))
+    if not la then return end
+    local pj = U.panel.create{ id = "blp", place = { host = "journal", corner = "bottom-left" } }
+    mcase("mm-list-in-list", "ui.list.create{ place = { list = <list> } }", f(LS.create, { id = "bl", place = { list = la }, size = sz }), E.err(LC .. "a list can't go inside a panel, list or row"))
+    mcase("mm-list-in-panel", "ui.list.create{ place = { panel = <panel> } }", f(LS.create, { id = "bl", place = { panel = pj }, size = sz }), E.err(LC .. "a list can't go inside a panel, list or row"))
+    -- rows
+    local RS, RC = U.row, UI .. ".row.create: "
+    mcase("mm-row-unknown", "ui.row.create{ ..., size = 1 }", f(RS.create, { id = "br", place = { list = la }, size = 1 }), E.err(RC .. "unknown key 'size' (valid: gap, id, place, style)"))
+    mcase("mm-row-hud", "ui.row.create{ place = { host = 'hud', corner } }", f(RS.create, { id = "br", place = { host = "hud", corner = "top-left" } }), E.err(RC .. "rows need a host with a cursor (journal, menu, screen); see input mode, story 16"))
+    local ra
+    mcase("mm-row-ok", "ui.row.create{ id = 'bra', place = { list = <list> } } [control]", function()
+        ra = RS.create{ id = "bra", place = { list = la } }
+        return ra
+    end, E.ret("a handle { id = 'bra' }", function(r) return type(r[1]) == "table" and r[1].id == "bra" end))
+    mcase("mm-row-in-panel-ok", "ui.row.create{ id = 'brp', place = { panel = <panel> } } [control]", function()
+        return RS.create{ id = "brp", place = { panel = pj } }
+    end, E.ret("a handle { id = 'brp' }", function(r) return type(r[1]) == "table" and r[1].id == "brp" end))
+    if ra then
+        mcase("mm-row-in-row", "ui.row.create{ place = { row = <row> } }", f(RS.create, { id = "br", place = { row = ra } }), E.err(RC .. "a row can't go inside a row"))
+        mcase("mm-list-in-row", "ui.list.create{ place = { row = <row> } }", f(LS.create, { id = "bl", place = { row = ra }, size = sz }), E.err(LC .. "a list can't go inside a panel, list or row"))
+        mcase("mm-fill-0", "ui.text.create{ place = { row = r, fill = 0 } }", f(T.create, { id = "bt", place = { row = ra, fill = 0 } }), E.err(PL .. "fill must be a number from 0.1 to 16, got 0"))
+        mcase("mm-fill-17", "ui.text.create{ place = { row = r, fill = 17 } }", f(T.create, { id = "bt", place = { row = ra, fill = 17 } }), E.err(PL .. "fill must be a number from 0.1 to 16, got 17"))
+        mcase("mm-fill-str", "ui.text.create{ place = { row = r, fill = 'x' } }", f(T.create, { id = "bt", place = { row = ra, fill = "x" } }), E.err(PL .. "fill must be a number from 0.1 to 16, got 'x'"))
+        mcase("mm-fill-list", "ui.text.create{ place = { list = l, fill = 2 } }", f(T.create, { id = "bt", place = { list = la, fill = 2 } }), E.err(PL .. "fill is allowed only with row"))
+        mcase("mm-row-child-17", "ui.text.create{ place = { row = <row with 16 children> } } [the 17th]", function()
+            local made = {}
+            for i = 1, 16 do made[i] = T.create{ id = "brc" .. i, text = "c", place = { row = ra, fill = i == 1 and 3 or nil } } end
+            local ok, err = pcall(T.create, { id = "brc17", text = "c", place = { row = ra } })
+            for _, m in ipairs(made) do T.remove(m) end
+            if not ok then error(err, 0) end
+        end, E.err(PL .. "row 'bra' already has 16 children (at most 16)"))
+        mcase("mm-button-in-row-ok", "ui.button.create{ place = { row = r, fill = 1 } } [control]", function()
+            local b = U.button.create{ id = "brb", label = "x", place = { row = ra, fill = 1 }, onClick = nop }
+            U.button.remove(b)
+            return b.id
+        end, E.ret("'brb'", function(r) return r[1] == "brb" end))
+        mcase("mm-row-setvis-yes", "ui.row.setVisible(r, 'yes')", f(RS.setVisible, ra, "yes"), E.err(UI .. ".row.setVisible: visible must be a boolean, got string"))
+        mcase("mm-row-isshown-ok", "ui.row.isShown(r) [control: the Journal is closed]", f(RS.isShown, ra), E.ret("false", function(r) return r[1] == false end))
+    end
+    mcase("mm-list-child-257", "ui.text.create{ place = { list = <list with 256 children> } } [the 257th]", function()
+        local made = {}
+        local base = ra and 1 or 0 -- 'bra' is one child already
+        for i = 1, 256 - base do made[i] = T.create{ id = "blc" .. i, text = "c", place = { list = la } } end
+        local ok, err = pcall(T.create, { id = "blc257", text = "c", place = { list = la } })
+        for _, m in ipairs(made) do T.remove(m) end
+        if not ok then error(err, 0) end
+    end, E.err(PL .. "list 'bla' already has 256 children (at most 256)"))
+    mcase("mm-list-setvis-1", "ui.list.setVisible(l, 1)", f(LS.setVisible, la, 1), E.err(UI .. ".list.setVisible: visible must be a boolean, got number"))
+    mcase("mm-list-setstyle-game", "ui.list.setStyle(l, { look = 'game' }) [control]", f(LS.setStyle, la, { look = "game" }), E.none)
+    mcase("mm-list-isshown-ok", "ui.list.isShown(l) [control: the Journal is closed]", f(LS.isShown, la), E.ret("false", function(r) return r[1] == false end))
+    mcase("mm-list-h-text", "ui.list.isShown(<text handle>)", function()
+        local th = T.create{ id = "blt", text = "t", place = { absolute = { anchor = "center", x = 0, y = 280 } } }
+        local ok, err = pcall(LS.isShown, th)
+        T.remove(th)
+        if not ok then error(err, 0) end
+    end, E.err(UI .. ".list.isShown: not a list handle"))
+    mcase("mm-list-h-forged", "ui.list.remove({ id = 'bla' }) [forged]", f(LS.remove, { id = "bla" }), E.err(UI .. ".list.remove: not a list handle"))
+    mcase("mm-list-remove-ok", "ui.list.remove(l) [control: its rows go too]", f(LS.remove, la), E.none)
+    mcase("mm-list-remove-again", "ui.list.remove(l) [again]", f(LS.remove, la), E.none)
+    if ra then mcase("mm-list-removed-row", "ui.row.isShown(<row of a removed list>)", f(RS.isShown, ra), E.err(UI .. ".row: handle 'bra' was removed")) end
+    U.panel.remove(pj) -- its row 'brp' goes with it
 end
 
 -- UI helpers (stories 7-10): every public function with bad values, on the game thread. Elements made here are
@@ -856,9 +1063,9 @@ local function uiCases(phase)
 
     -- UI-3 elements()
     case(P .. "elements-ok", "ui.elements() [control]", f(U.elements), E.ret("{ crosshair = ... }", function(r) return type(r[1]) == "table" and type(r[1].crosshair) == "string" and r[1].mic == nil end))
-    case(P .. "elements-arg", "ui.elements(1)", f(U.elements, 1), E.err(UI .. ".elements: unknown host 1 (valid: hud, journal)"))
+    case(P .. "elements-arg", "ui.elements(1)", f(U.elements, 1), E.err(UI .. ".elements: unknown host 1 (valid: hud, journal, menu, screen)"))
     -- story 19: elements(host)
-    case(P .. "elements-bogus", "ui.elements('bogus')", f(U.elements, "bogus"), E.err(UI .. ".elements: unknown host 'bogus' (valid: hud, journal)"))
+    case(P .. "elements-bogus", "ui.elements('bogus')", f(U.elements, "bogus"), E.err(UI .. ".elements: unknown host 'bogus' (valid: hud, journal, menu, screen)"))
     case(P .. "elements-two", "ui.elements('hud', 2)", f(U.elements, "hud", 2), E.err(UI .. ".elements: expected 0 or 1 arguments, got 2"))
     case(P .. "elements-hud", "ui.elements('hud') [control]", f(U.elements, "hud"), E.ret("{ crosshair = ... }", function(r) return type(r[1]) == "table" and type(r[1].crosshair) == "string" and r[1].map == nil end))
     case(P .. "elements-journal", "ui.elements('journal') [control]", f(U.elements, "journal"), E.ret("the nine journal regions", function(r)
@@ -899,7 +1106,7 @@ local function uiCases(phase)
     case(P .. "style-bgbool", "create{ style = { background = true } }", f(T.create, { id = "bi", style = { background = true } }), E.err(ST .. "background must be a preset name or a colour table, got boolean"))
     case(P .. "style-pad5", "create{ style = { padding = 5 } }", f(T.create, { id = "bi", style = { padding = 5 } }), E.err(ST .. "unknown padding 5 (valid: none, tight, normal, loose)"))
     case(P .. "style-padhuge", "create{ style = { padding = 'huge' } }", f(T.create, { id = "bi", style = { padding = "huge" } }), E.err(ST .. "unknown padding 'huge'"))
-    case(P .. "style-bg", "create{ style = { bg = 'dim' } }", f(T.create, { id = "bi", style = { bg = "dim" } }), E.err(ST .. "unknown style key 'bg' (valid: background, padding)"))
+    case(P .. "style-bg", "create{ style = { bg = 'dim' } }", f(T.create, { id = "bi", style = { bg = "dim" } }), E.err(ST .. "unknown style key 'bg' (valid: background, font, look, padding)"))
 
     -- A real element for the handle cases (out of the way: absolute, below the centre).
     local h
@@ -960,8 +1167,8 @@ local function uiCases(phase)
     pc_("corner-num", "{ corner = 1 }", { corner = 1 }, E.err(PL .. "unknown corner 1"))
     pc_("gap-bad", "{ corner, gap = 'huge' }", { corner = "top-left", gap = "huge" }, E.err(PL .. "unknown gap 'huge' (valid: tight, normal, loose)"))
     pc_("gap-num", "{ corner, gap = 16 }", { corner = "top-left", gap = 16 }, E.err(PL .. "unknown gap 16"))
-    pc_("host", "{ host = 'Journal', corner }", { host = "Journal", corner = "top-left" }, E.err(PL .. "unknown host 'Journal' (valid: hud, journal)"))
-    pc_("host-num", "{ host = 5, corner }", { host = 5, corner = "top-left" }, E.err(PL .. "unknown host 5 (valid: hud, journal)"))
+    pc_("host", "{ host = 'Journal', corner }", { host = "Journal", corner = "top-left" }, E.err(PL .. "unknown host 'Journal' (valid: hud, journal, menu, screen)"))
+    pc_("host-num", "{ host = 5, corner }", { host = 5, corner = "top-left" }, E.err(PL .. "unknown host 5 (valid: hud, journal, menu, screen)"))
     pc_("host-journal-near", "{ host = 'journal', near = 'crosshair' }", { host = "journal", near = "crosshair" }, E.err(PL .. "unknown near region 'crosshair' (valid: ammo, binder, cover, map, map-header, match, page-left, page-right, tasks)"))
     -- story 19: journal regions (the I/O matrix's error rows)
     local RN = "(valid: ammo, binder, cover, map, map-header, match, page-left, page-right, tasks)"
@@ -971,10 +1178,10 @@ local function uiCases(phase)
     pc_("region-num", "{ host = 'journal', corner, region = 1 }", { host = "journal", corner = "top-left", region = 1 }, E.err(PL .. "unknown region 1 " .. RN))
     pc_("inset-huge", "{ host = 'journal', corner, inset = 'huge' }", { host = "journal", corner = "top-left", inset = "huge" }, E.err(PL .. "unknown inset 'huge' (valid: tight, normal, loose)"))
     pc_("inset-num", "{ host = 'journal', corner, inset = 8 }", { host = "journal", corner = "top-left", inset = 8 }, E.err(PL .. "unknown inset 8 (valid: tight, normal, loose)"))
-    pc_("near-region-key", "{ host = 'journal', near = 'map', region = 'map' }", { host = "journal", near = "map", region = "map" }, E.err(PL .. "region is not allowed with near (valid keys: align, gap, host, near, offset, side)"))
+    pc_("near-region-key", "{ host = 'journal', near = 'map', region = 'map' }", { host = "journal", near = "map", region = "map" }, E.err(PL .. "region is not allowed with near (valid keys: align, gap, host, near, offset, screen, side)"))
     pc_("near-inset-key", "{ host = 'journal', near = 'map', inset = 'tight' }", { host = "journal", near = "map", inset = "tight" }, E.err(PL .. "inset is not allowed with near"))
-    pc_("abs-region-key", "{ host = 'journal', absolute, region = 'map' }", { host = "journal", absolute = { x = 0, y = 0 }, region = "map" }, E.err(PL .. "region is not allowed with absolute (valid keys: absolute, host)"))
-    pc_("abs-inset-key", "{ host = 'journal', absolute, inset = 'tight' }", { host = "journal", absolute = { x = 0, y = 0 }, inset = "tight" }, E.err(PL .. "inset is not allowed with absolute (valid keys: absolute, host)"))
+    pc_("abs-region-key", "{ host = 'journal', absolute, region = 'map' }", { host = "journal", absolute = { x = 0, y = 0 }, region = "map" }, E.err(PL .. "region is not allowed with absolute (valid keys: absolute, host, screen)"))
+    pc_("abs-inset-key", "{ host = 'journal', absolute, inset = 'tight' }", { host = "journal", absolute = { x = 0, y = 0 }, inset = "tight" }, E.err(PL .. "inset is not allowed with absolute (valid keys: absolute, host, screen)"))
     pc_("near-hud-map", "{ near = 'map' }", { near = "map" }, E.err(PL .. "unknown near element 'map' (valid: crosshair)"))
     pc_("journal-near-corner", "{ host = 'journal', near = 'map', corner }", { host = "journal", near = "map", corner = "top-left" }, E.err(PL .. "an intent needs exactly one of corner, near or absolute (got corner and near)"))
     for _, r in ipairs({ "ammo", "binder", "cover", "map", "map-header", "match", "page-left", "page-right", "tasks" }) do
@@ -1024,6 +1231,7 @@ local function uiCases(phase)
     end, E.ret("a new handle", function(r) return r[1] == true end))
     panelCases(P, f, okRet)
     buttonCases(P, f)
+    mmCases(P, f)
     case(P .. "stats", "ui.text.stats() [control]", f(T.stats), E.ret("a table with elements = 0", function(r) return type(r[1]) == "table" and r[1].elements == 0 end))
     case(P .. "hud-stats", "ui.hud.stats() [control]", f(U.hud.stats), E.ret("findAllCalls == 1", function(r) return type(r[1]) == "table" and r[1].findAllCalls == 1 end))
 end
@@ -1069,6 +1277,28 @@ uiOffThreadCases = function(P, h)
     off("button-setvis", "button.setVisible", U.button.setVisible, {}, true)
     off("button-remove", "button.remove", U.button.remove, {})
     off("button-isshown", "button.isShown", U.button.isShown, {})
+    -- story 21 (Mod Manager story 2): the menu entry, the menu and screen hosts, lists and rows
+    off("menu-entry", "menu.entry", U.menu.entry, { id = "off" })
+    off("menu-removeentry", "menu.removeEntry", U.menu.removeEntry, {})
+    off("menu-isopen", "menu.isOpen", U.menu.isOpen)
+    off("menu-watch", "menu.watch", U.menu.watch, function() end)
+    off("menu-unwatch", "menu.unwatch", U.menu.unwatch, 1)
+    off("screen-open", "screen.open", U.screen.open, { id = "off" })
+    off("screen-close", "screen.close", U.screen.close, {})
+    off("screen-isopen", "screen.isOpen", U.screen.isOpen, {})
+    off("screen-top", "screen.top", U.screen.top)
+    off("screen-watch", "screen.watch", U.screen.watch, function() end)
+    off("screen-unwatch", "screen.unwatch", U.screen.unwatch, 1)
+    off("list-create", "list.create", U.list.create, { id = "off" })
+    off("list-setstyle", "list.setStyle", U.list.setStyle, {}, nil)
+    off("list-setvis", "list.setVisible", U.list.setVisible, {}, true)
+    off("list-remove", "list.remove", U.list.remove, {})
+    off("list-isshown", "list.isShown", U.list.isShown, {})
+    off("row-create", "row.create", U.row.create, { id = "off" })
+    off("row-setstyle", "row.setStyle", U.row.setStyle, {}, nil)
+    off("row-setvis", "row.setVisible", U.row.setVisible, {}, true)
+    off("row-remove", "row.remove", U.row.remove, {})
+    off("row-isshown", "row.isShown", U.row.isShown, {})
 end
 
 local function preConnectCases()
@@ -3171,6 +3401,617 @@ local function buildSoak()
     end)
 end
 
+-- ---------------------------------------------------------------- menu (story 21 = Mod Manager story 2, one launch)
+-- Written for the VM at 1280x720 (run.ps1 -Target vm). Before any key: the entry { en = "SKEL ENTRY" } and a corner text
+-- on host "menu". Then: Enter past the startup screen; the column's order, pitch, x/width and look (field-by-field
+-- fingerprints, mods/menu-spike's, against OPTIONS; OPTIONS vs QUIT is the baseline) and the grown backing; the window
+-- stack's limits (eight windows, a ninth refused, closing the first closes the rest); keyboard focus OPTIONS -> entry ->
+-- QUIT and back; hover; a real click on the entry opens window A (a 40-row list of rows: three texts fill 3/1/1 and a
+-- button); A's button opens B; clicks on A while B is up reach nothing; B closed; the wheel scrolls A's list; a row
+-- button reaches only its row; Enter while A is open starts nothing; A's Close; OPTIONS (Settings) and START GAME
+-- (Create Server: the menu hidden, the corner text collapsed); a click where the entry was; a round trip to Tower
+-- Island (the entry inserted in Construct on the new menu); a window open across a reload (lost). Never keeps a UObject:
+-- every step finds what it needs again, and calls a method on an object read from a property only after valid()
+-- (the 0x18 crash, docs/mod-manager-research.md section 9).
+local function buildMenu()
+    local UI = core.ui
+    local MM = { ev = {}, sev = {}, clicks = 0, rowHits = {}, aopen = 0, built = false, builtB = false }
+    local OPT, QUIT, START = "UI_Button_Master_2", "UI_Button_Master_3", "UI_Button_Master"
+    local TEMPLATE = { UI_Button_Master = true, UI_Button_Master_1 = true, UI_Button_Master_6 = true, UI_Button_Master_2 = true, UI_Button_Master_3 = true }
+    local WANT_ORDER = { "START GAME", "JOIN GAME", "CUSTOMIZE", "OPTIONS", "SKEL ENTRY", "QUIT" }
+    local SCREEN_SHORT, LIST_SHORT, ROW_SHORT = "WBP_" .. CORE .. "Screen_C", "WBP_" .. CORE .. "List_C", "WBP_" .. CORE .. "Row_C"
+    local TEXT_S, BUTTON_S = "WBP_" .. CORE .. "Text_C", "WBP_" .. CORE .. "Button_C"
+    -- The stock V8.2.3 sizes of the column's frame (mods/menu-spike section 9.6, layout units): grown by the column's growth.
+    local STOCK_OV0_H, STOCK_BACK_H = 250, 282
+    local ROWS = 40
+
+    local function v(o)
+        if o == nil then return false end
+        local ok, y = pcall(function() return o:IsValid() end)
+        return ok and y == true
+    end
+    local function try(fn) local ok, r = pcall(fn) if ok then return r end return nil end
+    local function fname(w) if not v(w) then return "?" end return try(function() return w:GetFName():ToString() end) or "?" end
+    local function cname(w) if not v(w) then return "?" end return try(function() return w:GetClass():GetFName():ToString() end) or "?" end
+    local function prop(o, k) if not v(o) then return nil end local p = try(function() return o[k] end) return v(p) and p or nil end
+    local function msAfter(sec) local t = os.clock() + sec return function() return os.clock() >= t end end
+    local function bool(x) return x and "true" or "false" end
+    local function liveOf(short)
+        for _, w in ipairs(FindAllOf(short) or {}) do
+            if v(w) and try(function() return w:IsInViewport() end) then return w end
+        end
+        return nil
+    end
+    local function liveAll(short)
+        local out = {}
+        for _, w in ipairs(FindAllOf(short) or {}) do
+            if v(w) and try(function() return w:IsInViewport() end) then out[#out + 1] = w end
+        end
+        return out
+    end
+    local function menu() return liveOf("MainMenu_C") end
+    local function center(r) return math.floor((r.l + r.r) / 2 + 0.5), math.floor((r.t + r.b) / 2 + 0.5) end
+    local function scale(mm) return try(function() return WLL():GetViewportScale(mm) end) or 1 end
+    local function visOf(w) return v(w) and try(function() return w:GetVisibility() end) or -1 end
+    local function count(short) return #liveAll(short) end
+    local function ctag(w)
+        local k = cname(w)
+        if k == TEXT_S then return try(function() return w.ToolTipText:ToString() end) end
+        if k:sub(1, #("WBP_" .. CORE)) == "WBP_" .. CORE then return try(function() return w.CoreTag:ToString() end) end
+        return nil
+    end
+    local function childTagged(container, id)
+        if not v(container) then return nil end
+        local tag = UI.text.tagOf(id)
+        local n = try(function() return container:GetChildrenCount() end) or 0
+        for i = 0, n - 1 do
+            local c = try(function() return container:GetChildAt(i) end)
+            if v(c) and ctag(c) == tag then return c end
+        end
+        return nil
+    end
+    local function textIn(w) return try(function() return w.ButtonText:GetText():ToString() end) end
+    local function focused(w) return v(w) and (try(function() return w:HasKeyboardFocus() end) == true or try(function() return w:HasFocusedDescendants() end) == true or try(function() return w:HasAnyUserFocus() end) == true) end
+    local function hasKeyFocus(w) return v(w) and (try(function() return w:HasKeyboardFocus() end) == true or try(function() return w:HasFocusedDescendants() end) == true) end
+
+    -- ---- the column
+    local function column(mm) return prop(mm, "VerticalBox_104") end
+    local function entryOf(mm)
+        local vb = column(mm)
+        local n = vb and (try(function() return vb:GetChildrenCount() end) or 0) or 0
+        for i = 0, n - 1 do
+            local c = try(function() return vb:GetChildAt(i) end)
+            if v(c) and not TEMPLATE[fname(c)] and textIn(c) == "SKEL ENTRY" then return c end
+        end
+        return nil
+    end
+    local function extras(mm)
+        local vb, out = column(mm), 0
+        local n = vb and (try(function() return vb:GetChildrenCount() end) or 0) or 0
+        for i = 0, n - 1 do if not TEMPLATE[fname(try(function() return vb:GetChildAt(i) end))] then out = out + 1 end end
+        return out
+    end
+    local function focusOwner()
+        local mm = menu()
+        local vb = column(mm)
+        local own = {}
+        local n = vb and (try(function() return vb:GetChildrenCount() end) or 0) or 0
+        for i = 0, n - 1 do
+            local w = try(function() return vb:GetChildAt(i) end)
+            if focused(w) then own[#own + 1] = (textIn(w) or fname(w)) end
+        end
+        return #own > 0 and table.concat(own, ",") or "none"
+    end
+
+    -- mods/menu-spike's fingerprint: one button's look, key -> string, read from the live widget.
+    local COPY_PROPS = {
+        "Button Type Selection", "Transform Policy", "In Height Override", "In Width Override", "Do not ovverride with sizebox",
+        "In Horizontal Alignment", "Text Style", "Icon Type Selection", "Use Icon instead of text", "Show_NumberText",
+        "Show input action widget", "Style", "MinWidth", "MinHeight", "MaxWidth", "MaxHeight", "bApplyAlphaOnDisable", "bSelectable",
+        "bShouldSelectUponReceivingFocus", "bInteractableWhenSelected", "bToggleable", "bTriggerClickedAfterSelection",
+        "ClickMethod", "TouchMethod", "PressMethod", "PressedSlateSoundOverride", "ClickedSlateSoundOverride", "HoveredSlateSoundOverride",
+    }
+    local function oname(o) if not v(o) then return "nil" end return fname(o) end
+    local function v2(x) return x and string.format("%.1fx%.1f", x.X, x.Y) or "?" end
+    local function col(c) return c and string.format("%.2f,%.2f,%.2f,%.2f", c.R, c.G, c.B, c.A) or "?" end
+    local function fingerprint(b)
+        local f = {}
+        local function put(k, fn) local ok, x = pcall(fn) f[k] = ok and tostring(x) or ("err:" .. firstLine(x)) end
+        for _, k in ipairs(COPY_PROPS) do
+            put(k, function()
+                local x = b[k]
+                if type(x) == "userdata" then
+                    -- An object property: its name only when it is a live object (a null one is "null"; GetFName on it would
+                    -- crash). A struct has no IsValid, so it falls through.
+                    local okV, isV = pcall(function() return x:IsValid() end)
+                    if okV then return isV == true and oname(x) or "null" end
+                    local okS, s = pcall(function() return x.SoundObject end)
+                    if okS then return "sound:" .. oname(s) end
+                end
+                return x
+            end)
+        end
+        put("GetStyle", function() return oname(b:GetStyle()) end)
+        put("CurrentTextStyleClass", function() return oname(b:GetCurrentTextStyleClass()) end)
+        put("vis", function() return b:GetVisibility() end)
+        put("enabled", function() return b:GetIsEnabled() end)
+        local t = prop(b, "ButtonText")
+        put("text.Style", function() return oname(t.Style) end)
+        put("text.Font", function() local fi = t.Font return string.format("%s/%s/%s", oname(fi.FontObject), fi.TypefaceFontName:ToString(), tostring(fi.Size)) end)
+        put("text.Color", function() return col(t.ColorAndOpacity.SpecifiedColor) .. " rule=" .. tostring(t.ColorAndOpacity.ColorUseRule) end)
+        put("text.Shadow", function() return v2(t.ShadowOffset) .. " " .. col(t.ShadowColorAndOpacity) end)
+        put("text.Transform", function() return t.TextTransformPolicy end)
+        put("text.Justify", function() return t.Justification end)
+        put("text.vis", function() return t:GetVisibility() end)
+        put("sizebox", function() local s = prop(b, "SizeBox_Master") return string.format("h=%s/%s w=%s/%s", tostring(s.bOverride_HeightOverride), tostring(s.HeightOverride), tostring(s.bOverride_WidthOverride), tostring(s.WidthOverride)) end)
+        put("stroke", function() local i = prop(b, "StrokeImage") local br = i.Brush return string.format("%s size=%s tint=%s drawAs=%s vis=%s", oname(br.ResourceObject), v2(br.ImageSize), col(br.TintColor.SpecifiedColor), tostring(br.DrawAs), tostring(i:GetVisibility())) end)
+        put("desired", function() b:ForceLayoutPrepass() return v2(b:GetDesiredSize()) end)
+        return f
+    end
+    local function diff(a, b)
+        local out, keys = {}, {}
+        for k in pairs(a) do keys[#keys + 1] = k end
+        table.sort(keys)
+        for _, k in ipairs(keys) do if a[k] ~= b[k] then out[#out + 1] = string.format("%s: %s | %s", k, a[k], tostring(b[k])) end end
+        return out
+    end
+
+    -- The column's order, pitch, x/width and look, and the backing (AC 1, and again after the reload: AC 4).
+    local function columnChecks(phase)
+        local mm = menu()
+        if not check(mm ~= nil, "MCOL %s a live MainMenu_C", phase) then return end
+        local vb, opt, quit, ent = column(mm), prop(mm, OPT), prop(mm, QUIT), entryOf(mm)
+        if not check(ent ~= nil, "MCOL %s the entry 'SKEL ENTRY' is in VerticalBox_104", phase) then return end
+        local sc = scale(mm)
+        local labels, rows = {}, {}
+        local n = try(function() return vb:GetChildrenCount() end) or 0
+        for i = 0, n - 1 do
+            local c = try(function() return vb:GetChildAt(i) end)
+            labels[#labels + 1] = textIn(c) or fname(c)
+            rows[#rows + 1] = absR(c)
+        end
+        local orderOk = #labels == #WANT_ORDER
+        for i, w in ipairs(WANT_ORDER) do if labels[i] ~= w then orderOk = false end end
+        check(orderOk, "MORDER %s column=[%s] (expected %s)", phase, table.concat(labels, ", "), table.concat(WANT_ORDER, ", "))
+        local pitches, pitchOk = {}, true
+        for i = 2, #rows do
+            if rows[i] and rows[i - 1] then pitches[#pitches + 1] = (rows[i].t - rows[i - 1].t) / sc end
+        end
+        for i = 2, #pitches do if math.abs(pitches[i] - pitches[1]) > 1 then pitchOk = false end end
+        local ps = {}
+        for i, p in ipairs(pitches) do ps[i] = string.format("%.1f", p) end
+        check(pitchOk and #pitches == #rows - 1, "MPITCH %s row pitches (units) [%s] equal within 1", phase, table.concat(ps, ","))
+        local er, orr, qr = absR(ent), absR(opt), absR(quit)
+        check(er and orr and math.abs(er.l - orr.l) <= sc and math.abs((er.r - er.l) - (orr.r - orr.l)) <= sc,
+            "MXW %s entry x/width %s vs OPTIONS %s (desktop px, within 1 unit)", phase, rsA(er), rsA(orr))
+        -- Look: the mouse is away (a neutral point), so every button shows its normal state.
+        local fo, fq, fe = fingerprint(opt), fingerprint(quit), fingerprint(ent)
+        local d, dq = diff(fo, fe), diff(fo, fq)
+        for _, l in ipairs(d) do say("MLOOK %s diff OPTIONS|entry %s", phase, l) end
+        for _, l in ipairs(dq) do say("MLOOK %s diff OPTIONS|QUIT %s", phase, l) end
+        check(#d == #dq and #d == 0, "MFP %s fingerprint diffs entry-vs-OPTIONS=%d (OPTIONS vs QUIT: %d)", phase, #d, #dq)
+        -- The backing: Overlay_0 and NN_FieldNavigationBacking grew by the column's growth (the entry's row pitch).
+        local growth = (er and qr) and (qr.t - er.t) / sc or 0
+        local ov0, back = prop(mm, "Overlay_0"), prop(mm, "NN_FieldNavigationBacking")
+        local ovH = try(function() return ov0.Slot:GetSize().Y end) or -1
+        local bkH = try(function() return back.Slot:GetSize().Y end) or -1
+        check(math.abs(ovH - (STOCK_OV0_H + growth)) <= 1 and math.abs(bkH - (STOCK_BACK_H + growth)) <= 1,
+            "MGROW %s column grew %.1f units; Overlay_0 %.1f (stock %d), NN_FieldNavigationBacking %.1f (stock %d)", phase, growth, ovH, STOCK_OV0_H, bkH, STOCK_BACK_H)
+        local br = absR(back)
+        check(br and qr and br.b >= qr.b and br.t <= (er and er.t or 0), "MCOVER %s backing %s covers the entry and QUIT %s", phase, rsA(br), rsA(qr))
+        check(extras(mm) == 1, "MEXTRA %s column has exactly one extra child (%d)", phase, extras(mm))
+        MM.entryR = er
+    end
+
+    -- ---- the screen widgets: each window's WBP_<Core>Screen in the viewport, found by an element of ours in its Canvas.
+    local function screenWith(id)
+        for _, s in ipairs(liveAll(SCREEN_SHORT)) do
+            local c = prop(s, "Canvas")
+            if childTagged(c, id) then return s, c end
+        end
+        return nil
+    end
+    local function closeButtonIn(canvas)
+        local n = v(canvas) and (try(function() return canvas:GetChildrenCount() end) or 0) or 0
+        for i = 0, n - 1 do
+            local c = try(function() return canvas:GetChildAt(i) end)
+            if cname(c) == BUTTON_S and try(function() return c.Label:GetText():ToString() end) == "CLOSE" then return c end
+        end
+        return nil
+    end
+    local function listWidget()
+        local _, c = screenWith("alist")
+        return childTagged(c, "alist")
+    end
+    local function rowWidget(i)
+        local lw = listWidget()
+        return childTagged(prop(lw, "VBox"), "r" .. i), lw
+    end
+    local function cellOf(rw, id) return childTagged(prop(rw, "HBox"), id) end
+
+    -- ---- events
+    local function sevAfter(since, event, id, reason)
+        return function()
+            for i = since + 1, #MM.sev do
+                local e = MM.sev[i]
+                if e.event == event and e.id == id and (not reason or e.reason == reason) then return true end
+            end
+            return false
+        end
+    end
+    local function mevCount(e) local n = 0 for _, x in ipairs(MM.ev) do if x.event == e then n = n + 1 end end return n end
+
+    -- ---- the windows' content (made once, in A's first open: elements stay created across closes)
+    local function openB()
+        MM.B = UI.screen.open{ id = "B", close = true }
+        if not MM.builtB then
+            MM.builtB = true
+            UI.text.create{ id = "btext", text = "SKEL WINDOW B", place = { screen = MM.B, corner = "top-left" }, style = { font = "heading" } }
+        end
+    end
+    local function openA()
+        MM.A = UI.screen.open{ id = "A", close = true }
+        if MM.built then return end
+        MM.built = true
+        UI.text.create{ id = "atitle", text = "SKEL WINDOW A", place = { screen = MM.A, corner = "top-left" }, style = { font = "title" } }
+        UI.button.create{ id = "aopen", label = "OPEN B", place = { screen = MM.A, corner = "bottom-left" },
+            onClick = function() MM.aopen = MM.aopen + 1 say("MCLICK aopen %d", MM.aopen) openB() end }
+        local L = UI.list.create{ id = "alist", place = { screen = MM.A, absolute = { anchor = "center", x = 0, y = 0 } }, size = { w = 900, h = 440 }, gap = "tight" }
+        for i = 1, ROWS do
+            local r = UI.row.create{ id = "r" .. i, place = { list = L } }
+            UI.text.create{ id = "c1-" .. i, text = "SKEL MOD " .. i, place = { row = r, fill = 3 }, style = { font = "body" } }
+            UI.text.create{ id = "c2-" .. i, text = "1.0." .. i, place = { row = r, fill = 1 }, style = { font = "body" } }
+            UI.text.create{ id = "c3-" .. i, text = "ON", place = { row = r, fill = 1 }, style = { font = "small" } }
+            UI.button.create{ id = "rb" .. i, label = "PICK", place = { row = r },
+                onClick = function() MM.rowHits[i] = (MM.rowHits[i] or 0) + 1 say("MCLICK row %d %d", i, MM.rowHits[i]) end }
+        end
+    end
+    local function rowHitSum() local s = 0 for _, n in pairs(MM.rowHits) do s = s + n end return s end
+
+    -- ---- step helpers
+    local function clickAt(label, finder)
+        step("menu: click " .. label, function()
+            local x, y = finder()
+            if not check(x ~= nil, "MPOINT %s has a point to click", label) then return end
+            say("MCLICKREQ %s at (%d,%d)", label, x, y)
+            return request(string.format("click %d %d", x, y)), 40, "click " .. label
+        end)
+        step("menu: settle " .. label, function() return msAfter(1.5), 4 end)
+    end
+    local function widgetPoint(finder) return function() local r = absR(finder()) if r and r.r > r.l then return center(r) end end end
+    local function neutral()
+        local r = absR(prop(prop(menu(), "WidgetTree"), "RootWidget"))
+        if r and r.r > r.l then return math.floor(r.l + (r.r - r.l) * 0.62), math.floor(r.t + (r.b - r.t) * 0.55) end
+    end
+    local function moveTo(label, finder)
+        step("menu: move " .. label, function()
+            local x, y = finder()
+            if not x then say("MMOVE %s skipped (no point)", label) return end
+            return request(string.format("move %d %d", x, y)), 30, "move " .. label
+        end)
+        step("menu: move settle " .. label, function() return msAfter(0.8), 3 end)
+    end
+    local function shot(label) step("menu: shot " .. label, function() return request("shot " .. label), 30, "screenshot " .. label end) end
+    local function key(k, label, want)
+        step("menu: key " .. label, function()
+            local from = focusOwner()
+            local done = request("key " .. k)
+            local t
+            return function()
+                if not done() then return false end
+                t = t or os.clock() + 0.7
+                if os.clock() < t then return false end
+                local to = focusOwner()
+                if want then check(to == want, "MKEY %s %s: %s -> %s (expected %s)", label, k, from, to, want)
+                else say("MKEY %s %s: %s -> %s", label, k, from, to) end
+                MM.lastFocus = to
+                return true
+            end, 30, "key " .. k
+        end)
+    end
+
+    -- ---- before any key: the entry and a corner text, the watchers
+    step("menu: setup", function()
+        MM.mtok = UI.menu.watch(function(_, info)
+            MM.ev[#MM.ev + 1] = { event = info.event, reason = info.reason, path = info.path }
+            say("MEVENT %d %s reason=%s path=%s", #MM.ev, tostring(info.event), tostring(info.reason), tostring(info.path))
+        end)
+        MM.stok = UI.screen.watch(function(_, info)
+            MM.sev[#MM.sev + 1] = { event = info.event, id = info.id, reason = info.reason }
+            say("SEVENT %d %s id=%s reason=%s", #MM.sev, tostring(info.event), tostring(info.id), tostring(info.reason))
+        end)
+        MM.entry = UI.menu.entry{ id = "skel-entry", label = { en = "SKEL ENTRY", es = "SKEL ENTRADA" }, style = "options",
+            onClick = function()
+                MM.clicks = MM.clicks + 1
+                say("MCLICK entry %d", MM.clicks)
+                local ok, err = pcall(openA)
+                if not ok then say("MOPEN A failed: %s", firstLine(err)) end
+            end }
+        MM.mtext = UI.text.create{ id = "mtext", text = "SKEL MENU TEXT", place = { host = "menu", corner = "top-right" } }
+        check(MM.entry ~= nil and MM.entry.id == "skel-entry", "MSETUP entry and corner text created before any key")
+    end)
+    waitWorld("menu1", "NewMainMenu", 120)
+    -- The press-any-key screen (UI_Startup_C) takes keys only once it is up: wait for it, then a moment, then Enter,
+    -- again every 15 s until a MainMenu_C exists (mods/menu-spike's way; one early Enter was lost in the VM).
+    step("menu1: startup screen", function()
+        local deadline = os.clock() + 60
+        return function()
+            if liveOf("UI_Startup_C") or menu() then return true end
+            return os.clock() > deadline
+        end, 65, "startup screen"
+    end)
+    step("menu1: startup settle", function() return msAfter(2), 4 end)
+    step("menu1: startup", function()
+        local n = count("MainMenu_C")
+        check(n == 0, "STARTUP before key: MainMenu_C in viewport=%d (no menu yet, so no menu hook may be registered)", n)
+        check(UI.menu.isOpen() == false and UI.text.isShown(MM.mtext) == false, "STARTUP menu.isOpen=false, corner text isShown=false")
+        say("STARTUP requesting Enter (startup screen up: %s)", bool(liveOf("UI_Startup_C") ~= nil))
+        local done = request("key ENTER")
+        local deadline, tries = os.clock() + 15, 1
+        return function()
+            if menu() then return true end
+            if os.clock() > deadline and done() and tries < 4 then
+                tries, deadline = tries + 1, os.clock() + 15
+                say("STARTUP no menu yet; Enter again (%d)", tries)
+                done = request("key ENTER")
+            end
+            return false
+        end, 70, "menu after Enter"
+    end)
+    step("menu1: menu opened", function()
+        return function()
+            local mm = menu()
+            return mm ~= nil and mevCount("opened") >= 1 and entryOf(mm) ~= nil
+        end, 60, "menu opened with the entry"
+    end)
+    step("menu1: menu settle", function() return msAfter(3), 6 end)
+    step("menu1: opened", function()
+        check(UI.menu.isOpen() == true, "MOPEN menu.isOpen()=true; opened events=%d", mevCount("opened"))
+        check(UI.text.isShown(MM.mtext) == true, "MTEXT corner text isShown on the menu")
+    end)
+    moveTo("away", neutral)
+    step("menu1: column", function() columnChecks("menu1") end)
+    shot("menu-column")
+
+    -- ---- the window stack's limits (needs the live menu): eight windows, a ninth refused, close the first
+    step("menu1: stack limits", function()
+        local f = function(fn, ...) local a = table.pack(...) return function() return fn(table.unpack(a, 1, a.n)) end end
+        local SW = CORE:lower() .. ".ui.screen.open: "
+        local ws = {}
+        case("menu1.mm-screen-open-ok", "ui.screen.open{ id = 'w1' } [control]", function() ws[1] = UI.screen.open{ id = "w1", close = false } return ws[1] end,
+            E.ret("a window handle { id = 'w1' }", function(r) return type(r[1]) == "table" and r[1].id == "w1" end))
+        if not ws[1] then return end
+        case("menu1.mm-screen-open-again", "ui.screen.open{ id = 'w1' } [already open]", f(UI.screen.open, { id = "w1" }),
+            E.ret("the same handle", function(r) return rawequal(r[1], ws[1]) end))
+        case("menu1.mm-screen-handle-write", "window.id = 'x'", function() ws[1].id = "x" end, E.errAny({ "read-only", "read only" }))
+        for i = 2, 8 do ws[i] = UI.screen.open{ id = "w" .. i, close = false } end
+        case("menu1.mm-screen-open-9", "ui.screen.open{ id = 'w9' } [a ninth window]", f(UI.screen.open, { id = "w9" }), E.err(SW .. "this mod already has 8 windows open (at most 8)"))
+        case("menu1.mm-screen-top-8", "ui.screen.top() [control: w8]", f(UI.screen.top), E.ret("w8", function(r) return rawequal(r[1], ws[8]) end))
+        case("menu1.mm-screen-isopen-w3", "ui.screen.isOpen(w3) [control]", f(UI.screen.isOpen, ws[3]), E.ret("true", function(r) return r[1] == true end))
+        MM.stackSince = #MM.sev
+        case("menu1.mm-screen-close-w1", "ui.screen.close(w1) [closes w2..w8 first]", f(UI.screen.close, ws[1]), E.none)
+        case("menu1.mm-screen-top-none", "ui.screen.top() [control: none]", f(UI.screen.top), E.nilret)
+        case("menu1.mm-screen-isopen-w5", "ui.screen.isOpen(w5) [control: closed]", f(UI.screen.isOpen, ws[5]), E.ret("false", function(r) return r[1] == false end))
+        case("menu1.mm-screen-close-again", "ui.screen.close(w1) [again]", f(UI.screen.close, ws[1]), E.none)
+        return msAfter(1), 3
+    end)
+    step("menu1: stack events", function()
+        local okA = sevAfter(MM.stackSince or 0, "closed", "w1", "api")()
+        local parents = 0
+        for i = 2, 8 do if sevAfter(MM.stackSince or 0, "closed", "w" .. i, "parent")() then parents = parents + 1 end end
+        check(okA and parents == 7, "MSTACK closed w1 reason api=%s, w2..w8 reason parent=%d of 7", bool(okA), parents)
+        check(#liveAll(SCREEN_SHORT) == 0, "MSTACK no screen widget left in the viewport (%d)", #liveAll(SCREEN_SHORT))
+        check(hasKeyFocus(menu()), "MSTACK the menu holds keyboard focus after the last window closed")
+    end)
+
+    -- ---- keyboard: OPTIONS -> DOWN -> entry -> DOWN -> QUIT -> UP -> entry -> UP -> OPTIONS
+    step("menu1: focus OPTIONS", function()
+        local o = prop(menu(), OPT)
+        pcall(function() o:SetKeyboardFocus() end)
+        return msAfter(0.6), 2
+    end)
+    step("menu1: focus OPTIONS check", function() check(focusOwner() == "OPTIONS", "MKEY focus on OPTIONS (%s)", focusOwner()) end)
+    shot("menu-focus-options")
+    key("DOWN", "1", "SKEL ENTRY")
+    shot("menu-focus-entry")
+    key("DOWN", "2", "QUIT")
+    key("UP", "3", "SKEL ENTRY")
+    key("UP", "4", "OPTIONS")
+
+    -- ---- hover: the entry hovered shows the same text state as a hovered OPTIONS
+    moveTo("entry", widgetPoint(function() return entryOf(menu()) end))
+    step("menu1: hover entry", function() MM.hoverEntry = fingerprint(entryOf(menu()))["text.Color"] end)
+    shot("menu-hover-entry")
+    moveTo("options", widgetPoint(function() return prop(menu(), OPT) end))
+    step("menu1: hover options", function()
+        MM.hoverOpt = fingerprint(prop(menu(), OPT))["text.Color"]
+        check(MM.hoverEntry ~= nil and MM.hoverEntry == MM.hoverOpt, "MHOVER hovered entry text %s, hovered OPTIONS text %s", tostring(MM.hoverEntry), tostring(MM.hoverOpt))
+    end)
+    shot("menu-hover-options")
+    moveTo("away2", neutral)
+
+    -- ---- a real click on the entry: window A, nothing of the game's
+    clickAt("entry", widgetPoint(function() return entryOf(menu()) end))
+    step("menu1: entry clicked", function()
+        local mm = menu()
+        local page = try(function() return mm.WidgetSwitcher_1:GetActiveWidgetIndex() end)
+        check(MM.clicks == 1, "MENTRY real click ran onClick exactly once (%d)", MM.clicks)
+        check(count("SettingsMenu_draggable_C") == 0 and count("CreateServer_C") == 0 and page == 0,
+            "MENTRY nothing of the game's opened (Settings %d, CreateServer_C %d, menu page %s)", count("SettingsMenu_draggable_C"), count("CreateServer_C"), tostring(page))
+        check(MM.A ~= nil and UI.screen.isOpen(MM.A) == true and rawequal(UI.screen.top(), MM.A), "MWINA window A open and on top")
+        return msAfter(1.5), 4
+    end)
+    step("menu1: window A", function()
+        local s = screenWith("alist")
+        check(s ~= nil and hasKeyFocus(s), "MWINA A's screen widget %s has keyboard focus", fname(s))
+        local lw = listWidget()
+        local n = lw and try(function() return lw.VBox:GetChildrenCount() end) or 0
+        check(n == ROWS, "MWINA A's list holds %d rows (%d)", ROWS, n)
+        -- The game look (AC 7): row texts in AlumniSans, row brushes and the Close button on the Remaster materials.
+        local rw = rowWidget(1)
+        local c1 = cellOf(rw, "c1-1")
+        local font = try(function() return oname(c1.Text.Font.FontObject) end) or "?"
+        local rowBrush = try(function() return oname(rw.Background.Background.ResourceObject) end) or "?"
+        local cb = closeButtonIn(prop(s, "Canvas"))
+        local cbN = try(function() return oname(cb.Btn.WidgetStyle.Normal.ResourceObject) end) or "?"
+        local cbH = try(function() return oname(cb.Btn.WidgetStyle.Hovered.ResourceObject) end) or "?"
+        local cbF = try(function() return oname(cb.Label.Font.FontObject) end) or "?"
+        check(font:find("AlumniSans", 1, true) ~= nil and cbF:find("AlumniSans", 1, true) ~= nil, "MLOOKGAME fonts: row text %s, Close label %s (AlumniSans)", font, cbF)
+        check(rowBrush:find("M_NN_WornStrip", 1, true) ~= nil and cbN:find("M_NN_WornStrip", 1, true) ~= nil and cbH:find("M_NN_CinematicSelection", 1, true) ~= nil,
+            "MLOOKGAME brushes: row %s, Close normal %s, Close hovered %s", rowBrush, cbN, cbH)
+    end)
+    shot("menu-window-a")
+
+    -- ---- A's button opens B; B has focus, A takes no hits; a click on A's rows reaches nothing
+    clickAt("A open-B", widgetPoint(function() local _, c = screenWith("atitle") return childTagged(c, "aopen") end))
+    step("menu1: window B", function()
+        check(MM.aopen == 1 and MM.B ~= nil and UI.screen.isOpen(MM.B) and rawequal(UI.screen.top(), MM.B), "MWINB A's button opened B (clicks %d), B on top", MM.aopen)
+        local sb, sa = screenWith("btext"), screenWith("atitle")
+        check(sb ~= nil and hasKeyFocus(sb) and not hasKeyFocus(sa), "MWINB B has keyboard focus, A doesn't")
+        check(visOf(sa) == 3, "MWINB A is HitTestInvisible under B (visibility %s)", tostring(visOf(sa)))
+        MM.hitsBefore, MM.clicksBefore = rowHitSum(), MM.clicks
+    end)
+    shot("menu-window-b")
+    clickAt("A row under B", widgetPoint(function() return cellOf(rowWidget(1), "rb1") end))
+    step("menu1: under B", function()
+        check(rowHitSum() == MM.hitsBefore and MM.clicks == MM.clicksBefore and MM.aopen == 1, "MUNDERB a click on A's row while B is up reached nothing (row hits %d, entry %d, open-B %d)", rowHitSum(), MM.clicks, MM.aopen)
+        MM.bSince = #MM.sev
+        UI.screen.close(MM.B)
+        return msAfter(1), 3
+    end)
+    step("menu1: B closed", function()
+        check(sevAfter(MM.bSince, "closed", "B", "api")() and not UI.screen.isOpen(MM.B), "MCLOSEB B closed (reason api)")
+        local sa = screenWith("atitle")
+        check(sa ~= nil and hasKeyFocus(sa) and visOf(sa) ~= 3, "MCLOSEB A has keyboard focus again and takes hits (visibility %s)", tostring(visOf(sa)))
+        local lw = listWidget()
+        MM.off0 = try(function() return lw.Scroll:GetScrollOffset() end) or -1
+    end)
+
+    -- ---- the wheel scrolls A's list; rows line up; a row button reaches only its row
+    step("menu1: wheel", function()
+        local r = absR(listWidget())
+        if not check(r ~= nil and r.r > r.l, "MWHEEL A's list has a rectangle %s", rsA(r)) then return end
+        local x, y = center(r)
+        return request(string.format("wheel %d %d -3", x, y)), 40, "wheel"
+    end)
+    step("menu1: wheel settle", function() return msAfter(1.5), 4 end)
+    step("menu1: wheel check", function()
+        local lw = listWidget()
+        local off = try(function() return lw.Scroll:GetScrollOffset() end) or -1
+        check(MM.off0 == 0 and off > 0, "MWHEEL scroll offset %.1f -> %.1f", MM.off0 or -1, off)
+        -- Every fully visible row: its three texts start at the same x as in the first visible row (within 1 unit).
+        local lr = absR(lw)
+        local sc = scale(menu())
+        local base, n, worst, firstVis = nil, 0, 0, nil
+        for i = 1, ROWS do
+            local rw = rowWidget(i)
+            local rr = absR(rw)
+            if rr and lr and rr.t >= lr.t and rr.b <= lr.b and rr.b > rr.t then
+                firstVis = firstVis or i
+                local xs = {}
+                for k, id in ipairs({ "c1-", "c2-", "c3-" }) do local cr = absR(cellOf(rw, id .. i)) xs[k] = cr and cr.l or -1e9 end
+                if not base then base = xs else for k = 1, 3 do worst = math.max(worst, math.abs(xs[k] - base[k]) / sc) end end
+                n = n + 1
+            end
+        end
+        check(n >= 3 and worst <= 1, "MCOLS %d visible rows: their three texts start at the same x (worst %.2f units)", n, worst)
+        MM.visRow = firstVis
+    end)
+    clickAt("row button", widgetPoint(function() return MM.visRow and cellOf(rowWidget(MM.visRow), "rb" .. MM.visRow) end))
+    step("menu1: row button", function()
+        local k = MM.visRow or 0
+        check((MM.rowHits[k] or 0) == 1 and rowHitSum() == 1, "MROW a real click on row %d's button reached only its onClick (that row %d, all rows %d)", k, MM.rowHits[k] or 0, rowHitSum())
+        MM.cs0 = count("CreateServer_C")
+    end)
+    -- ---- Enter while A is open starts nothing (A holds the focus, not the menu's buttons)
+    step("menu1: enter on A", function() return request("key ENTER"), 30, "enter on A" end)
+    step("menu1: enter settle", function() return msAfter(1.5), 4 end)
+    step("menu1: enter check", function()
+        check(count("CreateServer_C") == 0 and UI.screen.isOpen(MM.A), "MENTER Enter with A open created no CreateServer_C (%d) and A stays open", count("CreateServer_C"))
+        MM.aSince = #MM.sev
+    end)
+    -- ---- A's Close button: closed (close), the menu has focus again, DOWN still moves in the column
+    clickAt("A close", widgetPoint(function() local _, c = screenWith("atitle") return closeButtonIn(c) end))
+    step("menu1: A closed", function()
+        check(sevAfter(MM.aSince, "closed", "A", "close")() and not UI.screen.isOpen(MM.A) and #liveAll(SCREEN_SHORT) == 0, "MCLOSEA Close closed A (reason close), no screen widget left")
+        check(hasKeyFocus(menu()), "MCLOSEA the menu holds keyboard focus")
+    end)
+    step("menu1: down after close", function()
+        local done = request("key DOWN")
+        local t
+        return function()
+            if not done() then return false end
+            t = t or os.clock() + 0.7
+            if os.clock() < t then return false end
+            check(focusOwner() ~= "none", "MCLOSEA DOWN after the close moves focus into the column (%s)", focusOwner())
+            return true
+        end, 30, "down after close"
+    end)
+    moveTo("away3", neutral)
+
+    -- ---- OPTIONS: Settings opens (closed through its own ExitSelf); START GAME: Create Server, the menu hidden
+    clickAt("OPTIONS", widgetPoint(function() return prop(menu(), OPT) end))
+    step("menu1: settings", function()
+        local s = liveOf("SettingsMenu_draggable_C")
+        check(s ~= nil and MM.clicks == 1, "MSETTINGS a real click on OPTIONS opened Settings (entry onClick still %d)", MM.clicks)
+        if s then pcall(function() s:ExitSelf() end) end
+        return msAfter(1), 3
+    end)
+    step("menu1: settings closed", function() check(liveOf("SettingsMenu_draggable_C") == nil, "MSETTINGS Settings closed through its own ExitSelf") MM.hidden0 = mevCount("hidden") end)
+    clickAt("START GAME", widgetPoint(function() return prop(menu(), START) end))
+    step("menu1: start game", function()
+        check(count("CreateServer_C") == 1, "MSTART a real click on START GAME opened Create Server (%d)", count("CreateServer_C"))
+        return function() return mevCount("hidden") > MM.hidden0 end, 5, "menu hidden"
+    end)
+    step("menu1: hidden", function()
+        check(mevCount("hidden") > MM.hidden0, "MHIDDEN the menu's hidden event fired")
+        local mm = menu()
+        local canvas = try(function() return mm.WidgetTree.RootWidget:GetWidgetAtIndex(0) end)
+        local w = childTagged(canvas, "mtext")
+        check(UI.text.isShown(MM.mtext) == false and visOf(w) == 1, "MHIDDEN corner text isShown=false, its widget Collapsed (%s)", tostring(visOf(w)))
+        MM.clicksBefore = MM.clicks
+    end)
+    clickAt("entry's last rect", function() if MM.entryR then return center(MM.entryR) end end)
+    step("menu1: last rect", function() check(MM.clicks == MM.clicksBefore, "MLASTRECT a click where the entry was calls no onClick (%d)", MM.clicks) end)
+
+    -- ---- Tower Island and back: the new menu gets its entry inside Construct
+    step("menu1: before travel", function() MM.lost0 = mevCount("lost") MM.open0 = mevCount("opened") end)
+    travel("match", MATCH_MAP, "listen")
+    waitWorld("match", "SmallMap", 150)
+    step("match: settle", function() return msAfter(6), 10 end)
+    step("match: menu lost", function() check(mevCount("lost") > MM.lost0 and UI.menu.isOpen() == false, "MLOST the menu's lost event fired on the map change") end)
+    travel("menu2", MENU_MAP, "")
+    waitWorld("menu2", "NewMainMenu", 150)
+    step("menu2: menu opened", function()
+        return function() local mm = menu() return mm ~= nil and mevCount("opened") > MM.open0 and entryOf(mm) ~= nil end, 60, "new menu with the entry"
+    end)
+    step("menu2: settle", function() return msAfter(3), 6 end)
+    moveTo("away4", neutral)
+    step("menu2: column", function() columnChecks("menu2") end)
+    shot("menu-reload")
+
+    -- ---- a window open across a map change: lost
+    step("menu2: window C", function()
+        MM.C = UI.screen.open{ id = "C", close = true }
+        UI.text.create{ id = "ctext", text = "SKEL WINDOW C", place = { screen = MM.C, corner = "top-left" } }
+        MM.cSince = #MM.sev
+        check(UI.screen.isOpen(MM.C), "MWINC window C open before the reload")
+        MM.open1 = mevCount("opened")
+    end)
+    travel("menu3", MENU_MAP, "")
+    waitWorld("menu3", "NewMainMenu", 150)
+    step("menu3: menu opened", function()
+        return function() local mm = menu() return mm ~= nil and mevCount("opened") > MM.open1 and entryOf(mm) ~= nil end, 60, "third menu"
+    end)
+    step("menu3: lost", function()
+        check(sevAfter(MM.cSince, "lost", "C")() and not UI.screen.isOpen(MM.C) and UI.screen.top() == nil and #liveAll(SCREEN_SHORT) == 0,
+            "MWINC window C lost with the map change (its widget gone, top() nil)")
+        check(extras(menu()) == 1, "MEXTRA menu3 column has exactly one extra child (%d)", extras(menu()))
+        UI.menu.unwatch(MM.mtok)
+        UI.screen.unwatch(MM.stok)
+    end)
+end
+
 -- ---------------------------------------------------------------- runner (game thread, every 250 ms)
 local idx, waiting, busy, finished = 0, nil, false, false
 local function finish()
@@ -3362,6 +4203,8 @@ client.connect{
         core = api
         if SCENARIO == "manual" then profile(true) startManual() return end
         if SCENARIO == "bad-input" then buildBadInput()
+        elseif SCENARIO == "menu" then
+            buildMenu() -- story 21 (Mod Manager story 2): the menu entry, the menu host and the window stack
         elseif SCENARIO == "journal" then
             core.log.debugEnabled = true -- the journal attach lines (cost per open) are DEBUG; no profiler: real costs
             buildJournal()

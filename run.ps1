@@ -11,7 +11,10 @@
   writes <seq> to done.txt. "<seq> click <x> <y>" (story 15: a button on the Journal) is a real mouse click at that
   desktop point, as mods/bp-spike/run.ps1 did: it brings the game window to the front and clicks only when it is in
   front (never into another program), so it takes the mouse for a moment. "<seq> shot <label>" is served only in the
-  VM (a screenshot); on the host it is acknowledged and skipped.
+  VM (a screenshot); on the host it is acknowledged and skipped. Story 21's menu scenario also asks for "key DOWN" and
+  "key UP" (arrow keys, posted like Enter), "move <x> <y>" (the cursor to that desktop point, no click; a hover) and
+  "wheel <x> <y> <notches>" (the cursor there, then that many mouse-wheel notches, negative = down, |n| at most 20);
+  move and wheel bring the game window to the front first, like a click.
   Keeps the log as <workspace>/dumps/<copy>/<name lowercase>/<scenario>.log (ignored by git) and runs check.ps1.
   Refuses to start while another runner's test or driver mod is enabled in the copy (the workspace's tools/run-guard:
   the refusal names each and the command that clears it); -AllowOtherDrivers runs anyway.
@@ -28,14 +31,14 @@
 #>
 param(
     [Parameter(Mandatory)] [string] $Instance,
-    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'soak')]
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'soak')]
     [string] $Scenario = 'skeleton',
-    [int] $TimeoutSec = 0, # 0: 420 s, 900 s for ui (it travels four times and waits for layout), 1200 s for journal (24 key presses, a revive, a map change), 1000 s for soak (10 min idle); x1.5 in the VM
+    [int] $TimeoutSec = 0, # 0: 420 s, 900 s for ui (it travels four times and waits for layout) and menu (about 40 requests and three map loads), 1200 s for journal (24 key presses, a revive, a map change), 1000 s for soak (10 min idle); x1.5 in the VM
     [ValidateSet('host', 'vm')] [string] $Target = 'host',
     [switch] $AllowOtherDrivers # run even when another runner's test mod is enabled in the copy (tools/run-guard)
 )
 $ErrorActionPreference = 'Stop'
-$hostTimeout = switch ($Scenario) { 'ui' { 900 } 'journal' { 1200 } 'soak' { 1000 } default { 420 } }
+$hostTimeout = switch ($Scenario) { 'ui' { 900 } 'menu' { 900 } 'journal' { 1200 } 'soak' { 1000 } default { 420 } }
 if ($TimeoutSec -le 0 -and $Target -eq 'host') { $TimeoutSec = $hostTimeout }
 $here     = $PSScriptRoot
 $name     = (Get-Content (Join-Path $here 'mod.json') -Raw | ConvertFrom-Json).name
@@ -92,17 +95,47 @@ function Stop-Game {
     $deadline = (Get-Date).AddSeconds(30)
     while ((Get-OurGame) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
 }
-# A real mouse click on the game only: the game window is brought to the front and clicked only when it is in front.
-function Invoke-Click([int] $x, [int] $y) {
+# The game window's handle once it is in front (brought there first), else zero (and why, on the console).
+function Get-FrontGameWindow([string] $what) {
     $p = Get-OurGame
     $h = if ($p) { $p.MainWindowHandle } else { [IntPtr]::Zero }
-    if ($h -eq [IntPtr]::Zero) { Write-Host '  click skipped: no game window'; return }
+    if ($h -eq [IntPtr]::Zero) { Write-Host "  $what skipped: no game window"; return [IntPtr]::Zero }
     if ([CoreRun.Win]::GetForegroundWindow() -ne $h) {
         [CoreRun.Win]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero); [CoreRun.Win]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero) # an Alt tap lifts the foreground lock
         [void][CoreRun.Win]::SetForegroundWindow($h)
         Start-Sleep -Milliseconds 300
     }
-    if ([CoreRun.Win]::GetForegroundWindow() -ne $h) { Write-Host '  click skipped: the game window is not in front'; return }
+    if ([CoreRun.Win]::GetForegroundWindow() -ne $h) { Write-Host "  $what skipped: the game window is not in front"; return [IntPtr]::Zero }
+    return $h
+}
+# The cursor to a desktop point on the game only (story 21's hover checks): no button.
+function Invoke-Move([int] $x, [int] $y) {
+    $h = Get-FrontGameWindow 'move'
+    if ($h -eq [IntPtr]::Zero) { return }
+    [void][CoreRun.Win]::SetCursorPos($x, $y)
+    Start-Sleep -Milliseconds 100
+    [CoreRun.Win]::mouse_event(0x0001, 1, 0, 0, [UIntPtr]::Zero); [CoreRun.Win]::mouse_event(0x0001, -1, 0, 0, [UIntPtr]::Zero) # a real move event
+    Write-Host "  moved the cursor to ($x, $y)"
+}
+# Mouse-wheel notches over a desktop point on the game only (story 21's list): negative scrolls down.
+function Invoke-Wheel([int] $x, [int] $y, [int] $notches) {
+    $h = Get-FrontGameWindow 'wheel'
+    if ($h -eq [IntPtr]::Zero) { return }
+    [void][CoreRun.Win]::SetCursorPos($x, $y)
+    Start-Sleep -Milliseconds 150
+    [CoreRun.Win]::mouse_event(0x0001, 1, 0, 0, [UIntPtr]::Zero); [CoreRun.Win]::mouse_event(0x0001, -1, 0, 0, [UIntPtr]::Zero)
+    $step = if ($notches -lt 0) { -120 } else { 120 }
+    for ($i = 0; $i -lt [Math]::Abs($notches); $i++) {
+        if ([CoreRun.Win]::GetForegroundWindow() -ne $h) { Write-Host '  wheel stopped: the game window lost the front'; return }
+        [CoreRun.Win]::mouse_event(0x0800, 0, 0, [uint32][BitConverter]::ToUInt32([BitConverter]::GetBytes([int]$step), 0), [UIntPtr]::Zero) # MOUSEEVENTF_WHEEL
+        Start-Sleep -Milliseconds 80
+    }
+    Write-Host "  wheel $notches notch(es) at ($x, $y)"
+}
+# A real mouse click on the game only: the game window is brought to the front and clicked only when it is in front.
+function Invoke-Click([int] $x, [int] $y) {
+    $h = Get-FrontGameWindow 'click'
+    if ($h -eq [IntPtr]::Zero) { return }
     [void][CoreRun.Win]::SetCursorPos($x, $y)
     Start-Sleep -Milliseconds 150
     [CoreRun.Win]::mouse_event(0x0001, 1, 0, 0, [UIntPtr]::Zero); [CoreRun.Win]::mouse_event(0x0001, -1, 0, 0, [UIntPtr]::Zero) # hover
@@ -114,16 +147,29 @@ function Invoke-Click([int] $x, [int] $y) {
 }
 
 function Invoke-Request([string] $cmd) {
-    # 'key ENTER' (touchdown), 'key <A-Z>' (the journal scenario's map key), 'click <x> <y>' (story 15), 'shot <label>'
-    # (VM only); anything else is ignored.
+    # 'key ENTER' (touchdown), 'key <A-Z>' (the journal scenario's map key), 'key UP' / 'key DOWN', 'click <x> <y>'
+    # (story 15), 'move <x> <y>' and 'wheel <x> <y> <notches>' (story 21), 'shot <label>' (VM only); anything else is ignored.
     if ($cmd -cmatch '^click (\d{1,5}) (\d{1,5})$') {
         $x = [int]$Matches[1]; $y = [int]$Matches[2]
         if ($x -le 16383 -and $y -le 16383) { Invoke-Click $x $y } else { Write-Host "  click skipped: ($x, $y) out of range" }
         return
     }
+    if ($cmd -cmatch '^move (\d{1,5}) (\d{1,5})$') {
+        $x = [int]$Matches[1]; $y = [int]$Matches[2]
+        if ($x -le 16383 -and $y -le 16383) { Invoke-Move $x $y } else { Write-Host "  move skipped: ($x, $y) out of range" }
+        return
+    }
+    if ($cmd -cmatch '^wheel (\d{1,5}) (\d{1,5}) (-?\d{1,2})$') {
+        $x = [int]$Matches[1]; $y = [int]$Matches[2]; $n = [int]$Matches[3]
+        if ($x -le 16383 -and $y -le 16383 -and $n -ne 0 -and [Math]::Abs($n) -le 20) { Invoke-Wheel $x $y $n } else { Write-Host "  wheel skipped: ($x, $y) or $n notches out of range" }
+        return
+    }
     if ($cmd -cmatch '^shot [A-Za-z0-9._-]{1,40}$') { Write-Host "  $cmd skipped (screenshots only in the VM)"; return }
     $vk, $scan, $label = $null, $null, $null
+    $ext = 0
     if ($cmd -ceq 'key ENTER') { $vk, $scan, $label = 0x0D, 0x1C, 'ENTER' }
+    elseif ($cmd -ceq 'key UP') { $vk, $scan, $label, $ext = 0x26, 0x48, 'UP', 1 }      # arrow keys are extended keys
+    elseif ($cmd -ceq 'key DOWN') { $vk, $scan, $label, $ext = 0x28, 0x50, 'DOWN', 1 }
     elseif ($cmd -cmatch '^key ([A-Z])$') {
         $letter = $Matches[1]
         # Set-1 scan codes of a US layout; the virtual key of a letter is its ASCII code.
@@ -138,9 +184,10 @@ function Invoke-Request([string] $cmd) {
     $p = Get-OurGame
     $h = if ($p) { $p.MainWindowHandle } else { [IntPtr]::Zero }
     if ($h -eq [IntPtr]::Zero) { Write-Host '  key skipped: no game window'; return }
-    $down = [CoreRun.Win]::PostMessage($h, 0x0100, [IntPtr]$vk, [IntPtr](1 -bor ($scan -shl 16)))                         # WM_KEYDOWN
+    $e = [int64]$ext -shl 24
+    $down = [CoreRun.Win]::PostMessage($h, 0x0100, [IntPtr]$vk, [IntPtr](1 -bor ($scan -shl 16) -bor $e))                         # WM_KEYDOWN
     Start-Sleep -Milliseconds 80
-    $up = [CoreRun.Win]::PostMessage($h, 0x0101, [IntPtr]$vk, [IntPtr]([int64]0xC0000001 -bor ([int64]$scan -shl 16)))    # WM_KEYUP
+    $up = [CoreRun.Win]::PostMessage($h, 0x0101, [IntPtr]$vk, [IntPtr]([int64]0xC0000001 -bor ([int64]$scan -shl 16) -bor $e))    # WM_KEYUP
     Write-Host ("  posted {0} to the game window (down={1} up={2})" -f $label, $down, $up)
 }
 

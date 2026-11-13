@@ -2,6 +2,28 @@
 
 All notable changes to Nucleus are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). From 0.5.0 a dependent's `need` and `dependsOn` are minimum versions (`>=0.5.0`), so a newer Nucleus never asks dependents to raise them. Up to 0.3.0, below 1.0.0 a dependent connected only to the same minor version (`need = "0.3.0"` accepted 0.3.x).
 
+## [Unreleased] - 0.7.0
+
+Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
+
+For players: mods can add a button to the title screen's own menu, between OPTIONS and QUIT, that looks like the game's buttons, and open full-screen windows over the menu with scrolling lists in the game's look (the Mod Manager uses this).
+
+### Added
+
+- `core.ui.menu`, the title-screen menu as a host (`host = "menu"`, corner or absolute): `isOpen()`, `watch(fn)` with the events `opened`, `hidden`, `shown` and `lost`, and `unwatch(token)`. While the menu is hidden (Create Server, Server List, another page) its elements are collapsed.
+- `core.ui.menu.entry{ id, label, onClick, style }` and `removeEntry(handle)`: one of the game's own buttons in the menu's column, directly above QUIT, styled like OPTIONS (`"options"`, the default) or like the column's first button (`"primary"`), with optional `textColor`, `hoverColor`, `fontSize` (16 to 28), `bold` and `italic`. One per mod; several mods' entries stack above QUIT in the order they attach, and the column's backing grows to fit. The label is a per-language table (`en` required, upper case); the game's language picks the string.
+- `core.ui.screen`: full-screen windows over the menu that form a stack (`open{ id, close }`, `close`, `isOpen`, `top`, `watch`, `unwatch`). Only the top window takes input and keyboard focus; closing a window closes the ones above it and gives focus back to the next window down or the menu. A Close button (`CLOSE`, in the game's language) by default. Elements go on a window with `place = { screen = <window>, corner | absolute }`.
+- `core.ui.list` (a scrolling list of a fixed size; children with `place = { list = h }`, at most 256) and `core.ui.row` (a horizontal row in a list, a panel or on a host; children with `place = { row = h, fill = <weight> }`, at most 16; equal weights line up as columns).
+- The game's look: `style.look = "game" | "plain"` (the game's look is the default on the menu and windows), and a text's `style.font = "title" | "heading" | "body" | "small"`. The game's fonts and materials are used by path at runtime; nothing of the game's is shipped. If one can't be loaded the element keeps the plain look (one `WARN`).
+- Lists, rows and buttons on the menu and on windows (hosts with a cursor). `panel.setStyle`, `setVisible`, `remove` and `isShown` also take a list or a row.
+- `core.has("ui.look")` is true; `ui.menu`, `ui.screen`, `ui.list` and `ui.row` are listed features.
+- Blueprint widgets `WBP_NucleusList`, `WBP_NucleusRow` and `WBP_NucleusScreen`, and setters on the text, panel and button widgets that take a font or material object.
+
+### Changed
+
+- Error texts that list the hosts now read `valid: hud, journal, menu, screen`, and a button on the HUD raises `buttons need a host with a cursor (journal, menu, screen); ...`. `unknown style key` now lists `background, font, look, padding`, and the valid keys of an intent include `fill, list, row, screen`.
+- `WBP_NucleusButton`'s root is now a SizeBox (for the game look's minimum height); its functions are unchanged.
+
 ## [0.6.0] - 2026-11-11
 
 Soft release to a few testers, not released publicly. Game: Nuclear Nightmare V8.2.1 (build 26512322). UE4SS: v3.0.1-1181-g83330635.

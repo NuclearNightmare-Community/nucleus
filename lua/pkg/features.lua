@@ -19,6 +19,7 @@ local SKIP = { name = true, version = true, log = true, has = true, features = t
 M.HAND = {
     "map.setup", -- map service (0.5.0): the nucleus.map.setup shared variable, outside the api table (user 2026-11-08)
     "ui.journal.regions", -- story 19 (0.6.0): named Journal regions in core.ui.place (region, inset, near = <region>) and elements("journal")
+    "ui.look", -- story 21 (0.7.0): style.look = "game" | "plain" and a text's style.font; buttons, lists and rows on the menu and screen hosts
 }
 
 -- The UI part of the api table: path -> { module, function } (client.lua builds api.ui from this).
@@ -39,6 +40,15 @@ M.UI = {
     { "button.create", "button", "create" }, { "button.setLabel", "button", "setLabel" }, { "button.setEnabled", "button", "setEnabled" },
     { "button.setVisible", "button", "setVisible" }, { "button.remove", "button", "remove" }, { "button.isShown", "button", "isShown" },
     { "button.stats", "button", "stats" },
+    -- story 21 (core 0.7.0, Mod Manager story 2): the title-screen menu (host and entry), windows, lists and rows
+    { "menu.entry", "entry", "entry" }, { "menu.removeEntry", "entry", "removeEntry" },
+    { "menu.isOpen", "menu", "isOpen" }, { "menu.watch", "menu", "watch" }, { "menu.unwatch", "menu", "unwatch" },
+    { "screen.open", "screen", "open" }, { "screen.close", "screen", "close" }, { "screen.isOpen", "screen", "isOpen" },
+    { "screen.top", "screen", "top" }, { "screen.watch", "screen", "watch" }, { "screen.unwatch", "screen", "unwatch" },
+    { "list.create", "list", "create" }, { "list.setStyle", "list", "setStyle" }, { "list.setVisible", "list", "setVisible" },
+    { "list.remove", "list", "remove" }, { "list.isShown", "list", "isShown" },
+    { "row.create", "row", "create" }, { "row.setStyle", "row", "setStyle" }, { "row.setVisible", "row", "setVisible" },
+    { "row.remove", "row", "remove" }, { "row.isShown", "row", "isShown" },
     { "place", "place", "place" },
     { "elements", "place", "elements" },
     { "debug.overlaps", "debug", "overlaps" }, -- story 12: a diagnostic for testing a mod's UI

@@ -11,7 +11,7 @@
   For scenario bad-input it also installs core's test-only C++ part (test/SkelNative, built by build.ps1 as
   build/native-out/test/main.dll, never packaged) as Mods/<name>SkelNative: the forced missing struct member case.
   -Scenario breaks one part on purpose: skeleton (all parts), no-native (no dlls/main.dll), no-pak (no LogicMods pak);
-  bad-input, ui, journal, soak and manual install all parts like skeleton. The scenario goes to the test dependent's Scripts/scenario.txt.
+  bad-input, ui, journal, menu, soak and manual install all parts like skeleton. The scenario goes to the test dependent's Scripts/scenario.txt.
   manual is for hand testing: the test dependent never travels or presses keys, and keeps a text widget in the live
   HUD's top-right corner (README.md, "Hand testing").
   -Staged: $Instance is the host-side staging folder of a VM run (run.ps1 -Target vm, tools/vm/vm-sp.ps1), not a game
@@ -25,7 +25,7 @@
 param(
     [Parameter(Mandatory)] [string] $Instance,
     [switch] $Test,
-    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'soak', 'manual')]
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'soak', 'manual')]
     [string] $Scenario = 'skeleton',
     [switch] $Remove,
     [switch] $Staged

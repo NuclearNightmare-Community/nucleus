@@ -24,6 +24,7 @@ local BASE = (...):gsub("%.ui%.button$", "")
 local C = require(BASE .. ".ui.common")
 local P = require(BASE .. ".ui.place")
 local X = require(BASE .. ".ui.text")
+local A = require(BASE .. ".ui.assets")
 local theme = require(BASE .. ".ui.theme")
 
 local B = {}
@@ -36,17 +37,43 @@ local function firstLine(e) return (tostring(e):match("^[^\n]*")) end
 
 -- ---------------------------------------------------------------- the click hook (one per Lua state)
 
+-- Story 21: core's own buttons (a window's Close) carry the tag <core>:<mod>:#<name>; ids of dependents' elements
+-- can't start with "#". id -> fn() run on a click, under pcall.
+B._internal = {}
+local lastInternal = {}
+
+-- Whether an element and every container above it are visible (story 21: a row in a list is two levels down).
+local function chainVisible(el)
+    local n = 0
+    while el and n < 4 do
+        if not el.visible then return false end
+        el, n = el.panel, n + 1
+    end
+    return true
+end
+
 local function dispatch(ctx)
     local w = ctx:get()
     if not C.valid(w) then return end
     local tag = X._readTag(w, "button")
     local mine = C.LOWER .. ":" .. C.modTag .. ":"
     if not tag or tag:sub(1, #mine) ~= mine then S.ignored = S.ignored + 1 return end -- another mod's button
-    local el = C.els[tag:sub(#mine + 1)]
+    local id = tag:sub(#mine + 1)
+    if id:sub(1, 1) == "#" then
+        local f = B._internal[id]
+        if not f then S.ignored = S.ignored + 1 return end
+        local now = C.micros()
+        if lastInternal[id] and now - lastInternal[id] < DEBOUNCE_US then S.debounced = S.debounced + 1 return end
+        lastInternal[id] = now
+        local ok, err = pcall(f)
+        if not ok then C.warnOnce("internal click " .. id, "core button %s: %s", id, firstLine(err)) end
+        return
+    end
+    local el = C.els[id]
     if not el or el.removed or el.kind ~= "button" then S.ignored = S.ignored + 1 return end
     local cur = el.ref and C.deref(el.ref)
     if not cur or cur:GetAddress() ~= w:GetAddress() then S.ignored = S.ignored + 1 return end -- not its live widget
-    if not el.enabled or not el.visible or (el.panel and not el.panel.visible) then S.dropped = S.dropped + 1 return end
+    if not el.enabled or not chainVisible(el) then S.dropped = S.dropped + 1 return end
     local now = C.micros()
     if el.lastClick and now - el.lastClick < DEBOUNCE_US then S.debounced = S.debounced + 1 return end
     el.lastClick = now
@@ -106,6 +133,26 @@ local function applyEnabled(el, w)
     el.appliedEnabled = el.enabled
 end
 
+-- Story 21: the game's look on a button widget (the menu's secondary buttons: M_NN_WornStrip at alpha 0.52, the
+-- cinematic selection on hover and press, AlumniSans-SemiBold 22 in the menu's text colours, padding 12/4/12/4, at
+-- least 44 high). False when an asset is missing (the caller keeps the plain look; assets.lua warned once).
+local function styleGame(w)
+    local g = theme.game
+    local strip, sel = A.get("mat:strip"), A.get("mat:selection")
+    local font = A.get("font:" .. g.buttonFont.font)
+    if not (strip and sel and font) then return false end
+    local t, pd, n, h = g.buttonTint, g.buttonPadding, g.text, g.textHover
+    C.count(); w:SetMaterials(strip, sel, t.r, t.g, t.b, t.a, pd.l, pd.t, pd.r, pd.b, g.buttonMinHeight)
+    C.count(); w:SetLabelLook(font, g.buttonFont.size, n.r, n.g, n.b, n.a, h.r, h.g, h.b, h.a, g.shadowA)
+    return true
+end
+function B._styleGame(w)
+    local ok, res = pcall(styleGame, w)
+    if not ok then C.warnOnce("game button", "a game-look button failed (is %s's pak current?): %s", C.NAME, firstLine(res)) return false end
+    return res
+end
+
+local PLAIN_LABEL = { size = 18 }
 X.KIND.button = {
     pkg = C.BUTTON_PKG, short = C.BUTTON_SHORT, cls = C.BUTTON_CLASS,
     content = function(el, w, fresh)
@@ -116,23 +163,41 @@ X.KIND.button = {
     end,
     style = function(el, w)
         local s, h, p = el.style, el.style.hover, el.style.pressed
+        -- Story 21: the game look unless the style names its own background (then the colours, with the game's label).
+        if X._lookOf(el) == "game" and not s.explicitBg then
+            if B._styleGame(w) then el.gameLook = true return end
+        end
         local ok, err = pcall(function()
             C.count(); w:SetColors(s.r, s.g, s.b, s.a, h.r, h.g, h.b, h.a, p.r, p.g, p.b, p.a, s.pad)
+            if el.gameLook then
+                -- Back from the game look: the generator's label (the engine font at 18, white, with its shadow).
+                local font = A.get("font:Engine")
+                if font then C.count(); w:SetLabelLook(font, PLAIN_LABEL.size, 1, 1, 1, 1, 1, 1, 1, 1, 0.85) end
+                el.gameLook = nil
+            end
         end)
         if not ok then C.warnOnce("style:" .. el.id, "button '%s': style not applied (is %s's pak current?): %s", el.id, C.NAME, firstLine(err)) end
     end,
 }
 
--- Buttons need a host with a cursor; a panel holding buttons too. Called by the engine for every create and place.
+-- Whether a container holds a button at any depth (story 21: a row in a list).
+local function holdsButton(el)
+    for _, ch in ipairs(el.children or {}) do
+        if not ch.removed and (ch.kind == "button" or (ch.children and holdsButton(ch))) then return true end
+    end
+    return false
+end
+
+-- Buttons need a host with a cursor; so do lists and rows (story 21), and a panel holding buttons. Called by the
+-- engine for every create and place.
+local NEEDS_CURSOR = { button = "buttons", list = "lists", row = "rows" }
 X.checkHost = function(kind, host, fn, el)
     if host ~= "hud" then return end
-    if kind == "button" then C.fail("%s.%s: buttons need a host with a cursor (journal); see input mode, story 16", C.UI, fn) end
-    if kind == "panel" and el then
-        for _, ch in ipairs(el.children) do
-            if ch.kind == "button" and not ch.removed then
-                C.fail("%s.%s: panel '%s' holds buttons, which need a host with a cursor (journal); see input mode, story 16", C.UI, fn, el.id)
-            end
-        end
+    if NEEDS_CURSOR[kind] then
+        C.fail("%s.%s: %s need a host with a cursor (%s); see input mode, story 16", C.UI, fn, NEEDS_CURSOR[kind], C.CURSOR_HOSTS)
+    end
+    if kind == "panel" and el and holdsButton(el) then
+        C.fail("%s.%s: panel '%s' holds buttons, which need a host with a cursor (%s); see input mode, story 16", C.UI, fn, el.id, C.CURSOR_HOSTS)
     end
 end
 
@@ -244,5 +309,7 @@ end
 
 -- Internal (client.lua): load the button class before onReady, so the first create can register the hook at once.
 function B._prepare() return X._classOf("button") ~= nil end
+-- Internal (screen.lua): the click hook for core's own buttons.
+function B._ensureHook() return ensureHook() end
 B._dispatch, B._S = onClicked, S -- for unit tests
 return B
