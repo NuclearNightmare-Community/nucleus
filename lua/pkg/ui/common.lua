@@ -25,7 +25,44 @@ C.CLICK_FN = C.BUTTON_CLASS .. ":" .. C.NAME .. "_OnClicked"
 C.JOURNAL_PKG = "/Game/Graphics/Journal/Journal"
 C.JOURNAL_SHORT = "Journal_C"
 C.JOURNAL_CLASS = C.JOURNAL_PKG .. "." .. C.JOURNAL_SHORT
-C.HOST_NAMES = "hud, journal"    -- the hosts an intent can name (place.lua)
+-- Story 21 (Mod Manager story 2): the title-screen menu, the game's own column button class, and core's list, row and
+-- window widgets (WBP_<Core>List: SizeBox "Box" -> Border "Background" -> ScrollBox "Scroll" -> VerticalBox "VBox";
+-- WBP_<Core>Row: Border "Background" -> HorizontalBox "HBox"; WBP_<Core>Screen: Overlay "Root" -> Border "Backdrop"
+-- (hit-testable) + CanvasPanel "Canvas").
+C.MENU_PKG = "/Game/Graphics/MainMenu/MainMenu"
+C.MENU_SHORT = "MainMenu_C"
+C.MENU_CLASS = C.MENU_PKG .. "." .. C.MENU_SHORT
+C.GAME_BUTTON_PKG = "/Game/Hyper/UI/Widgets/Generic_Elements/Buttons/UI_Button_Master"
+C.GAME_BUTTON_SHORT = "UI_Button_Master_C"
+C.GAME_BUTTON_CLASS = C.GAME_BUTTON_PKG .. "." .. C.GAME_BUTTON_SHORT
+C.LIST_PKG = "/Game/Mods/" .. C.NAME .. "/WBP_" .. C.NAME .. "List"
+C.LIST_SHORT = "WBP_" .. C.NAME .. "List_C"
+C.LIST_CLASS = C.LIST_PKG .. "." .. C.LIST_SHORT
+C.ROW_PKG = "/Game/Mods/" .. C.NAME .. "/WBP_" .. C.NAME .. "Row"
+C.ROW_SHORT = "WBP_" .. C.NAME .. "Row_C"
+C.ROW_CLASS = C.ROW_PKG .. "." .. C.ROW_SHORT
+C.SCREEN_PKG = "/Game/Mods/" .. C.NAME .. "/WBP_" .. C.NAME .. "Screen"
+C.SCREEN_SHORT = "WBP_" .. C.NAME .. "Screen_C"
+C.SCREEN_CLASS = C.SCREEN_PKG .. "." .. C.SCREEN_SHORT
+C.HOST_NAMES = "hud, journal, menu, screen" -- the hosts an intent can name (place.lua)
+C.CURSOR_HOSTS = "journal, menu, screen"    -- hosts with a cursor: buttons, lists and rows go there
+
+-- An element's host key is "hud", "journal", "menu", or "screen#<window id>" for a window of the screen host: each
+-- window is a host of its own (its own canvas, corner stacks and settling), all of kind "screen".
+function C.hostKind(host)
+    if type(host) == "string" and host:sub(1, 7) == "screen#" then return "screen" end
+    return host
+end
+function C.windowHost(id) return "screen#" .. id end
+-- Hosts whose elements default to the game's look (story 21) and that have a cursor.
+function C.gameHost(host) local k = C.hostKind(host) return k == "menu" or k == "screen" end
+
+-- Story 21: the windows of the screen host in this Lua state (screen.lua fills them; place.lua reads them to validate
+-- an intent's screen = <window handle>). id -> { id, handle, open, ref (the window widget's weak handle), z, ... }.
+C.windows = {}
+C.windowOf = setmetatable({}, { __mode = "k" }) -- window handle table -> its record
+-- Hosts whose elements are collapsed now (story 21: the menu while its opacity is 0 or another page shows).
+C.hostHidden = {}
 
 -- ESlateVisibility
 C.VIS = { Visible = 0, Collapsed = 1, Hidden = 2, HitTestInvisible = 3, SelfHitTestInvisible = 4 }
@@ -150,17 +187,22 @@ C.removedHandle = setmetatable({}, { __mode = "k" }) -- handle table -> id, afte
 C.removedKind = setmetatable({}, { __mode = "k" })   -- handle table -> kind, after remove
 C.seq = 0
 
--- The host an element is drawn on: its own, or its panel's.
+-- The host an element is drawn on: its own, or its container's (story 21: a row in a list holds texts two levels down).
+-- el.panel is the element's container: a panel, a list or a row (story 21); containers have el.children.
 function C.hostOf(el)
-    if el.panel then return el.panel.place.host end
+    local n = 0
+    while el.panel and n < 4 do el = el.panel; n = n + 1 end
     return el.place.host
 end
+function C.isContainer(el) return el.children ~= nil end
 
-local ARTICLE = { text = "a text element", panel = "a panel", button = "a button" }
+local ARTICLE = { text = "a text element", panel = "a panel", button = "a button", list = "a list", row = "a row" }
 C.ARTICLE = ARTICLE
+-- Story 21: functions that take a panel also take a list or a row (setStyle, setVisible, remove, isShown).
+local CONTAINER = { panel = true, list = true, row = true }
 
 -- The element behind a handle, or a clean error. fn is e.g. "text.set"; kind, when given, is the kind the function
--- takes ("text", "panel", "button"); nil takes any element.
+-- takes ("text", "panel", "button", "list", "row"); nil takes any element. "panel" also takes a list or a row.
 function C.element(h, fn, kind)
     if type(h) ~= "table" then
         C.fail("%s.%s: expected %s handle, got %s", C.UI, fn, (kind == nil or kind == "text") and "an element" or ARTICLE[kind], C.describe(h))
@@ -172,7 +214,7 @@ function C.element(h, fn, kind)
         if kind == nil or kind == "text" then C.fail("%s.%s: not an element handle (use the handle that text.create returned)", C.UI, fn) end
         C.fail("%s.%s: not %s handle (use the handle that %s.create returned)", C.UI, fn, ARTICLE[kind], kind)
     end
-    if kind and el.kind ~= kind then
+    if kind and el.kind ~= kind and not (kind == "panel" and CONTAINER[el.kind]) then
         C.fail("%s.%s: not %s handle ('%s' is %s)", C.UI, fn, ARTICLE[kind], el.id, ARTICLE[el.kind])
     end
     return el

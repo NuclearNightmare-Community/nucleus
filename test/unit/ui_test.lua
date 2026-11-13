@@ -6,7 +6,7 @@
 local ROOT = (arg and arg[0] or ""):match("^(.*)[/\\]test[/\\]unit[/\\][^/\\]+$") or "."
 
 -- ---------------------------------------------------------------- module loading as Mods/Nucleus/Scripts/nucleus/*
-package.preload["nucleus.version"] = function() return { name = "Nucleus", version = "0.6.0", floor = "0.1.0" } end
+package.preload["nucleus.version"] = function() return { name = "Nucleus", version = "0.7.0", floor = "0.1.0" } end
 table.insert(package.searchers, 2, function(name)
     local rest = name:match("^nucleus%.(.+)$")
     if not rest then return nil end
@@ -347,8 +347,8 @@ local bad = {
     { { near = "mic" }, "unknown near element 'mic' (valid: crosshair)" },
     { { near = "crosshair", side = "up" }, "unknown side 'up'" },
     { { near = "crosshair", align = "middle" }, "unknown align 'middle'" },
-    { { host = "Journal", corner = "top-left" }, "unknown host 'Journal' (valid: hud, journal)" },
-    { { host = 5, corner = "top-left" }, "unknown host 5 (valid: hud, journal)" },
+    { { host = "Journal", corner = "top-left" }, "unknown host 'Journal' (valid: hud, journal, menu, screen)" },
+    { { host = 5, corner = "top-left" }, "unknown host 5 (valid: hud, journal, menu, screen)" },
     { { host = "journal", near = "crosshair" }, "unknown near region 'crosshair' (valid: ammo, binder, cover, map, map-header, match, page-left, page-right, tasks)" },
     -- story 19: the I/O matrix's error rows
     { { corner = "top-left", region = "map" }, "region is not available on host 'hud' (journal only)" },
@@ -357,9 +357,9 @@ local bad = {
     { { host = "journal", corner = "top-left", region = 1 }, "unknown region 1 (valid: ammo, binder, cover, map, map-header, match, page-left, page-right, tasks)" },
     { { host = "journal", corner = "top-left", inset = "huge" }, "unknown inset 'huge' (valid: tight, normal, loose)" },
     { { host = "journal", corner = "top-left", inset = 8 }, "unknown inset 8 (valid: tight, normal, loose)" },
-    { { host = "journal", near = "map", region = "map" }, "region is not allowed with near (valid keys: align, gap, host, near, offset, side)" },
+    { { host = "journal", near = "map", region = "map" }, "region is not allowed with near (valid keys: align, gap, host, near, offset, screen, side)" },
     { { host = "journal", near = "map", inset = "tight" }, "inset is not allowed with near" },
-    { { host = "journal", absolute = {}, region = "map" }, "region is not allowed with absolute (valid keys: absolute, host)" },
+    { { host = "journal", absolute = {}, region = "map" }, "region is not allowed with absolute (valid keys: absolute, host, screen)" },
     { { near = "map" }, "unknown near element 'map' (valid: crosshair)" },
     { { host = "journal", near = "map", corner = "top-left" }, "an intent needs exactly one of corner, near or absolute (got corner and near)" },
 }
@@ -382,7 +382,7 @@ raises(function() X.resolveStyle({ background = { r = -1, g = 0, b = 0 } }) end,
 raises(function() X.resolveStyle({ background = { r = 2, g = 0, b = 0 } }) end, "background.r must be a number from 0 to 1, got 2", "style: 2")
 raises(function() X.resolveStyle({ background = { r = "x", g = 0, b = 0 } }) end, "got 'x'", "style: 'x'")
 raises(function() X.resolveStyle({ padding = 5 }) end, "unknown padding 5 (valid: none, tight, normal, loose)", "style: padding 5")
-raises(function() X.resolveStyle({ bg = "dim" }) end, "unknown style key 'bg' (valid: background, padding)", "style: bg")
+raises(function() X.resolveStyle({ bg = "dim" }) end, "unknown style key 'bg' (valid: background, font, look, padding)", "style: bg")
 
 raises(function() X._validId("", "text.create") end, "id must not be empty", "id: empty")
 raises(function() X._validId(string.rep("a", 65), "text.create") end, "id is 65 characters, at most 64", "id: 65")
@@ -1068,8 +1068,8 @@ function regionTests() -- a function: the main chunk is at Lua's 200-locals limi
     local ej, n = P.elements("journal"), 0
     for k, d in pairs(ej) do n = n + 1; ok(type(d) == "string" and P._REGIONS[k] ~= nil, "elements('journal'): " .. k) end
     ok(n == 9, "elements('journal'): nine regions", n)
-    raises(function() P.elements("bogus") end, "nucleus.ui.elements: unknown host 'bogus' (valid: hud, journal)", "elements('bogus')")
-    raises(function() P.elements(1) end, "nucleus.ui.elements: unknown host 1 (valid: hud, journal)", "elements(1)")
+    raises(function() P.elements("bogus") end, "nucleus.ui.elements: unknown host 'bogus' (valid: hud, journal, menu, screen)", "elements('bogus')")
+    raises(function() P.elements(1) end, "nucleus.ui.elements: unknown host 1 (valid: hud, journal, menu, screen)", "elements(1)")
     raises(function() P.elements("hud", 2) end, "nucleus.ui.elements: expected 0 or 1 arguments, got 2", "elements('hud', 2)")
 
     -- placement on an open Journal (16:9)
@@ -1435,12 +1435,12 @@ raises(function() BN.create{ id = "bb", label = "x", place = jplace } end, BC ..
 raises(function() BN.create{ id = "bb", label = "x", place = jplace, onClick = "f" } end, BC .. "onClick must be a function, got 'f'", "button: onClick a string")
 raises(function() BN.create{ id = "bb", label = {}, place = jplace, onClick = counter("x") } end, BC .. "label must be a string, a number or nil, got table", "button: label a table")
 raises(function() BN.create{ id = "bb", label = string.rep("x", 65), place = jplace, onClick = counter("x") } end, BC .. "label is 65 characters, at most 64", "button: 65-character label")
-raises(function() BN.create{ id = "bb", label = "x", place = { host = "hud", corner = "top-left" }, onClick = counter("x") } end, BC .. "buttons need a host with a cursor (journal); see input mode, story 16", "button: host hud")
-raises(function() BN.create{ id = "bb", label = "x", onClick = counter("x") } end, BC .. "buttons need a host with a cursor (journal)", "button: default place is the HUD")
+raises(function() BN.create{ id = "bb", label = "x", place = { host = "hud", corner = "top-left" }, onClick = counter("x") } end, BC .. "buttons need a host with a cursor (journal, menu, screen); see input mode, story 16", "button: host hud")
+raises(function() BN.create{ id = "bb", label = "x", onClick = counter("x") } end, BC .. "buttons need a host with a cursor (journal, menu, screen)", "button: default place is the HUD")
 raises(function() BN.create{ id = "bb", label = "x", place = jplace, onClick = counter("x"), enabled = "yes" } end, BC .. "enabled must be a boolean or nil, got 'yes'", "button: enabled 'yes'")
 raises(function() BN.create{ id = "bb", label = "x", place = jplace, onClick = counter("x"), style = { background = "pink" } } end, "nucleus.ui.button: unknown background 'pink'", "button: style prefix")
 local hudPanel = PN.create{ id = "bhp", place = { corner = "top-left" } }
-raises(function() BN.create{ id = "bb", label = "x", place = { panel = hudPanel }, onClick = counter("x") } end, BC .. "buttons need a host with a cursor (journal)", "button: into a HUD panel")
+raises(function() BN.create{ id = "bb", label = "x", place = { panel = hudPanel }, onClick = counter("x") } end, BC .. "buttons need a host with a cursor (journal, menu, screen)", "button: into a HUD panel")
 PN.remove(hudPanel)
 ok(C.els.bb == nil and #HOOKS == 0, "button: nothing made, no hook, by refused creates")
 
@@ -1450,8 +1450,8 @@ local b1 = BN.create{ id = "b1", label = "One", place = { panel = bp }, onClick 
 local b2 = BN.create{ id = "b2", label = 22, place = { panel = bp }, onClick = function(h) hits.b2 = (hits.b2 or 0) + 1; error("b2 throws on purpose") end }
 local bt = X.create{ id = "bt", text = "text", place = { panel = bp } }
 ok(#HOOKS == 1 and HOOKS[1].path == "/Game/Mods/Nucleus/WBP_NucleusButton.WBP_NucleusButton_C:Nucleus_OnClicked", "button: one click hook per Lua state, by full path", HOOKS[1] and HOOKS[1].path)
-raises(function() P.place(bp, { host = "hud", corner = "top-left" }) end, PLC .. "panel 'bp' holds buttons, which need a host with a cursor (journal); see input mode, story 16", "button: a panel holding buttons can't go to the HUD")
-raises(function() P.place(b1, { host = "hud", corner = "top-left" }) end, PLC .. "buttons need a host with a cursor (journal)", "button: place on the HUD")
+raises(function() P.place(bp, { host = "hud", corner = "top-left" }) end, PLC .. "panel 'bp' holds buttons, which need a host with a cursor (journal, menu, screen); see input mode, story 16", "button: a panel holding buttons can't go to the HUD")
+raises(function() P.place(b1, { host = "hud", corner = "top-left" }) end, PLC .. "buttons need a host with a cursor (journal, menu, screen)", "button: place on the HUD")
 ok(not BN.isShown(b1) and C.els.b1.ref == nil, "button: pending while the Journal is closed")
 local jb = openNew(20); tick()
 local wbp = widgetOfId("bp")

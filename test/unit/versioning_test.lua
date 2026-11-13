@@ -101,8 +101,8 @@ ok(S.parse("1.2.3").major == 1 and S.parse(">=1.2.3") == nil and S.parse(5) == n
 -- ---------------------------------------------------------------- features
 local F = require("nucleus.features")
 local declared = F.declared()
-local want = { "call", "clock", "deref", "free", "map.setup", "ref", "ui", "ui.button", "ui.debug", "ui.elements", "ui.hud", "ui.journal", "ui.journal.regions", "ui.panel", "ui.place", "ui.text" }
-eq(table.concat(declared, ","), table.concat(want, ","), "declared(): the 0.6.0 feature list (map.setup and ui.journal.regions hand-named), sorted")
+local want = { "call", "clock", "deref", "free", "map.setup", "ref", "ui", "ui.button", "ui.debug", "ui.elements", "ui.hud", "ui.journal", "ui.journal.regions", "ui.list", "ui.look", "ui.menu", "ui.panel", "ui.place", "ui.row", "ui.screen", "ui.text" }
+eq(table.concat(declared, ","), table.concat(want, ","), "declared(): the 0.7.0 feature list (map.setup, ui.journal.regions and ui.look hand-named), sorted")
 for i = 2, #declared do ok(declared[i - 1] < declared[i], "declared() is sorted and unique at " .. i) end
 -- the rule
 do

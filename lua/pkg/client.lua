@@ -16,7 +16,10 @@ local uiOk, uiErr = pcall(function()
     return { common = require(BASE .. ".ui.common"), hud = require(BASE .. ".ui.hud"),
              journal = require(BASE .. ".ui.journal"),
              text = require(BASE .. ".ui.text"), place = require(BASE .. ".ui.place"), debug = require(BASE .. ".ui.debug"),
-             panel = require(BASE .. ".ui.panel"), button = require(BASE .. ".ui.button") }
+             panel = require(BASE .. ".ui.panel"), button = require(BASE .. ".ui.button"),
+             -- story 21 (Mod Manager story 2): the title-screen menu, its entry, windows, lists and rows
+             menu = require(BASE .. ".ui.menu"), entry = require(BASE .. ".ui.entry"), screen = require(BASE .. ".ui.screen"),
+             list = require(BASE .. ".ui.list"), row = require(BASE .. ".ui.row") }
 end)
 
 local NAME, LOWER = V.name, V.name:lower()
@@ -197,6 +200,7 @@ function C.connect(opts)
                 local prev = ModRef.OnUnload
                 ModRef.OnUnload = function(...)
                     pcall(U.hud._summary)
+                    pcall(U.entry._unload) -- story 21: the entry leaves the live menu with its mod
                     if type(prev) == "function" then return prev(...) end
                 end
             end)

@@ -59,6 +59,8 @@ function PN.create(opts)
     if opts.place ~= nil and opts.place.panel ~= nil then C.fail("%s.panel.create: a panel can't go inside a panel (one level only)", C.UI) end
     local intent = opts.place or { corner = "top-right" }
     local place = P.validate(intent)
+    -- Story 21: nor inside a list or a row (checkJoin raises for every container).
+    if place.panelEl then X._checkJoin(place.panelEl, "panel", "panel.create") end
     local style = X.resolveStyle(opts.style, "panel")
     local layout = validLayout(opts.layout, "panel.create")
     local gap = validGap(opts.gap, "panel.create")
@@ -83,7 +85,7 @@ end
 function PN.setStyle(h, style)
     C.enter("panel.setStyle")
     local el = C.element(h, "panel.setStyle", "panel")
-    X._setStyle(el, X.resolveStyle(style, "panel"))
+    X._setStyle(el, X.resolveStyle(style, el.kind)) -- story 21: a list's or a row's own defaults
 end
 
 function PN.setVisible(h, visible)

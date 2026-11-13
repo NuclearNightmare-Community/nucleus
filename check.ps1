@@ -22,7 +22,7 @@
 param(
     [string] $Instance,
     [string] $Log,
-    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'soak', 'manual')]
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'soak', 'manual')]
     [string] $Scenario = 'skeleton',
     [ValidateSet('host', 'vm')] [string] $Target = 'host'
 )
@@ -196,6 +196,37 @@ foreach ($p in 'menu1', 'match1') {
     }
     foreach ($fn in 'setlabel', 'setenabled', 'setvis', 'remove', 'isshown') {
         foreach ($h in 'nil', 'num', 'forged', 'text') { $badInput += "\[$T\] OK CASE $p\.ui-button-$fn-h-$h " }
+    }
+}
+# Story 21 (Mod Manager story 2, core 0.7.0): the menu entry, the menu and screen hosts, lists, rows and the game look
+# with bad values, in both worlds (no title-screen menu is open in either, so screen.open refuses), and every new
+# function off the game thread.
+foreach ($p in 'menu1', 'match1') {
+    foreach ($id in 'mm-entry-none', 'mm-entry-str', 'mm-entry-unknown', 'mm-entry-noid', 'mm-entry-space', 'mm-entry-65', 'mm-label-nil',
+                    'mm-label-str', 'mm-label-noen', 'mm-label-lower', 'mm-label-17', 'mm-label-empty', 'mm-label-65', 'mm-label-num',
+                    'mm-label-key-digit', 'mm-label-key-long', 'mm-label-key-num', 'mm-onclick-nil', 'mm-onclick-str', 'mm-style-preset',
+                    'mm-style-num', 'mm-style-tpreset', 'mm-style-key', 'mm-style-font-500', 'mm-style-font-15', 'mm-style-font-float',
+                    'mm-style-color-2', 'mm-style-color-str', 'mm-style-bold', 'mm-style-italic', 'mm-entry-ok', 'mm-entry-second',
+                    'mm-remove-nil', 'mm-remove-num', 'mm-remove-forged', 'mm-remove-ok', 'mm-remove-again', 'mm-entry-after-remove',
+                    'mm-isopen-arg', 'mm-isopen-ok', 'mm-watch-nil', 'mm-watch-str', 'mm-unwatch-forged', 'mm-unwatch-str', 'mm-watch-ok',
+                    'mm-screen-open-none', 'mm-screen-open-unknown', 'mm-screen-open-noid', 'mm-screen-open-close', 'mm-screen-open-nomenu',
+                    'mm-screen-close-nil', 'mm-screen-close-num', 'mm-screen-close-forged', 'mm-screen-isopen-nil', 'mm-screen-isopen-num',
+                    'mm-screen-isopen-forged', 'mm-screen-top-arg', 'mm-screen-top-ok', 'mm-screen-watch-nil', 'mm-screen-unwatch-forged',
+                    'mm-screen-unwatch-float', 'mm-screen-watch-ok', 'mm-elements-menu', 'mm-elements-screen', 'mm-place-screen-num',
+                    'mm-place-screen-forged', 'mm-place-menu-near', 'mm-place-menu-region', 'mm-place-fill-alone', 'mm-text-menu-ok',
+                    'mm-look-bad', 'mm-font-bad', 'mm-font-plain', 'mm-font-game-ok', 'mm-list-none', 'mm-list-unknown', 'mm-list-size-nil',
+                    'mm-list-size-str', 'mm-list-size-w31', 'mm-list-size-h4097', 'mm-list-size-nan', 'mm-list-hud', 'mm-list-hud-default',
+                    'mm-list-ok', 'mm-list-in-list', 'mm-list-in-panel', 'mm-row-unknown', 'mm-row-hud', 'mm-row-ok', 'mm-row-in-panel-ok',
+                    'mm-row-in-row', 'mm-list-in-row', 'mm-fill-0', 'mm-fill-17', 'mm-fill-str', 'mm-fill-list', 'mm-row-child-17',
+                    'mm-button-in-row-ok', 'mm-row-setvis-yes', 'mm-row-isshown-ok', 'mm-list-child-257', 'mm-list-setvis-1',
+                    'mm-list-setstyle-game', 'mm-list-isshown-ok', 'mm-list-h-text', 'mm-list-h-forged', 'mm-list-remove-ok',
+                    'mm-list-remove-again', 'mm-list-removed-row') {
+        $badInput += "\[$T\] OK CASE $p\.ui-$id "
+    }
+    foreach ($id in 'menu-entry', 'menu-removeentry', 'menu-isopen', 'menu-watch', 'menu-unwatch', 'screen-open', 'screen-close', 'screen-isopen',
+                    'screen-top', 'screen-watch', 'screen-unwatch', 'list-create', 'list-setstyle', 'list-setvis', 'list-remove', 'list-isshown',
+                    'row-create', 'row-setstyle', 'row-setvis', 'row-remove', 'row-isshown') {
+        $badInput += "\[$T\] OK CASE $p\.off-ui-$id "
     }
 }
 foreach ($id in 'pre-create', 'pre-watch', 'pre-find', 'pre-elements', 'pre-overlaps', 'pre-journal-watch', 'pre-journal-isopen', 'pre-panel-create', 'pre-panel-move', 'pre-button-create') { $badInput += "\[$T\] OK CASE $id " }
@@ -467,6 +498,93 @@ $soak = $started + @(
 )
 # Hand testing: only that nothing broke. What the player did (where they went, whether the HUD showed) is not judged;
 # the manual test's own caught errors are soft (warn) checks.
+# Story 21 (Mod Manager story 2): the menu entry, the menu host and the window stack, one launch written for the VM at
+# 1280x720 (run.ps1 -Scenario menu -Target vm). END result=PASS already means every check the test made passed; these
+# name the ones the acceptance criteria rest on, plus core's own lines (logged with the test's logger).
+$menuChecks = $started + @(
+    "\[$T\] SCENARIO menu "
+    "\[$T\] OK MSETUP entry and corner text created before any key"
+    "\[$T\] OK STARTUP before key: MainMenu_C in viewport=0 "
+    "\[$T\] OK STARTUP menu\.isOpen=false, corner text isShown=false"
+    # Core registers its menu hooks once, from a poll tick after the first MainMenu_C exists (line order checked below).
+    "#1|\[$T\] ui menu hooks registered \(MainMenu_C:Construct, CommonButtonBase:HandleButtonClicked\) after the first menu "
+    # The first menu gets its entry late (poll); the two menus after a map change inside Construct.
+    "#1|\[$T\] ui menu entry 'skel-entry' inserted between OPTIONS and QUIT in \S+ \(poll\), column grew "
+    "#2|\[$T\] ui menu entry 'skel-entry' inserted between OPTIONS and QUIT in \S+ \(construct\), column grew "
+    "!\[$T\] WARN ui menu entry"
+    "\[$T\] OK MOPEN menu\.isOpen\(\)=true"
+    "\[$T\] OK MTEXT corner text isShown on the menu"
+    # AC 1 and AC 4: order, pitch, x/width, look (0 fingerprint differences, like OPTIONS vs QUIT) and the backing.
+    "\[$T\] OK MORDER menu1 column=\[START GAME, JOIN GAME, CUSTOMIZE, OPTIONS, SKEL ENTRY, QUIT\]"
+    "\[$T\] OK MORDER menu2 column=\[START GAME, JOIN GAME, CUSTOMIZE, OPTIONS, SKEL ENTRY, QUIT\]"
+    "\[$T\] OK MPITCH menu1 "
+    "\[$T\] OK MPITCH menu2 "
+    "\[$T\] OK MXW menu1 "
+    "\[$T\] OK MXW menu2 "
+    "\[$T\] OK MFP menu1 fingerprint diffs entry-vs-OPTIONS=0 \(OPTIONS vs QUIT: 0\)"
+    "\[$T\] OK MFP menu2 fingerprint diffs entry-vs-OPTIONS=0 \(OPTIONS vs QUIT: 0\)"
+    "\[$T\] OK MGROW menu1 "
+    "\[$T\] OK MGROW menu2 "
+    "\[$T\] OK MCOVER menu1 "
+    "\[$T\] OK MCOVER menu2 "
+    "\[$T\] OK MEXTRA menu1 "
+    "\[$T\] OK MEXTRA menu2 "
+    "\[$T\] OK MEXTRA menu3 "
+    # The window stack's limits (I/O matrix: nested windows, a ninth window).
+    "\[$T\] OK CASE menu1\.mm-screen-open-ok "
+    "\[$T\] OK CASE menu1\.mm-screen-open-again "
+    "\[$T\] OK CASE menu1\.mm-screen-handle-write "
+    "\[$T\] OK CASE menu1\.mm-screen-open-9 "
+    "\[$T\] OK CASE menu1\.mm-screen-top-8 "
+    "\[$T\] OK CASE menu1\.mm-screen-isopen-w3 "
+    "\[$T\] OK CASE menu1\.mm-screen-close-w1 "
+    "\[$T\] OK CASE menu1\.mm-screen-top-none "
+    "\[$T\] OK CASE menu1\.mm-screen-isopen-w5 "
+    "\[$T\] OK CASE menu1\.mm-screen-close-again "
+    "\[$T\] OK MSTACK closed w1 reason api=true, w2\.\.w8 reason parent=7 of 7"
+    "\[$T\] OK MSTACK the menu holds keyboard focus"
+    # AC 2: keys, hover, the real click.
+    "\[$T\] OK MKEY focus on OPTIONS"
+    "\[$T\] OK MKEY 1 DOWN: OPTIONS -> SKEL ENTRY"
+    "\[$T\] OK MKEY 2 DOWN: SKEL ENTRY -> QUIT"
+    "\[$T\] OK MKEY 3 UP: QUIT -> SKEL ENTRY"
+    "\[$T\] OK MKEY 4 UP: SKEL ENTRY -> OPTIONS"
+    "\[$T\] OK MHOVER "
+    "\[$T\] OK MENTRY real click ran onClick exactly once \(1\)"
+    "\[$T\] OK MENTRY nothing of the game's opened"
+    "#1|\[$T\] MCLICK entry "
+    # AC 5-7: the windows.
+    "\[$T\] OK MWINA window A open and on top"
+    "\[$T\] OK MWINA A's screen widget .* has keyboard focus"
+    "\[$T\] OK MWINA A's list holds 40 rows"
+    "\[$T\] OK MLOOKGAME fonts: "
+    "\[$T\] OK MLOOKGAME brushes: "
+    "\[$T\] OK MWINB A's button opened B"
+    "\[$T\] OK MWINB B has keyboard focus, A doesn't"
+    "\[$T\] OK MWINB A is HitTestInvisible under B"
+    "\[$T\] OK MUNDERB "
+    "\[$T\] OK MCLOSEB B closed \(reason api\)"
+    "\[$T\] OK MCLOSEB A has keyboard focus again"
+    "\[$T\] OK MWHEEL scroll offset "
+    "\[$T\] OK MCOLS "
+    "\[$T\] OK MROW "
+    "\[$T\] OK MENTER "
+    "\[$T\] OK MCLOSEA Close closed A \(reason close\)"
+    "\[$T\] OK MCLOSEA the menu holds keyboard focus"
+    "\[$T\] OK MCLOSEA DOWN after the close moves focus into the column"
+    # AC 3: OPTIONS and START GAME as without the entry; the menu hidden; no onClick at the entry's last rect.
+    "\[$T\] OK MSETTINGS a real click on OPTIONS opened Settings"
+    "\[$T\] OK MSETTINGS Settings closed"
+    "\[$T\] OK MSTART "
+    "\[$T\] OK MHIDDEN the menu's hidden event fired"
+    "\[$T\] OK MHIDDEN corner text isShown=false"
+    "\[$T\] OK MLASTRECT "
+    # The map changes: the menu lost; a window open across a reload lost.
+    "\[$T\] OK MLOST "
+    "\[$T\] OK MWINC window C lost with the map change"
+    "\[$T\] SEVENT \d+ lost id=C "
+    "\[$T\] END result=PASS"
+)
 $manual = @(
     "\[$T\] SCENARIO manual "
     "\[$T\] CONNECT ok $N $Ver "
@@ -481,6 +599,7 @@ $expect = @{
     'skeleton'  = $skeleton
     'ui'        = $ui
     'journal'   = $journal
+    'menu'      = $menuChecks
     'soak'      = $soak
     'manual'    = $manual
     'bad-input' = $badInput
@@ -533,6 +652,14 @@ if ($Scenario -eq 'bad-input') {
     $seen = @($lines | Where-Object { $_ -match "\[$T\] FEATURES (\S+)" } | ForEach-Object { $Matches[1] }) | Select-Object -Last 1
     if ($ready -and $ready -eq $seen) { Write-Host "ok:   core.features() equals the READY line's features ($ready)" }
     else { Write-Host "FAIL: core.features() ($seen) differs from the READY line's features ($ready)"; $failed++ }
+}
+if ($Scenario -eq 'menu') {
+    # Story 21: no menu hook before a MainMenu_C exists. The test logs STARTUP while none is in the viewport, just before
+    # it presses Enter; core's one hooks line must come after it.
+    $startup = [Array]::FindIndex([string[]]$lines, [Predicate[string]]{ param($l) $l -match "\[$T\] OK STARTUP before key: MainMenu_C in viewport=0 " })
+    $hooks = [Array]::FindIndex([string[]]$lines, [Predicate[string]]{ param($l) $l -match "\[$T\] ui menu hooks registered " })
+    if ($startup -ge 0 -and $hooks -gt $startup) { Write-Host "ok:   core's menu hooks registered after the startup screen (line $($hooks + 1) > $($startup + 1))" }
+    else { Write-Host "FAIL: core's menu hooks line ($($hooks + 1)) is not after the STARTUP line ($($startup + 1))"; $failed++ }
 }
 if ($Scenario -eq 'soak') {
     # Story 7 AC 7: the one-minute windows that lie wholly in the idle match (the first one after "SOAK idle" may

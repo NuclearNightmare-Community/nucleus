@@ -4,15 +4,20 @@
 #include "Blueprint/SlateBlueprintLibrary.h"
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetBlueprintGeneratedClass.h"
+#include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/BillboardComponent.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
 #include "Components/ButtonSlot.h"
 #include "Components/BorderSlot.h"
+#include "Components/CanvasPanel.h"
 #include "Components/HorizontalBox.h"
 #include "Components/Overlay.h"
 #include "Components/OverlaySlot.h"
+#include "Components/ScrollBox.h"
+#include "Components/SizeBox.h"
+#include "Components/SizeBoxSlot.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextBlock.h"
@@ -281,11 +286,126 @@ namespace
 		return FKismetEditorUtilities::CreateBlueprint(Parent, Pkg, FName(FPackageName::GetShortName(LongName)), BPTYPE_Normal, BPClass, GenClass, TEXT("CoreGen"));
 	}
 
+	// ---------------------------------------------------------------- story 2 (Mod Manager v1): the game look's setters
+	// Lua passes only objects (a font, a material, loaded by path at runtime: nothing of the game's is cooked in) and
+	// numbers; the structs are made here.
+
+	FEdGraphPinType LinearColorT() { return PinType(UEdGraphSchema_K2::PC_Struct, TBaseStructure<FLinearColor>::Get()); }
+	const TCHAR* WhiteColor = TEXT("(R=1.000000,G=1.000000,B=1.000000,A=1.000000)");
+
+	/** MakeColor(R, G, B, A) fed from four entry pins (names Prefix + R/G/B/A); returns the node. */
+	UK2Node_CallFunction* ColorFrom(FGraph& G, UEdGraphNode* Entry, const FString& Prefix)
+	{
+		UK2Node_CallFunction* Make = G.Call(UKismetMathLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, MakeColor));
+		for (const TCHAR* Ch : {TEXT("R"), TEXT("G"), TEXT("B"), TEXT("A")})
+		{
+			G.Link(Entry, FName(Prefix + Ch), Make, FName(Ch));
+		}
+		return Make;
+	}
+	/** MakeColor(R, G, B) constants and A from one entry pin. */
+	UK2Node_CallFunction* ColorAlphaFrom(FGraph& G, UEdGraphNode* Entry, FName APin, const TCHAR* R, const TCHAR* Gr, const TCHAR* B)
+	{
+		UK2Node_CallFunction* Make = G.Call(UKismetMathLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, MakeColor));
+		G.Default(Make, TEXT("R"), R);
+		G.Default(Make, TEXT("G"), Gr);
+		G.Default(Make, TEXT("B"), B);
+		G.Link(Entry, APin, Make, TEXT("A"));
+		return Make;
+	}
+	/** A Make SlateColor whose SpecifiedColor is the given colour pin; returns its output pin. */
+	UEdGraphPin* SlateColorOf(FGraph& G, UEdGraphPin* LinearColor)
+	{
+		UK2Node_MakeStruct* Color = G.MakeStruct(FSlateColor::StaticStruct());
+		G.Link(LinearColor, G.Pin(Color, FName(TEXT("SpecifiedColor"))));
+		return G.OnlyOutput(Color);
+	}
+	/** A Make SlateFontInfo with FontObject and Size from two pins (every other member at its default); its output pin. */
+	UEdGraphPin* FontInfoOf(FGraph& G, UEdGraphPin* Font, UEdGraphPin* Size)
+	{
+		UK2Node_MakeStruct* Info = G.MakeStruct(FSlateFontInfo::StaticStruct());
+		G.Link(Font, G.Pin(Info, GET_MEMBER_NAME_CHECKED(FSlateFontInfo, FontObject)));
+		G.Link(Size, G.Pin(Info, GET_MEMBER_NAME_CHECKED(FSlateFontInfo, Size)));
+		return G.OnlyOutput(Info);
+	}
+	/** UWidgetBlueprintLibrary::MakeBrushFromMaterial(Material pin, 32, 32); its output pin. */
+	UEdGraphPin* MaterialBrushOf(FGraph& G, UEdGraphPin* Material)
+	{
+		UK2Node_CallFunction* Make = G.Call(UWidgetBlueprintLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UWidgetBlueprintLibrary, MakeBrushFromMaterial));
+		G.Link(Material, G.Pin(Make, TEXT("Material")));
+		return G.Pin(Make, PN_Ret);
+	}
+
+	/**
+	 * SetBackgroundMaterial(Material: MaterialInterface, R, G, B, A, Padding: Float) and SetBackgroundSolid() on a widget
+	 * with a Border "Background": the material brush tinted by the Border's brush colour, with the same padding all
+	 * round; Solid puts back the default brush (a solid quad, the Border's starting brush) for a plain style.
+	 */
+	struct FMaterialFns { FFunc Mat; FFunc Solid; };
+	FMaterialFns AddBackgroundMaterial(UBlueprint* BP)
+	{
+		FMaterialFns F;
+		F.Mat = AddFunction(BP, TEXT("SetBackgroundMaterial"), {{TEXT("Material"), ObjT(UMaterialInterface::StaticClass())},
+			{TEXT("R"), RealT()}, {TEXT("G"), RealT()}, {TEXT("B"), RealT()}, {TEXT("A"), RealT()}, {TEXT("Padding"), RealT()}}, {});
+		F.Solid = AddFunction(BP, TEXT("SetBackgroundSolid"), {}, {});
+		return F;
+	}
+	void FillBackgroundMaterial(UBlueprint* BP, const FMaterialFns& F)
+	{
+		{
+			FGraph G(BP, F.Mat.G);
+			UK2Node_VariableGet* GetBg = G.Get(TEXT("Background"));
+			UEdGraphPin* Brush = MaterialBrushOf(G, G.Pin(F.Mat.Entry, TEXT("Material")));
+			UK2Node_CallFunction* SetBrush = G.Call(UBorder::StaticClass(), GET_FUNCTION_NAME_CHECKED(UBorder, SetBrush));
+			G.Link(GetBg, TEXT("Background"), SetBrush, PN_Self);
+			G.Link(Brush, G.Pin(SetBrush, TEXT("InBrush")));
+			UK2Node_CallFunction* Make = ColorFrom(G, F.Mat.Entry, TEXT(""));
+			UK2Node_CallFunction* SetColor = G.Call(UBorder::StaticClass(), GET_FUNCTION_NAME_CHECKED(UBorder, SetBrushColor));
+			G.Link(GetBg, TEXT("Background"), SetColor, PN_Self);
+			G.Link(Make, PN_Ret, SetColor, TEXT("InBrushColor"));
+			UK2Node_MakeStruct* Margin = G.MakeStruct(FMargin::StaticStruct());
+			for (const FName Side : {GET_MEMBER_NAME_CHECKED(FMargin, Left), GET_MEMBER_NAME_CHECKED(FMargin, Top),
+			                         GET_MEMBER_NAME_CHECKED(FMargin, Right), GET_MEMBER_NAME_CHECKED(FMargin, Bottom)})
+			{
+				G.Link(F.Mat.Entry, TEXT("Padding"), Margin, Side);
+			}
+			UK2Node_CallFunction* SetPad = G.Call(UBorder::StaticClass(), GET_FUNCTION_NAME_CHECKED(UBorder, SetPadding));
+			G.Link(GetBg, TEXT("Background"), SetPad, PN_Self);
+			G.Link(G.OnlyOutput(Margin), G.Pin(SetPad, TEXT("InPadding")));
+			G.Chain({F.Mat.Entry, SetBrush, SetColor, SetPad});
+		}
+		{
+			FGraph G(BP, F.Solid.G);
+			UK2Node_VariableGet* GetBg = G.Get(TEXT("Background"));
+			UK2Node_MakeStruct* Brush = G.MakeStruct(FSlateBrush::StaticStruct());
+			UK2Node_CallFunction* SetBrush = G.Call(UBorder::StaticClass(), GET_FUNCTION_NAME_CHECKED(UBorder, SetBrush));
+			G.Link(GetBg, TEXT("Background"), SetBrush, PN_Self);
+			G.Link(G.OnlyOutput(Brush), G.Pin(SetBrush, TEXT("InBrush")));
+			G.Chain({F.Solid.Entry, SetBrush});
+		}
+	}
+
+	/** A Border "Background" (alpha 0, padding 0, self-hit-test-invisible) as the root of a widget tree; returns it. */
+	UBorder* RootBackground(UWidgetTree* T)
+	{
+		UBorder* Background = T->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Background"));
+		Background->SetBrushColor(FLinearColor(0.f, 0.f, 0.f, 0.f));
+		Background->SetPadding(FMargin(0.f));
+		Background->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		Background->bIsVariable = true;
+		return Background;
+	}
+
 	/**
 	 * WBP_<Core>Text: Border "Background" -> TextBlock "Text" (white, drop shadow, size 18), and three functions:
 	 *   SetText(NewText: String)                  Text.SetText(NewText)
 	 *   SetBackground(R, G, B, A: Float)          Background.SetBrushColor((R, G, B, A)); A = 0 shows no box
 	 *   SetBackgroundPadding(Padding: Float)      Background.SetPadding(Padding on all four sides)
+	 * Story 2 (Mod Manager v1, the game look; Lua passes objects loaded by path and numbers):
+	 *   SetFontObject(Font: Object, Size: Float)             Text.SetFont(FontInfo(Font, Size))
+	 *   SetTextColor(R, G, B, A, ShadowA: Float)             text colour (R, G, B, A), shadow colour (0, 0, 0, ShadowA)
+	 *   SetBackgroundMaterial(Material, R, G, B, A, Padding) Background brush from the material, its tint, padding
+	 *   SetBackgroundSolid()                                 Background brush back to the default solid quad
 	 * The Border is hit-test invisible and starts at alpha 0 with padding 0, so an unstyled element looks and measures
 	 * exactly like the bare TextBlock it replaces. Lua creates it, parents it into a game canvas and calls these; it
 	 * carries no logic of its own.
@@ -297,7 +417,8 @@ namespace
 	{
 		UWidgetBlueprint* WBP = CastChecked<UWidgetBlueprint>(NewBlueprint(Dir / FString::Printf(TEXT("WBP_%sText"), *Core),
 			UUserWidget::StaticClass(), UWidgetBlueprint::StaticClass(), UWidgetBlueprintGeneratedClass::StaticClass()));
-		for (const TCHAR* Fn : {TEXT("SetText"), TEXT("SetBackground"), TEXT("SetBackgroundPadding")})
+		for (const TCHAR* Fn : {TEXT("SetText"), TEXT("SetBackground"), TEXT("SetBackgroundPadding"), TEXT("SetFontObject"),
+		                        TEXT("SetTextColor"), TEXT("SetBackgroundMaterial"), TEXT("SetBackgroundSolid")})
 		{
 			// A name the parent class already has would shadow or clash with it: fail loudly here, not in game.
 			checkf(!UUserWidget::StaticClass()->FindFunctionByName(Fn), TEXT("UUserWidget already has a function %s"), Fn);
@@ -333,7 +454,36 @@ namespace
 		FFunc SetBg = AddFunction(WBP, TEXT("SetBackground"),
 			{{TEXT("R"), RealT()}, {TEXT("G"), RealT()}, {TEXT("B"), RealT()}, {TEXT("A"), RealT()}}, {});
 		FFunc SetPad = AddFunction(WBP, TEXT("SetBackgroundPadding"), {{TEXT("Padding"), RealT()}}, {});
+		FFunc SetFontObj = AddFunction(WBP, TEXT("SetFontObject"), {{TEXT("Font"), ObjT(UObject::StaticClass())}, {TEXT("Size"), RealT()}}, {});
+		FFunc SetColor = AddFunction(WBP, TEXT("SetTextColor"),
+			{{TEXT("R"), RealT()}, {TEXT("G"), RealT()}, {TEXT("B"), RealT()}, {TEXT("A"), RealT()}, {TEXT("ShadowA"), RealT()}}, {});
+		FMaterialFns Mat = AddBackgroundMaterial(WBP);
 		if (!Compile(WBP)) return nullptr;
+		FillBackgroundMaterial(WBP, Mat);
+		{
+			// SetFontObject(Font, Size): Text.SetFont(FontInfo(Font, Size)).
+			FGraph G(WBP, SetFontObj.G);
+			UK2Node_VariableGet* GetText = G.Get(TEXT("Text"));
+			UEdGraphPin* Info = FontInfoOf(G, G.Pin(SetFontObj.Entry, TEXT("Font")), G.Pin(SetFontObj.Entry, TEXT("Size")));
+			UK2Node_CallFunction* Set = G.Call(UTextBlock::StaticClass(), GET_FUNCTION_NAME_CHECKED(UTextBlock, SetFont));
+			G.Link(GetText, TEXT("Text"), Set, PN_Self);
+			G.Link(Info, G.Pin(Set, TEXT("InFontInfo")));
+			G.Chain({SetFontObj.Entry, Set});
+		}
+		{
+			// SetTextColor(R, G, B, A, ShadowA): Text colour, then shadow colour (0, 0, 0, ShadowA).
+			FGraph G(WBP, SetColor.G);
+			UK2Node_VariableGet* GetText = G.Get(TEXT("Text"));
+			UK2Node_CallFunction* Make = ColorFrom(G, SetColor.Entry, TEXT(""));
+			UK2Node_CallFunction* SetC = G.Call(UTextBlock::StaticClass(), GET_FUNCTION_NAME_CHECKED(UTextBlock, SetColorAndOpacity));
+			G.Link(GetText, TEXT("Text"), SetC, PN_Self);
+			G.Link(SlateColorOf(G, G.Pin(Make, PN_Ret)), G.Pin(SetC, TEXT("InColorAndOpacity")));
+			UK2Node_CallFunction* Shadow = ColorAlphaFrom(G, SetColor.Entry, TEXT("ShadowA"), TEXT("0.0"), TEXT("0.0"), TEXT("0.0"));
+			UK2Node_CallFunction* SetS = G.Call(UTextBlock::StaticClass(), GET_FUNCTION_NAME_CHECKED(UTextBlock, SetShadowColorAndOpacity));
+			G.Link(GetText, TEXT("Text"), SetS, PN_Self);
+			G.Link(Shadow, PN_Ret, SetS, TEXT("InShadowColorAndOpacity"));
+			G.Chain({SetColor.Entry, SetC, SetS});
+		}
 		{
 			// SetBackground(R, G, B, A): Background.SetBrushColor(MakeColor(R, G, B, A)).
 			FGraph G(WBP, SetBg.G);
@@ -440,6 +590,7 @@ namespace
 		G.Chain({SetTag.Entry, Set});
 	}
 
+
 	/**
 	 * WBP_<Core>Panel (story 14): Border "Background" -> Overlay "Layers" -> [VerticalBox "VBox", HorizontalBox "HBox"].
 	 * Lua puts a vertical panel's children into VBox and a horizontal one's into HBox (the other stays empty: zero size),
@@ -448,12 +599,13 @@ namespace
 	 * inside it stay clickable. Functions:
 	 *   SetBackground(R, G, B, A), SetBackgroundPadding(Padding)   as on the text widget
 	 *   SetTag(NewTag: String)                                     CoreTag = NewTag
+	 *   SetBackgroundMaterial(Material, R, G, B, A, Padding), SetBackgroundSolid()   story 2, as on the text widget
 	 */
 	UWidgetBlueprint* BuildPanel(const FString& Dir, const FString& Core)
 	{
 		UWidgetBlueprint* WBP = CastChecked<UWidgetBlueprint>(NewBlueprint(Dir / FString::Printf(TEXT("WBP_%sPanel"), *Core),
 			UUserWidget::StaticClass(), UWidgetBlueprint::StaticClass(), UWidgetBlueprintGeneratedClass::StaticClass()));
-		CheckNames({TEXT("SetBackground"), TEXT("SetBackgroundPadding"), TEXT("SetTag")});
+		CheckNames({TEXT("SetBackground"), TEXT("SetBackgroundPadding"), TEXT("SetTag"), TEXT("SetBackgroundMaterial"), TEXT("SetBackgroundSolid")});
 
 		UWidgetTree* T = WBP->WidgetTree;
 		UBorder* Background = T->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Background"));
@@ -487,20 +639,33 @@ namespace
 		FFunc SetBg = AddSetBackground(WBP);
 		FFunc SetPad = AddFunction(WBP, TEXT("SetBackgroundPadding"), {{TEXT("Padding"), RealT()}}, {});
 		FFunc SetTag = AddTag(WBP);
+		FMaterialFns Mat = AddBackgroundMaterial(WBP);
 		if (!Compile(WBP)) return nullptr;
 		FillBackground(WBP, SetBg, SetPad);
 		FillTag(WBP, SetTag);
+		FillBackgroundMaterial(WBP, Mat);
 		if (!Compile(WBP) || !Save(WBP)) return nullptr;
 		return WBP;
 	}
 
 	/**
-	 * WBP_<Core>Button (story 15): Button "Btn" -> TextBlock "Label" (white, drop shadow, size 18, centred). Functions:
+	 * WBP_<Core>Button (story 15): SizeBox "Box" (story 2) -> Button "Btn" -> TextBlock "Label" (white, drop shadow, size 18,
+	 * centred). Functions:
 	 *   SetLabel(NewLabel: String)          Label.SetText(NewLabel)
 	 *   SetEnabledState(Enabled: Bool)      Btn.SetIsEnabled(Enabled) (a disabled button never fires OnClicked)
 	 *   SetColors(NR, NG, NB, NA, HR, HG, HB, HA, PR, PG, PB, PA, Padding: Float)
 	 *                                       Btn.SetStyle: a solid brush per state (normal and disabled N, hovered H,
-	 *                                       pressed P) and the same padding all round in both padding slots
+	 *                                       pressed P) and the same padding all round in both padding slots; story 2:
+	 *                                       also Btn.SetBackgroundColor(white) and Box.SetMinDesiredHeight(0), so a
+	 *                                       plain style after a game one looks plain again
+	 *   SetMaterials(Normal, Hover: MaterialInterface, R, G, B, A, PadL, PadT, PadR, PadB, MinHeight: Float)   story 2
+	 *                                       Btn.SetStyle(normal and disabled from Normal, hovered and pressed from
+	 *                                       Hover, padding L/T/R/B), Btn.SetBackgroundColor((R, G, B, A)) (the tint),
+	 *                                       Box.SetMinDesiredHeight(MinHeight)
+	 *   SetLabelLook(Font: Object, Size, NR, NG, NB, NA, HR, HG, HB, HA, ShadowA: Float)   story 2
+	 *                                       NormalTextColor/HoverTextColor = N/H, Label font (Font, Size), colour N,
+	 *                                       shadow (0, 0, 0, ShadowA). Btn.OnHovered sets the label to HoverTextColor,
+	 *                                       OnUnhovered to NormalTextColor (both white by default: no visible change)
 	 *   SetTag(NewTag: String)              CoreTag = NewTag
 	 *   <Core>_OnClicked()                  ClickCount += 1. The button's OnClicked calls it and nothing else; each
 	 *                                       dependent's Lua post-hooks it by full path (bp-spike's NNSpike_OnClicked)
@@ -511,12 +676,19 @@ namespace
 		UWidgetBlueprint* WBP = CastChecked<UWidgetBlueprint>(NewBlueprint(Dir / FString::Printf(TEXT("WBP_%sButton"), *Core),
 			UUserWidget::StaticClass(), UWidgetBlueprint::StaticClass(), UWidgetBlueprintGeneratedClass::StaticClass()));
 		const FString ClickFn = Core + TEXT("_OnClicked");
-		CheckNames({TEXT("SetLabel"), TEXT("SetEnabledState"), TEXT("SetColors"), TEXT("SetTag"), *ClickFn});
+		CheckNames({TEXT("SetLabel"), TEXT("SetEnabledState"), TEXT("SetColors"), TEXT("SetTag"), *ClickFn,
+			TEXT("SetMaterials"), TEXT("SetLabelLook")});
 
 		UWidgetTree* T = WBP->WidgetTree;
+		USizeBox* Box = T->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Box"));
+		Box->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		Box->bIsVariable = true;
+		T->RootWidget = Box;
 		UButton* Btn = T->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn"));
 		Btn->bIsVariable = true;
-		T->RootWidget = Btn;
+		USizeBoxSlot* BtnSlot = CastChecked<USizeBoxSlot>(Box->AddChild(Btn));
+		BtnSlot->SetHorizontalAlignment(HAlign_Fill);
+		BtnSlot->SetVerticalAlignment(VAlign_Fill);
 		UTextBlock* Label = T->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Label"));
 		Label->SetText(FText::GetEmpty());
 		Label->SetColorAndOpacity(FSlateColor(FLinearColor::White));
@@ -532,9 +704,12 @@ namespace
 		LabelSlot->SetPadding(FMargin(0.f));
 		LabelSlot->SetHorizontalAlignment(HAlign_Center);
 		LabelSlot->SetVerticalAlignment(VAlign_Center);
+		WBP->OnVariableAdded(TEXT("Box"));
 		WBP->OnVariableAdded(TEXT("Btn"));
 		WBP->OnVariableAdded(TEXT("Label"));
 		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("ClickCount"), IntT(), TEXT("0"));
+		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("NormalTextColor"), LinearColorT(), WhiteColor);
+		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("HoverTextColor"), LinearColorT(), WhiteColor);
 
 		// The functions need the compiled widget variables, so compile first.
 		FFunc SetLabel = AddFunction(WBP, TEXT("SetLabel"), {{TEXT("NewLabel"), StrT()}}, {});
@@ -551,6 +726,20 @@ namespace
 		FFunc SetColors = AddFunction(WBP, TEXT("SetColors"), ColorsIn, {});
 		FFunc SetTag = AddTag(WBP);
 		FFunc OnClicked = AddFunction(WBP, FName(ClickFn), {}, {});
+		FFunc SetMats = AddFunction(WBP, TEXT("SetMaterials"), {{TEXT("Normal"), ObjT(UMaterialInterface::StaticClass())},
+			{TEXT("Hover"), ObjT(UMaterialInterface::StaticClass())}, {TEXT("R"), RealT()}, {TEXT("G"), RealT()}, {TEXT("B"), RealT()},
+			{TEXT("A"), RealT()}, {TEXT("PadL"), RealT()}, {TEXT("PadT"), RealT()}, {TEXT("PadR"), RealT()}, {TEXT("PadB"), RealT()},
+			{TEXT("MinHeight"), RealT()}}, {});
+		FParams LookIn = {{TEXT("Font"), ObjT(UObject::StaticClass())}, {TEXT("Size"), RealT()}};
+		for (const TCHAR* State : {TEXT("N"), TEXT("H")})
+		{
+			for (const TCHAR* Ch : {TEXT("R"), TEXT("G"), TEXT("B"), TEXT("A")})
+			{
+				LookIn.Add({FName(FString(State) + Ch), RealT()});
+			}
+		}
+		LookIn.Add({TEXT("ShadowA"), RealT()});
+		FFunc SetLook = AddFunction(WBP, TEXT("SetLabelLook"), LookIn, {});
 		if (!Compile(WBP)) return nullptr;
 		FillTag(WBP, SetTag);
 		{
@@ -607,7 +796,72 @@ namespace
 			UK2Node_CallFunction* Set = G.Call(UButton::StaticClass(), GET_FUNCTION_NAME_CHECKED(UButton, SetStyle));
 			G.Link(GetBtn, TEXT("Btn"), Set, PN_Self);
 			G.Link(G.OnlyOutput(Style), G.Pin(Set, TEXT("InStyle")));
-			G.Chain({SetColors.Entry, Set});
+			// Story 2: no tint and no minimum height, as before the game look existed.
+			UK2Node_CallFunction* White = G.Call(UKismetMathLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, MakeColor));
+			for (const TCHAR* Ch : {TEXT("R"), TEXT("G"), TEXT("B"), TEXT("A")}) G.Default(White, FName(Ch), TEXT("1.0"));
+			UK2Node_CallFunction* Tint = G.Call(UButton::StaticClass(), GET_FUNCTION_NAME_CHECKED(UButton, SetBackgroundColor));
+			G.Link(GetBtn, TEXT("Btn"), Tint, PN_Self);
+			G.Link(White, PN_Ret, Tint, TEXT("InBackgroundColor"));
+			UK2Node_VariableGet* GetBox = G.Get(TEXT("Box"));
+			UK2Node_CallFunction* Min = G.Call(USizeBox::StaticClass(), GET_FUNCTION_NAME_CHECKED(USizeBox, SetMinDesiredHeight));
+			G.Link(GetBox, TEXT("Box"), Min, PN_Self);
+			G.Default(Min, TEXT("InMinDesiredHeight"), TEXT("0.0"));
+			G.Chain({SetColors.Entry, Set, Tint, Min});
+		}
+		{
+			// SetMaterials: Btn.SetStyle(Make ButtonStyle(Normal/Disabled = brush of Normal, Hovered/Pressed = brush of
+			// Hover, both paddings Margin(L, T, R, B))), Btn.SetBackgroundColor(tint), Box.SetMinDesiredHeight(MinHeight).
+			FGraph G(WBP, SetMats.G);
+			UEdGraphPin* NormalBrush = MaterialBrushOf(G, G.Pin(SetMats.Entry, TEXT("Normal")));
+			UEdGraphPin* HoverBrush = MaterialBrushOf(G, G.Pin(SetMats.Entry, TEXT("Hover")));
+			UK2Node_MakeStruct* Style = G.MakeStruct(FButtonStyle::StaticStruct());
+			G.Link(NormalBrush, G.Pin(Style, GET_MEMBER_NAME_CHECKED(FButtonStyle, Normal)));
+			G.Link(NormalBrush, G.Pin(Style, GET_MEMBER_NAME_CHECKED(FButtonStyle, Disabled)));
+			G.Link(HoverBrush, G.Pin(Style, GET_MEMBER_NAME_CHECKED(FButtonStyle, Hovered)));
+			G.Link(HoverBrush, G.Pin(Style, GET_MEMBER_NAME_CHECKED(FButtonStyle, Pressed)));
+			UK2Node_MakeStruct* Margin = G.MakeStruct(FMargin::StaticStruct());
+			G.Link(SetMats.Entry, TEXT("PadL"), Margin, GET_MEMBER_NAME_CHECKED(FMargin, Left));
+			G.Link(SetMats.Entry, TEXT("PadT"), Margin, GET_MEMBER_NAME_CHECKED(FMargin, Top));
+			G.Link(SetMats.Entry, TEXT("PadR"), Margin, GET_MEMBER_NAME_CHECKED(FMargin, Right));
+			G.Link(SetMats.Entry, TEXT("PadB"), Margin, GET_MEMBER_NAME_CHECKED(FMargin, Bottom));
+			G.Link(G.OnlyOutput(Margin), G.Pin(Style, GET_MEMBER_NAME_CHECKED(FButtonStyle, NormalPadding)));
+			G.Link(G.OnlyOutput(Margin), G.Pin(Style, GET_MEMBER_NAME_CHECKED(FButtonStyle, PressedPadding)));
+			UK2Node_VariableGet* GetBtn = G.Get(TEXT("Btn"));
+			UK2Node_CallFunction* Set = G.Call(UButton::StaticClass(), GET_FUNCTION_NAME_CHECKED(UButton, SetStyle));
+			G.Link(GetBtn, TEXT("Btn"), Set, PN_Self);
+			G.Link(G.OnlyOutput(Style), G.Pin(Set, TEXT("InStyle")));
+			UK2Node_CallFunction* Make = ColorFrom(G, SetMats.Entry, TEXT(""));
+			UK2Node_CallFunction* Tint = G.Call(UButton::StaticClass(), GET_FUNCTION_NAME_CHECKED(UButton, SetBackgroundColor));
+			G.Link(GetBtn, TEXT("Btn"), Tint, PN_Self);
+			G.Link(Make, PN_Ret, Tint, TEXT("InBackgroundColor"));
+			UK2Node_VariableGet* GetBox = G.Get(TEXT("Box"));
+			UK2Node_CallFunction* Min = G.Call(USizeBox::StaticClass(), GET_FUNCTION_NAME_CHECKED(USizeBox, SetMinDesiredHeight));
+			G.Link(GetBox, TEXT("Box"), Min, PN_Self);
+			G.Link(SetMats.Entry, TEXT("MinHeight"), Min, TEXT("InMinDesiredHeight"));
+			G.Chain({SetMats.Entry, Set, Tint, Min});
+		}
+		{
+			// SetLabelLook: the two colour variables, then the label's font, normal colour and shadow.
+			FGraph G(WBP, SetLook.G);
+			UK2Node_CallFunction* N = ColorFrom(G, SetLook.Entry, TEXT("N"));
+			UK2Node_CallFunction* H = ColorFrom(G, SetLook.Entry, TEXT("H"));
+			UK2Node_VariableSet* SetN = G.Set(TEXT("NormalTextColor"));
+			G.Link(N, PN_Ret, SetN, TEXT("NormalTextColor"));
+			UK2Node_VariableSet* SetH = G.Set(TEXT("HoverTextColor"));
+			G.Link(H, PN_Ret, SetH, TEXT("HoverTextColor"));
+			UK2Node_VariableGet* GetLabel = G.Get(TEXT("Label"));
+			UEdGraphPin* Info = FontInfoOf(G, G.Pin(SetLook.Entry, TEXT("Font")), G.Pin(SetLook.Entry, TEXT("Size")));
+			UK2Node_CallFunction* SetF = G.Call(UTextBlock::StaticClass(), GET_FUNCTION_NAME_CHECKED(UTextBlock, SetFont));
+			G.Link(GetLabel, TEXT("Label"), SetF, PN_Self);
+			G.Link(Info, G.Pin(SetF, TEXT("InFontInfo")));
+			UK2Node_CallFunction* SetC = G.Call(UTextBlock::StaticClass(), GET_FUNCTION_NAME_CHECKED(UTextBlock, SetColorAndOpacity));
+			G.Link(GetLabel, TEXT("Label"), SetC, PN_Self);
+			G.Link(SlateColorOf(G, G.Pin(N, PN_Ret)), G.Pin(SetC, TEXT("InColorAndOpacity")));
+			UK2Node_CallFunction* Shadow = ColorAlphaFrom(G, SetLook.Entry, TEXT("ShadowA"), TEXT("0.0"), TEXT("0.0"), TEXT("0.0"));
+			UK2Node_CallFunction* SetS = G.Call(UTextBlock::StaticClass(), GET_FUNCTION_NAME_CHECKED(UTextBlock, SetShadowColorAndOpacity));
+			G.Link(GetLabel, TEXT("Label"), SetS, PN_Self);
+			G.Link(Shadow, PN_Ret, SetS, TEXT("InShadowColorAndOpacity"));
+			G.Chain({SetLook.Entry, SetN, SetH, SetF, SetC, SetS});
 		}
 		{
 			// <Core>_OnClicked(): ClickCount = ClickCount + 1.
@@ -635,9 +889,187 @@ namespace
 			C.Finalize();
 			UK2Node_CallFunction* Call = G.CallSelf(FName(ClickFn));
 			G.Chain({Bound, Call});
+			// Story 2: Btn.OnHovered / OnUnhovered -> the label's colour from HoverTextColor / NormalTextColor.
+			const TPair<const TCHAR*, const TCHAR*> Hovers[] = {{TEXT("OnHovered"), TEXT("HoverTextColor")}, {TEXT("OnUnhovered"), TEXT("NormalTextColor")}};
+			for (const TPair<const TCHAR*, const TCHAR*>& E : Hovers)
+			{
+				FMulticastDelegateProperty* HoverDelegate = FindFProperty<FMulticastDelegateProperty>(UButton::StaticClass(), E.Key);
+				check(HoverDelegate);
+				FGraphNodeCreator<UK2Node_ComponentBoundEvent> HC(*EG);
+				UK2Node_ComponentBoundEvent* HoverBound = HC.CreateNode(false);
+				HoverBound->InitializeComponentBoundEventParams(BtnProp, HoverDelegate);
+				G.Place(HoverBound);
+				HC.Finalize();
+				UK2Node_VariableGet* GetColor = G.Get(E.Value);
+				UK2Node_VariableGet* GetLabel = G.Get(TEXT("Label"));
+				UK2Node_CallFunction* SetC = G.Call(UTextBlock::StaticClass(), GET_FUNCTION_NAME_CHECKED(UTextBlock, SetColorAndOpacity));
+				G.Link(GetLabel, TEXT("Label"), SetC, PN_Self);
+				G.Link(SlateColorOf(G, G.Pin(GetColor, E.Value)), G.Pin(SetC, TEXT("InColorAndOpacity")));
+				G.Chain({HoverBound, SetC});
+			}
 		}
 
 		if (!Compile(WBP) || !Save(WBP)) return nullptr;
+		return WBP;
+	}
+
+	/**
+	 * WBP_<Core>List (story 2, Mod Manager v1): SizeBox "Box" -> Border "Background" -> ScrollBox "Scroll" -> VerticalBox
+	 * "VBox". Lua puts the list's children into VBox (in its order, rebuilt like a panel's); the ScrollBox is Visible so
+	 * the mouse wheel reaches it, every other container self-hit-test-invisible. Functions:
+	 *   SetBackground(R, G, B, A), SetBackgroundPadding(Padding)                as on the text widget
+	 *   SetBackgroundMaterial(Material, R, G, B, A, Padding), SetBackgroundSolid() as on the text widget
+	 *   SetTag(NewTag: String)                                                  CoreTag = NewTag
+	 *   SetListSize(W, H: Float)                                                Box width and height overrides
+	 */
+	UWidgetBlueprint* BuildList(const FString& Dir, const FString& Core)
+	{
+		UWidgetBlueprint* WBP = CastChecked<UWidgetBlueprint>(NewBlueprint(Dir / FString::Printf(TEXT("WBP_%sList"), *Core),
+			UUserWidget::StaticClass(), UWidgetBlueprint::StaticClass(), UWidgetBlueprintGeneratedClass::StaticClass()));
+		CheckNames({TEXT("SetBackground"), TEXT("SetBackgroundPadding"), TEXT("SetBackgroundMaterial"), TEXT("SetBackgroundSolid"),
+			TEXT("SetTag"), TEXT("SetListSize")});
+
+		UWidgetTree* T = WBP->WidgetTree;
+		USizeBox* Box = T->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Box"));
+		Box->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		Box->bIsVariable = true;
+		T->RootWidget = Box;
+		UBorder* Background = RootBackground(T);
+		USizeBoxSlot* BgSlot = CastChecked<USizeBoxSlot>(Box->AddChild(Background));
+		BgSlot->SetHorizontalAlignment(HAlign_Fill);
+		BgSlot->SetVerticalAlignment(VAlign_Fill);
+		UScrollBox* Scroll = T->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("Scroll"));
+		Scroll->SetVisibility(ESlateVisibility::Visible);
+		Scroll->SetOrientation(Orient_Vertical);
+		Scroll->bIsVariable = true;
+		UBorderSlot* ScrollSlot = CastChecked<UBorderSlot>(Background->AddChild(Scroll));
+		ScrollSlot->SetPadding(FMargin(0.f));
+		ScrollSlot->SetHorizontalAlignment(HAlign_Fill);
+		ScrollSlot->SetVerticalAlignment(VAlign_Fill);
+		UVerticalBox* VBox = T->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("VBox"));
+		VBox->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		VBox->bIsVariable = true;
+		Scroll->AddChild(VBox);
+		for (const TCHAR* W : {TEXT("Box"), TEXT("Background"), TEXT("Scroll"), TEXT("VBox")}) WBP->OnVariableAdded(W);
+
+		FFunc SetBg = AddSetBackground(WBP);
+		FFunc SetPad = AddFunction(WBP, TEXT("SetBackgroundPadding"), {{TEXT("Padding"), RealT()}}, {});
+		FFunc SetTag = AddTag(WBP);
+		FMaterialFns Mat = AddBackgroundMaterial(WBP);
+		FFunc SetSize = AddFunction(WBP, TEXT("SetListSize"), {{TEXT("W"), RealT()}, {TEXT("H"), RealT()}}, {});
+		if (!Compile(WBP)) return nullptr;
+		FillBackground(WBP, SetBg, SetPad);
+		FillTag(WBP, SetTag);
+		FillBackgroundMaterial(WBP, Mat);
+		{
+			FGraph G(WBP, SetSize.G);
+			UK2Node_VariableGet* GetBox = G.Get(TEXT("Box"));
+			UK2Node_CallFunction* SetW = G.Call(USizeBox::StaticClass(), GET_FUNCTION_NAME_CHECKED(USizeBox, SetWidthOverride));
+			G.Link(GetBox, TEXT("Box"), SetW, PN_Self);
+			G.Link(SetSize.Entry, TEXT("W"), SetW, TEXT("InWidthOverride"));
+			UK2Node_CallFunction* SetH = G.Call(USizeBox::StaticClass(), GET_FUNCTION_NAME_CHECKED(USizeBox, SetHeightOverride));
+			G.Link(GetBox, TEXT("Box"), SetH, PN_Self);
+			G.Link(SetSize.Entry, TEXT("H"), SetH, TEXT("InHeightOverride"));
+			G.Chain({SetSize.Entry, SetW, SetH});
+		}
+		if (!Compile(WBP) || !Save(WBP)) return nullptr;
+		return WBP;
+	}
+
+	/**
+	 * WBP_<Core>Row (story 2): Border "Background" -> HorizontalBox "HBox". Lua puts the row's children into HBox (Fill
+	 * slots with a weight line up as columns, Auto otherwise). Both self-hit-test-invisible. Functions:
+	 *   SetBackground(R, G, B, A), SetBackgroundPadding(Padding)                as on the text widget
+	 *   SetBackgroundMaterial(Material, R, G, B, A, Padding), SetBackgroundSolid() as on the text widget
+	 *   SetTag(NewTag: String)                                                  CoreTag = NewTag
+	 */
+	UWidgetBlueprint* BuildRow(const FString& Dir, const FString& Core)
+	{
+		UWidgetBlueprint* WBP = CastChecked<UWidgetBlueprint>(NewBlueprint(Dir / FString::Printf(TEXT("WBP_%sRow"), *Core),
+			UUserWidget::StaticClass(), UWidgetBlueprint::StaticClass(), UWidgetBlueprintGeneratedClass::StaticClass()));
+		CheckNames({TEXT("SetBackground"), TEXT("SetBackgroundPadding"), TEXT("SetBackgroundMaterial"), TEXT("SetBackgroundSolid"), TEXT("SetTag")});
+
+		UWidgetTree* T = WBP->WidgetTree;
+		UBorder* Background = RootBackground(T);
+		T->RootWidget = Background;
+		UHorizontalBox* HBox = T->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("HBox"));
+		HBox->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		HBox->bIsVariable = true;
+		UBorderSlot* BoxSlot = CastChecked<UBorderSlot>(Background->AddChild(HBox));
+		BoxSlot->SetPadding(FMargin(0.f));
+		BoxSlot->SetHorizontalAlignment(HAlign_Fill);
+		BoxSlot->SetVerticalAlignment(VAlign_Fill);
+		WBP->OnVariableAdded(TEXT("Background"));
+		WBP->OnVariableAdded(TEXT("HBox"));
+
+		FFunc SetBg = AddSetBackground(WBP);
+		FFunc SetPad = AddFunction(WBP, TEXT("SetBackgroundPadding"), {{TEXT("Padding"), RealT()}}, {});
+		FFunc SetTag = AddTag(WBP);
+		FMaterialFns Mat = AddBackgroundMaterial(WBP);
+		if (!Compile(WBP)) return nullptr;
+		FillBackground(WBP, SetBg, SetPad);
+		FillTag(WBP, SetTag);
+		FillBackgroundMaterial(WBP, Mat);
+		if (!Compile(WBP) || !Save(WBP)) return nullptr;
+		return WBP;
+	}
+
+	/**
+	 * WBP_<Core>Screen (story 2, the window stack): Overlay "Root" -> [Border "Backdrop" (Visible: hit-testable, so it
+	 * blocks everything below; solid, colour (0, 0, 0, 0.85)), CanvasPanel "Canvas" (self-hit-test-invisible; the
+	 * window's elements go here)]. Lua adds it to the viewport above the menu. The class default is focusable, so the
+	 * top window can hold keyboard focus. Functions:
+	 *   SetBackdrop(R, G, B, A: Float)      Backdrop.SetBrushColor((R, G, B, A))
+	 *   SetTag(NewTag: String)              CoreTag = NewTag
+	 */
+	UWidgetBlueprint* BuildScreen(const FString& Dir, const FString& Core)
+	{
+		UWidgetBlueprint* WBP = CastChecked<UWidgetBlueprint>(NewBlueprint(Dir / FString::Printf(TEXT("WBP_%sScreen"), *Core),
+			UUserWidget::StaticClass(), UWidgetBlueprint::StaticClass(), UWidgetBlueprintGeneratedClass::StaticClass()));
+		CheckNames({TEXT("SetBackdrop"), TEXT("SetTag")});
+
+		UWidgetTree* T = WBP->WidgetTree;
+		UOverlay* Root = T->ConstructWidget<UOverlay>(UOverlay::StaticClass(), TEXT("Root"));
+		Root->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		Root->bIsVariable = true;
+		T->RootWidget = Root;
+		UBorder* Backdrop = T->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Backdrop"));
+		Backdrop->SetBrushColor(FLinearColor(0.f, 0.f, 0.f, 0.85f));
+		Backdrop->SetPadding(FMargin(0.f));
+		Backdrop->SetVisibility(ESlateVisibility::Visible);
+		Backdrop->bIsVariable = true;
+		UOverlaySlot* BackSlot = CastChecked<UOverlaySlot>(Root->AddChild(Backdrop));
+		BackSlot->SetHorizontalAlignment(HAlign_Fill);
+		BackSlot->SetVerticalAlignment(VAlign_Fill);
+		UCanvasPanel* Canvas = T->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("Canvas"));
+		Canvas->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		Canvas->bIsVariable = true;
+		UOverlaySlot* CanvasSlot = CastChecked<UOverlaySlot>(Root->AddChild(Canvas));
+		CanvasSlot->SetHorizontalAlignment(HAlign_Fill);
+		CanvasSlot->SetVerticalAlignment(VAlign_Fill);
+		WBP->OnVariableAdded(TEXT("Root"));
+		WBP->OnVariableAdded(TEXT("Backdrop"));
+		WBP->OnVariableAdded(TEXT("Canvas"));
+
+		FFunc SetBackdrop = AddFunction(WBP, TEXT("SetBackdrop"), {{TEXT("R"), RealT()}, {TEXT("G"), RealT()}, {TEXT("B"), RealT()}, {TEXT("A"), RealT()}}, {});
+		FFunc SetTag = AddTag(WBP);
+		if (!Compile(WBP)) return nullptr;
+		FillTag(WBP, SetTag);
+		{
+			FGraph G(WBP, SetBackdrop.G);
+			UK2Node_VariableGet* GetBd = G.Get(TEXT("Backdrop"));
+			UK2Node_CallFunction* Make = ColorFrom(G, SetBackdrop.Entry, TEXT(""));
+			UK2Node_CallFunction* Set = G.Call(UBorder::StaticClass(), GET_FUNCTION_NAME_CHECKED(UBorder, SetBrushColor));
+			G.Link(GetBd, TEXT("Backdrop"), Set, PN_Self);
+			G.Link(Make, PN_Ret, Set, TEXT("InBrushColor"));
+			G.Chain({SetBackdrop.Entry, Set});
+		}
+		if (!Compile(WBP)) return nullptr;
+		UUserWidget* CDO = CastChecked<UUserWidget>(WBP->GeneratedClass->GetDefaultObject());
+		CDO->SetIsFocusable(true);
+		CDO->MarkPackageDirty();
+		UE_LOG(LogCoreGen, Display, TEXT("SCREEN %s class default focusable=%s"), *WBP->GetPathName(), CDO->IsFocusable() ? TEXT("true") : TEXT("false"));
+		if (!Save(WBP)) return nullptr;
 		return WBP;
 	}
 
@@ -1121,6 +1553,9 @@ int32 UCoreGenCommandlet::Main(const FString& Params)
 	if (!BuildText(Dir, Core)) return 1;
 	if (!BuildPanel(Dir, Core)) return 1;
 	if (!BuildButton(Dir, Core)) return 1;
+	if (!BuildList(Dir, Core)) return 1;
+	if (!BuildRow(Dir, Core)) return 1;
+	if (!BuildScreen(Dir, Core)) return 1;
 	if (!BuildActor(Dir, Core)) return 1;
 	if (!BuildMarkers(Dir)) return 1;
 	if (!LayoutFile.IsEmpty() && !WriteLayout(Dir, LayoutFile)) return 1;

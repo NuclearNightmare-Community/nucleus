@@ -22,11 +22,20 @@
 --
 -- Story 14: a panel's children (el.panel set, no host of their own) live in the panel widget's box. The panel attaches
 -- them after itself, in its order, and the per-host loops (attach on a host event, placement, ticks) skip them.
+--
+-- Story 21 (Mod Manager story 2): two more hosts, "menu" (the title-screen menu's main page, menu.lua) and "screen"
+-- (core's windows, screen.lua; each window is a host of its own, "screen#<id>"), and two more containers: a list
+-- (WBP_<Core>List, scrolling, a fixed size) and a row (WBP_<Core>Row, horizontal). A container is any element with
+-- children (el.children): a panel, a list or a row; el.panel is an element's container. A row can sit in a list or a
+-- panel, so a text in a row is two levels down; everything else is one level. And the game's look (style.look):
+-- the Remaster fonts, colours and materials, loaded by path at runtime (assets.lua), the default on menu and screen.
 local BASE = (...):gsub("%.ui%.text$", "")
 local C = require(BASE .. ".ui.common")
 local H = require(BASE .. ".ui.hud")
 local J = require(BASE .. ".ui.journal")
+local M = require(BASE .. ".ui.menu")
 local P = require(BASE .. ".ui.place")
+local A = require(BASE .. ".ui.assets")
 local theme = require(BASE .. ".ui.theme")
 local D = require(BASE .. ".ui.debug")
 
@@ -46,10 +55,44 @@ local HOST = {
         poll = function() local j = J._poll() return j, j ~= nil and J._mapPageActive(j) end,
         canvas = function(j) return J._canvasOf(j) end,
     },
+    -- Story 21: the title-screen menu's main page.
+    menu = {
+        poll = function() local m = M._poll() return m, m ~= nil and not M._hiddenOf(m) end,
+        canvas = function(m) return M._canvasOf(m) end,
+    },
 }
+-- Story 21: a window of the screen host ("screen#<id>"): its widget while it is open, and its Canvas.
+local windowAdapters = {}
+local function windowCanvas(w)
+    local ok, c = pcall(C.prop, w, "Canvas")
+    return ok and C.valid(c) and c or nil
+end
+local function hostA(host)
+    local a = HOST[host]
+    if a then return a end
+    if C.hostKind(host) ~= "screen" then return nil end
+    a = windowAdapters[host]
+    if not a then
+        local id = host:sub(8)
+        a = {
+            poll = function()
+                local rec = C.windows[id]
+                if not (rec and rec.open and rec.ref) then return nil end
+                local ok, w = pcall(C.deref, rec.ref)
+                if not (ok and w) then return nil end
+                return w, true
+            end,
+            canvas = windowCanvas,
+        }
+        windowAdapters[host] = a
+    end
+    return a
+end
+X._hostA = hostA
 local MAX_ID = 64
 local MAX_TEXT = 256
 local MAX_CHILDREN = 32          -- story 14: children per panel
+local CHILD_CAP = { panel = 32, list = 256, row = 16 } -- story 21: children per container
 local RETRY_TICKS = 10           -- a failed attach is retried every 10 ticks (5 s), not every tick
 local TAG_PREFIX = C.LOWER .. ":" -- full tag: <core>:<modTag>:<id>
 
@@ -72,14 +115,65 @@ end
 local function sameStyle(a, b) return a.r == b.r and a.g == b.g and a.b == b.b and a.a == b.a and a.pad == b.pad end
 local function warnFirst(key, fmt, err, ...) C.warnOnce(key, fmt, ..., tostring(err):match("^[^\n]*")) end
 
+-- Story 21: the look an element is drawn in: its style's look, else the game's on the menu and screen hosts and the
+-- plain one elsewhere.
+local function lookOf(el)
+    if el.style.look then return el.style.look end
+    return C.gameHost(C.hostOf(el)) and "game" or "plain"
+end
+X._lookOf = lookOf
+
+-- A game asset for the look (assets.lua): the cache only inside a hook; nil (plain look, one WARN) when missing.
+local function gameAsset(key) return A.get(key) end
+
+-- Story 21: a game-look background (a material) or the plain one (a colour). Only rows get the worn strip by default
+-- in the game look; an explicit background is a colour in both looks. el.matBg: the widget shows a material now.
 local function backgroundStyle(el, w, fresh)
     local s = el.style
-    if fresh and s.a == 0 and s.pad == 0 then return end -- the unstyled widget already looks like this
+    local game = lookOf(el) == "game"
+    if game and el.kind == "row" and not s.explicitBg then
+        local mat = gameAsset("mat:strip")
+        if mat then
+            local t = theme.game.rowTint
+            local ok, err = pcall(function() C.count(); w:SetBackgroundMaterial(mat, t.r, t.g, t.b, t.a, s.pad) end)
+            if ok then el.matBg = true return end
+            warnFirst("style:" .. el.id, "%s '%s': the game look's background failed (is %s's pak current?): %s", err, el.kind, el.id, C.NAME)
+        end
+    end
+    if fresh and s.a == 0 and s.pad == 0 and not el.matBg then return end -- the unstyled widget already looks like this
     local ok, err = pcall(function()
+        if el.matBg then C.count(); w:SetBackgroundSolid(); el.matBg = nil end
         C.count(); w:SetBackground(s.r, s.g, s.b, s.a)
         C.count(); w:SetBackgroundPadding(s.pad)
     end)
     if not ok then warnFirst("style:" .. el.id, "%s '%s': style not applied (is %s's pak current?): %s", err, el.kind, el.id, C.NAME) end
+end
+
+-- Story 21: a text's font and colour in the game look (style.font, default body); back to the generator's defaults
+-- (white, drop shadow, size 18) when it goes plain again.
+local PLAIN_TEXT = { size = 18, r = 1, g = 1, b = 1, a = 1, shadowA = 0.85 }
+local function textLook(el, w, fresh)
+    if lookOf(el) == "game" then
+        local f = theme.game.textFonts[el.style.font or "body"]
+        local font = gameAsset("font:" .. f.font)
+        if font then
+            local c = theme.game.text
+            local ok, err = pcall(function()
+                C.count(); w:SetFontObject(font, f.size)
+                C.count(); w:SetTextColor(c.r, c.g, c.b, c.a, theme.game.shadowA)
+            end)
+            if ok then el.gameText = true else warnFirst("look:" .. el.id, "text '%s': the game look failed (is %s's pak current?): %s", err, el.id, C.NAME) end
+        end
+        return
+    end
+    if el.gameText then
+        el.gameText = nil
+        pcall(function()
+            local font = gameAsset("font:Engine") -- the engine's default font (Roboto), at the generator's size
+            if font then C.count(); w:SetFontObject(font, PLAIN_TEXT.size) end
+            C.count(); w:SetTextColor(PLAIN_TEXT.r, PLAIN_TEXT.g, PLAIN_TEXT.b, PLAIN_TEXT.a, PLAIN_TEXT.shadowA)
+        end)
+    end
 end
 
 local KIND = {
@@ -89,15 +183,36 @@ local KIND = {
             if fresh and el.text == "" then return end
             C.count(); w:SetText(el.text)
         end,
-        style = backgroundStyle,
+        style = function(el, w, fresh)
+            backgroundStyle(el, w, fresh)
+            textLook(el, w, fresh)
+        end,
     },
     panel = {
         pkg = C.PANEL_PKG, short = C.PANEL_SHORT, cls = C.PANEL_CLASS,
         content = function() end,
         style = backgroundStyle,
     },
+    -- Story 21: a scrolling list of a fixed size, and a row.
+    list = {
+        pkg = C.LIST_PKG, short = C.LIST_SHORT, cls = C.LIST_CLASS,
+        content = function(el, w, fresh)
+            local key = el.size.w .. "x" .. el.size.h
+            if el.sizeKey == key and not fresh then return end
+            C.count(); w:SetListSize(el.size.w, el.size.h)
+            el.sizeKey = key
+        end,
+        style = backgroundStyle,
+    },
+    row = {
+        pkg = C.ROW_PKG, short = C.ROW_SHORT, cls = C.ROW_CLASS,
+        content = function() end,
+        style = backgroundStyle,
+    },
 }
 X.KIND = KIND -- button.lua adds the button kind
+-- Widget classes that are not element kinds (story 21: the window).
+local EXTRA_CLASS = { screen = { pkg = C.SCREEN_PKG, short = C.SCREEN_SHORT } }
 
 local function kindOfClass(short)
     for k, K in pairs(KIND) do if K.short == short then return k end end
@@ -144,16 +259,31 @@ end
 -- Resolves a style to { r, g, b, a, pad } (colour 0..1, padding in canvas units). kind (default "text") picks the
 -- error prefix and the defaults: text has no box, a panel is dim with normal padding (story 14), a button is the
 -- theme's face with its hover and pressed colours (story 15).
+local LOOKS = { game = true, plain = true }
+local STYLE_KEYS = { background = true, padding = true, look = true, font = true }
 function X.resolveStyle(style, kind)
     kind = kind or "text"
     local pre = C.UI .. "." .. kind
     if style == nil then
         if kind == "text" then return { r = 0, g = 0, b = 0, a = 0, pad = 0 } end
-        if kind == "panel" then style = theme.panelDefault else style = {} end
+        if kind == "panel" then style = theme.panelDefault
+        elseif kind == "list" then style = theme.listDefault
+        else style = {} end
     end
     if type(style) ~= "table" then C.fail("%s: style must be a table { background = ..., padding = ... }, got %s", pre, C.describe(style)) end
     for k in pairs(style) do
-        if k ~= "background" and k ~= "padding" then C.fail("%s: unknown style key %s (valid: background, padding)", pre, C.describe(k)) end
+        if not STYLE_KEYS[k] then C.fail("%s: unknown style key %s (valid: background, font, look, padding)", pre, C.describe(k)) end
+    end
+    -- Story 21: the look (nil: the host's default) and, on a text, its font (game look only).
+    local look = style.look
+    if look ~= nil and (type(look) ~= "string" or not LOOKS[look]) then C.fail("%s: unknown look %s (valid: game, plain)", pre, C.describe(look)) end
+    local font = style.font
+    if font ~= nil then
+        if kind ~= "text" then C.fail("%s: unknown style key 'font' (valid: background, look, padding; font is for text)", pre) end
+        if type(font) ~= "string" or not theme.game.textFonts[font] then
+            C.fail("%s: unknown font %s (valid: %s)", pre, C.describe(font), table.concat(theme.game.textFontNames, ", "))
+        end
+        if look == "plain" then C.fail("%s: font needs look = 'game' (got look 'plain')", pre) end
     end
     local bg, col = style.background, nil
     if bg == nil then bg = kind == "button" and theme.button or "none" end
@@ -178,6 +308,7 @@ function X.resolveStyle(style, kind)
         C.fail("%s: unknown padding %s (valid: %s)", pre, C.describe(pad), table.concat(theme.paddingNames, ", "))
     end
     col.pad = theme.padding[pad]
+    col.look, col.font, col.explicitBg = look, font, style.background ~= nil
     if kind == "button" then
         local h, q = theme.buttonHover, theme.buttonPressed
         col.hover = { r = h.r, g = h.g, b = h.b, a = h.a }
@@ -207,7 +338,7 @@ local function tagOf(id) return TAG_PREFIX .. C.modTag .. ":" .. id end
 local classRefs = {}
 local inHookNow = function() return false end -- story 20: X._inHook, set below
 local function classOf(kind)
-    local K = KIND[kind]
+    local K = KIND[kind] or EXTRA_CLASS[kind]
     local r = classRefs[kind]
     if r then
         local okD, cls = pcall(C.deref, r)
@@ -216,7 +347,8 @@ local function classOf(kind)
         classRefs[kind] = nil
     end
     -- Story 20: inside the Journal's Construct hook only a cached class is used: never GetAsset (a load there is fatal).
-    if inHookNow() then return nil end
+    -- Story 21: the same inside the menu's.
+    if inHookNow() or M._inHook then return nil end
     local t = C.pt()
     local helpers = StaticFindObject("/Script/AssetRegistry.Default__AssetRegistryHelpers")
     local ok, got = pcall(function()
@@ -312,31 +444,46 @@ local function liveWidget(el) return el.ref and C.deref(el.ref) or nil end
 
 -- ---------------------------------------------------------------- panels: the box and its children (story 14)
 
--- The box a panel's children go into (VBox or HBox of WBP_<Core>Panel), and the other one.
+-- The box a container's children go into (a panel: VBox or HBox of WBP_<Core>Panel; story 21: a list's VBox inside its
+-- ScrollBox, a row's HBox), and, for a panel, the other one (other: a list or a row has none).
 local function boxOf(p, w, other)
-    local horiz = p.layout == "horizontal"
-    if other then horiz = not horiz end
-    local ok, b = pcall(function() if horiz then return w.HBox end return w.VBox end)
+    local ok, b
+    if p.kind == "list" or p.kind == "row" then
+        if other then return nil end
+        ok, b = pcall(function() if p.kind == "row" then return w.HBox end return w.VBox end)
+    else
+        local horiz = p.layout == "horizontal"
+        if other then horiz = not horiz end
+        ok, b = pcall(function() if horiz then return w.HBox end return w.VBox end)
+    end
     return ok and C.valid(b) and b or nil
 end
 X._boxOf = boxOf
 
--- Box slot paddings: the first visible child 0, every later visible one the panel's gap before it (top in a vertical
--- panel, left in a horizontal one). Hidden children are collapsed: the box skips them and their padding.
+-- Box slot paddings: the first visible child 0, every later visible one the container's gap before it (top in a
+-- vertical one, left in a horizontal one). Hidden children are collapsed: the box skips them and their padding.
+-- Story 21: a row's child also gets its fill (a Fill slot with that weight: equal weights line up as columns; none:
+-- Auto).
+local SIZE_AUTO, SIZE_FILL = 0, 1
 local function applyGaps(p)
     local first = true
     local horiz = p.layout == "horizontal"
+    local isRow = p.kind == "row"
     for _, ch in ipairs(p.children) do
         if not ch.removed and ch.visible then
             local w = liveWidget(ch)
             if w then
                 local pad = first and 0 or p.gapUnits
                 first = false
-                local key = tostring(pad)
+                local key = isRow and (tostring(pad) .. "/" .. tostring(ch.fill)) or tostring(pad)
                 if ch.padKey ~= key then
                     local ok, err = pcall(function()
                         C.count()
                         w.Slot:SetPadding(horiz and { Left = pad, Top = 0, Right = 0, Bottom = 0 } or { Left = 0, Top = pad, Right = 0, Bottom = 0 })
+                        if isRow then
+                            C.count()
+                            w.Slot:SetSize({ SizeRule = ch.fill and SIZE_FILL or SIZE_AUTO, Value = ch.fill or 1.0 })
+                        end
                     end)
                     if ok then ch.padKey = key else warnFirst("gap:" .. p.id, "panel '%s': setting a child's gap failed: %s", err, p.id) end
                 end
@@ -383,10 +530,13 @@ local function ensureOrder(p, box)
     return not same
 end
 
--- A child that should be attached but whose widget is gone (Deref only).
+-- A child that should be attached but whose widget is gone (Deref only); story 21: at any depth (a row in a list).
 local function childMissing(p)
     for _, ch in ipairs(p.children) do
-        if not ch.removed and (ch.retryAt == nil or tick >= ch.retryAt) and not liveWidget(ch) then return true end
+        if not ch.removed and (ch.retryAt == nil or tick >= ch.retryAt) then
+            if not liveWidget(ch) then return true end
+            if ch.children and childMissing(ch) then return true end
+        end
     end
     return false
 end
@@ -394,6 +544,21 @@ end
 -- ---------------------------------------------------------------- attach (UI-2) and re-attach (UI-4)
 
 local attachChildren -- below
+
+-- The ids of a container's children (at any depth) that are not attached, appended to pending (at most 8 kept).
+function X._pendingChildren(p, pending)
+    for _, ch in ipairs(p.children) do
+        if not ch.removed then
+            if not ch.attached then
+                pending = pending or {}
+                if #pending < 8 then pending[#pending + 1] = "'" .. ch.id .. "'" end
+            elseif ch.children then
+                pending = X._pendingChildren(ch, pending)
+            end
+        end
+    end
+    return pending
+end
 
 -- Puts one element's widget into its container (a host canvas, or its panel's box; hostObj: the live HUD or Journal):
 -- reuses the element's own widget or one tagged with its id, else creates one. Then re-applies content and style;
@@ -485,7 +650,7 @@ local function attachOne(el, hostObj, container, byId, reason, report, steps)
     -- A fresh widget got its visibility before it joined; a reused one gets it again (placeAll, attachChildren).
     if not fresh then el.appliedVis = nil end
     if el.panel then el.padKey = fresh and "0" or nil end
-    if el.kind == "panel" then attachChildren(el, w, hostObj, fresh, reason, report, steps) end
+    if el.children then attachChildren(el, w, hostObj, fresh, reason, report, steps) end
     if C.debugOn() and not el.panel then D.schedule(el, "attach") end -- story 12: overlap check about 1 s later (debug only, HUD only)
     -- DEBUG only: a log line costs 0.3-0.8 ms on the game thread, and a successful attach is routine. Failures keep
     -- their INFO/WARN lines (onHud, warnOnce).
@@ -506,7 +671,7 @@ end
 attachChildren = function(p, pw, hostObj, fresh, reason, report, steps)
     local box = boxOf(p, pw)
     if not box then
-        C.warnOnce("nobox:" .. p.id, "panel '%s': its widget has no %s; its children stay pending (is %s's pak current?)", p.id, p.layout == "horizontal" and "HBox" or "VBox", C.NAME)
+        C.warnOnce("nobox:" .. p.id, "%s '%s': its widget has no %s; its children stay pending (is %s's pak current?)", p.kind, p.id, p.layout == "horizontal" and "HBox" or "VBox", C.NAME)
         return
     end
     local byId = {}
@@ -600,10 +765,11 @@ end
 
 -- The live object and canvas of a host, or nil.
 local function liveHost(host)
-    local A = HOST[host]
-    local obj = A.poll()
+    local ad = hostA(host)
+    if not ad then return nil end
+    local obj = ad.poll()
     if not obj then return nil end
-    local canvas = A.canvas(obj)
+    local canvas = ad.canvas(obj)
     if not canvas then return nil end
     return obj, canvas
 end
@@ -688,14 +854,7 @@ local function onHud(hud, info)
                     if #pending < 8 then pending[#pending + 1] = "'" .. el.id .. "'" end
                 end
                 if not ok then C.warnOnce("attach:" .. el.id, "attach %s: %s", el.id, tostring(res):match("^[^\n]*")) end
-                if ok and res and el.kind == "panel" then
-                    for _, ch in ipairs(el.children) do
-                        if not ch.removed and not ch.attached then
-                            pending = pending or {}
-                            if #pending < 8 then pending[#pending + 1] = "'" .. ch.id .. "'" end
-                        end
-                    end
-                end
+                if ok and res and el.children then pending = X._pendingChildren(el, pending) end
             end
         end
         t = C.pt()
@@ -773,7 +932,7 @@ local function onTickBody(hud)
     local missing = false
     for _, el in ipairs(C.order) do
         if not el.removed and el.place.host == "hud" and (el.retryAt == nil or tick >= el.retryAt) then
-            if not liveNow(el) or (el.kind == "panel" and childMissing(el)) then missing = true break end
+            if not liveNow(el) or (el.children ~= nil and childMissing(el)) then missing = true break end
         end
     end
     C.pa(full and "tick.membersFull" or "tick.members", t)
@@ -788,7 +947,7 @@ local function onTickBody(hud)
             local any = false
             for _, el in ipairs(C.order) do
                 if not el.removed and el.place.host == "hud" and (el.retryAt == nil or tick >= el.retryAt)
-                    and (not strict(el) or (el.kind == "panel" and childMissing(el))) then
+                    and (not strict(el) or (el.children ~= nil and childMissing(el))) then
                     local ok, res = pcall(attachOne, el, hud, canvas, byId, "its widget left the HUD canvas")
                     if not ok or not res then
                         el.retryAt = tick + RETRY_TICKS
@@ -843,7 +1002,7 @@ X._stepsText = stepsText
 -- attach line written at the poll's opened. Cleared at that Journal's closed / lost; an opened forgets the others.
 local constructed = {}
 local inHook = false             -- inside the Construct hook: classes from the cache only (classOf), no hook registered
-function X._inHook() return inHook end
+function X._inHook() return inHook or M._inHook == true end -- story 21: or inside the menu's Construct
 inHookNow = X._inHook
 
 -- Attaches the journal elements into the Journal's canvas (story 13; shared by the Construct hook and opened since
@@ -852,20 +1011,42 @@ inHookNow = X._inHook
 -- the set of elements it attached (for placement).
 local function liveChildrenMissing(p)
     for _, ch in ipairs(p.children) do
-        if not ch.removed and not liveWidget(ch) then return true end
+        if not ch.removed then
+            if not liveWidget(ch) then return true end
+            if ch.children and liveChildrenMissing(ch) then return true end
+        end
     end
     return false
 end
-local function attachJournal(j, canvas, byId, reason, skipLive, jpath)
+-- A container's children (any depth) after its attach: counted, marked with the host object's path, and the ones
+-- left pending listed (retried at the next open, not RETRY_TICKS later).
+local function noteChildren(p, jpath, n, pending)
+    for _, ch in ipairs(p.children) do
+        if not ch.removed then
+            n = n + 1
+            if ch.attached then
+                ch.jpath = jpath
+                if ch.children then n, pending = noteChildren(ch, jpath, n, pending) end
+            else
+                ch.retryAt = nil
+                pending = pending or {}
+                if #pending < 8 then pending[#pending + 1] = "'" .. ch.id .. "'" end
+            end
+        end
+    end
+    return n, pending
+end
+-- Story 21: the same for any host whose object is new on each open (the journal, the menu, a window): host is its key.
+local function attachHostEls(host, obj, canvas, byId, reason, skipLive, jpath)
     local report = { build = C.debugOn() }
     local steps = {}
     local n, pending, did = 0, nil, {}
     local live = liveIn(canvas)
     for _, el in ipairs(C.order) do
-        if not el.removed and el.place.host == "journal" then
+        if not el.removed and el.place.host == host then
             n = n + 1
-            if not (skipLive and live(el) and not (el.kind == "panel" and liveChildrenMissing(el))) then
-                local ok, res = pcall(attachOne, el, j, canvas, byId, reason, report, steps)
+            if not (skipLive and live(el) and not (el.children ~= nil and liveChildrenMissing(el))) then
+                local ok, res = pcall(attachOne, el, obj, canvas, byId, reason, report, steps)
                 if not ok or not res then
                     el.attached = false
                     pending = pending or {}
@@ -876,22 +1057,13 @@ local function attachJournal(j, canvas, byId, reason, skipLive, jpath)
                 end
                 if not ok then C.warnOnce("attach:" .. el.id, "attach %s: %s", el.id, tostring(res):match("^[^\n]*")) end
             end
-            if el.kind == "panel" then
-                for _, ch in ipairs(el.children) do
-                    if not ch.removed then
-                        n = n + 1
-                        if ch.attached then ch.jpath = jpath
-                        else
-                            ch.retryAt = nil -- a Journal attach retries it at the next opened, not RETRY_TICKS later
-                            pending = pending or {}
-                            if #pending < 8 then pending[#pending + 1] = "'" .. ch.id .. "'" end
-                        end
-                    end
-                end
-            end
+            if el.children then n, pending = noteChildren(el, jpath, n, pending) end
         end
     end
     return n, pending, report, steps, did
+end
+local function attachJournal(j, canvas, byId, reason, skipLive, jpath)
+    return attachHostEls("journal", j, canvas, byId, reason, skipLive, jpath)
 end
 
 local function attachLine(n, dt, s, report, pending, reason)
@@ -1138,20 +1310,25 @@ local function ensureWatching()
         ensureConstructHook()
     end)
 end
+local ensureMenu -- story 21, below
 local function ensureHost(el)
     ensureWatching()
-    if C.hostOf(el) == "journal" then ensureJournal() end
+    local host = C.hostOf(el)
+    if host == "journal" then ensureJournal()
+    elseif C.gameHost(host) then ensureMenu() end
+    -- Story 21: the game look's assets are loaded in this state's LoadMap post-hook from now on.
+    if C.gameHost(host) or (el.style and el.style.look == "game") then A.ensureLoadMapHook() end
 end
 X._ensureHost = ensureHost
 
--- Attaches one element now when its host is live (create, or place on a pending element). A panel's child attaches
--- into its panel's box when the panel's widget is live; otherwise it waits for its panel.
+-- Attaches one element now when its host is live (create, or place on a pending element). A container's child attaches
+-- into its container's box when the container's widget is live; otherwise it waits for its container.
 local function attachNow(el, reason)
     if el.panel then
         local p = el.panel
         local pw = liveWidget(p)
         if not pw then return end
-        local obj = liveHost(p.place.host)
+        local obj = liveHost(C.hostOf(p))
         if not obj then return end
         local box = boxOf(p, pw)
         if not box then return end
@@ -1181,15 +1358,142 @@ local function attachNow(el, reason)
 end
 X._attachNow = attachNow
 
+-- ---------------------------------------------------------------- story 21: the menu host and the windows
+-- Like the Journal: every menu is new (each return from a match builds one), so its elements get new widgets on each
+-- (in its Construct post-hook from the second menu on, else at the poll's opened), and on lost only their handles are
+-- freed. While the menu is hidden (opacity 0 under Create Server, another page) its elements are collapsed.
+
+-- Frees the handles of every element on a host (children included) and marks them detached; never touches widgets
+-- (they went with their host). keepPath: elements attached to this host object stay (a newer menu's).
+local function releaseHost(host, keepPath)
+    local freed = 0
+    forHost(host, function(el)
+        if keepPath and el.jpath == keepPath and el.ref then return end
+        if el.ref then freed = freed + 1 end
+        freeRef(el)
+        el.attached, el.slotKey, el.appliedVis, el.stackHeight, el.padKey = false, nil, nil, nil, nil
+        el.nearRect, el.jpath, el.sizeKey, el.matBg, el.gameText = nil, nil, nil, nil, nil
+        if el.appliedEnabled ~= nil then el.appliedEnabled = nil end
+    end)
+    return freed
+end
+
+-- Re-applies the wanted visibility of a host's top-level elements (the host was hidden or shown).
+local function revisit(host)
+    for _, el in ipairs(C.order) do
+        if not el.removed and el.place.host == host then
+            local w = liveWidget(el)
+            if w then
+                el.appliedVis = nil
+                local ok, err = pcall(P.applyVisibility, el, w)
+                if not ok then C.warnOnce("vis:" .. el.id, "%s '%s': SetVisibility failed: %s", el.kind, el.id, tostring(err):match("^[^\n]*")) end
+            end
+        end
+    end
+end
+
+local menuConstructed = {}       -- menu path -> true: its elements were attached in its Construct post-hook
+local function anyMenuElement()
+    for _, el in ipairs(C.order) do
+        if not el.removed and C.hostOf(el) == "menu" then return true end
+    end
+    return false
+end
+
+-- The poll's events for the menu host.
+local function onMenu(m, info)
+    if info.event == "opened" then
+        local canvas = M._canvasOf(m)
+        if not canvas then return end -- _canvasOf warned once; the host stays closed (the entry still inserts)
+        local cons = menuConstructed[info.path]
+        for p in pairs(menuConstructed) do if p ~= info.path then menuConstructed[p] = nil end end
+        local t0 = C.micros()
+        local n, pending, report, _, did = attachHostEls("menu", m, canvas, {}, info.reason, cons == true, info.path)
+        if n == 0 then return end
+        if next(did) then placeAll("menu", m, canvas, true, false, cons and did or nil) end
+        if info.hidden then revisit("menu") end
+        if pending then
+            C.log.info("ui menu attach left %s pending until the next menu (%d element(s))", table.concat(pending, ", "), n)
+        elseif C.debugOn() then
+            C.log.debug("ui menu attach n=%d in %d us: %s (%s%s)", n, C.micros() - t0, table.concat(report, ", "), tostring(info.reason), cons and ", after Construct" or "")
+        end
+    elseif info.event == "hidden" or info.event == "shown" then
+        revisit("menu")
+        if info.event == "shown" then P.settle("menu") end
+    elseif info.event == "lost" then
+        menuConstructed[info.path] = nil
+        local newer = next(menuConstructed)
+        local freed = releaseHost("menu", newer)
+        if freed > 0 and C.debugOn() then C.log.debug("ui menu lost: freed %d widget handle(s) (%s)", freed, tostring(info.reason)) end
+    end
+end
+
+-- Inside MainMenu_C:Construct's post-hook (menu.lua runs it under pcall, with M._inHook set): every menu element whose
+-- class is cached, placed; nothing loaded, no dependent's code called. The rest attach at the poll's opened.
+local function menuConstruct(m, path)
+    if not anyMenuElement() then return end
+    local canvas = M._canvasOf(m)
+    if not canvas then return end
+    local again = menuConstructed[path] == true
+    local byId = {}
+    if again then
+        local okS, b, orphans = pcall(scan, canvas, onHost("menu"))
+        if okS then
+            byId = b
+            for _, o in ipairs(orphans) do removeWidget(o.w) end
+        end
+    end
+    attachHostEls("menu", m, canvas, byId, "construct", false, path)
+    placeAll("menu", m, canvas, true)
+    menuConstructed[path] = true
+end
+
+local function onMenuTick(m)
+    P.tick("menu", m, function(el) return el.ref and C.deref(el.ref) or nil end)
+end
+
+local menuWatching = false
+ensureMenu = function()
+    if menuWatching then return end
+    menuWatching = true
+    M._watch(onMenu)
+    M._ticker(onMenuTick)
+    M._onConstruct(menuConstruct)
+    M._wants(function() return anyMenuElement(), false end)
+end
+
+-- A window opened (screen.lua): every element on it gets a widget in its canvas, then placement.
+function X._attachHost(host, obj, canvas, reason)
+    local n, pending = attachHostEls(host, obj, canvas, {}, reason, false, nil)
+    if n > 0 then placeAll(host, obj, canvas, true) end
+    if pending then C.log.info("ui %s attach left %s pending (%d element(s))", host, table.concat(pending, ", "), n) end
+    return n
+end
+-- A window closed or lost (screen.lua): its elements' handles are freed; they keep their state for the next open.
+function X._detachHost(host) return releaseHost(host) end
+-- Per menu tick for an open window: corner stacks still settling.
+function X._tickHost(host, obj)
+    P.tick(host, obj, function(el) return el.ref and C.deref(el.ref) or nil end)
+end
+X._ensureMenu = function() ensureMenu() end
+
 -- ---------------------------------------------------------------- the element registry (all kinds)
 
--- Story 14: whether a panel can take one more child; raises otherwise. kind: the joining element's kind.
+-- Story 14: whether a container can take one more child; raises otherwise. kind: the joining element's kind.
+-- Story 21 nesting: a panel takes text, buttons and rows; a list takes text, buttons and rows; a row takes text and
+-- buttons. A list goes inside nothing; a panel inside no container.
 local function checkJoin(p, kind, fn)
-    if kind == "panel" then C.fail("%s.%s: a panel can't go inside a panel (one level only)", C.UI, fn) end
+    if kind == "list" then C.fail("%s.%s: a list can't go inside a panel, list or row", C.UI, fn) end
+    if kind == "panel" then
+        if p.kind == "panel" then C.fail("%s.%s: a panel can't go inside a panel (one level only)", C.UI, fn) end
+        C.fail("%s.%s: a panel can't go inside a list or row", C.UI, fn)
+    end
+    if kind == "row" and p.kind == "row" then C.fail("%s.%s: a row can't go inside a row", C.UI, fn) end
     local n = 0
     for _, ch in ipairs(p.children) do if not ch.removed then n = n + 1 end end
-    if n >= MAX_CHILDREN then C.fail("%s.place: panel '%s' already has %d children (at most %d)", C.UI, p.id, n, MAX_CHILDREN) end
-    if X.checkHost then X.checkHost(kind, p.place.host, fn) end
+    local cap = CHILD_CAP[p.kind] or MAX_CHILDREN
+    if n >= cap then C.fail("%s.place: %s '%s' already has %d children (at most %d)", C.UI, p.kind, p.id, n, cap) end
+    if X.checkHost then X.checkHost(kind, C.hostOf(p), fn) end
 end
 X._checkJoin = checkJoin
 
@@ -1199,7 +1503,7 @@ function X._new(kind, id, fields, place)
     local el = fields
     el.kind, el.id, el.visible, el.removed, el.attached, el.seq = kind, id, true, false, false, C.seq
     if place.panelEl then
-        el.panel, el.place = place.panelEl, { inPanel = true }
+        el.panel, el.place, el.fill = place.panelEl, { inPanel = true }, place.fill
         local list = place.panelEl.children
         list[#list + 1] = el
     else
@@ -1252,9 +1556,10 @@ local function removeEl(el, underRemovedPanel)
     C.handleOf[el.handle] = nil
     C.removedHandle[el.handle] = el.id
     C.removedKind[el.handle] = el.kind
-    if el.kind == "panel" then
-        for _, ch in ipairs(el.children) do removeEl(ch, true) end
+    if el.children then
+        local kids = el.children
         el.children = {}
+        for _, ch in ipairs(kids) do removeEl(ch, true) end
     end
     if el.panel and not underRemovedPanel then
         local p = el.panel
@@ -1279,10 +1584,11 @@ local function shown(el)
         local pw = liveWidget(el.panel)
         container = pw and boxOf(el.panel, pw)
     else
-        local A = HOST[el.place.host]
-        local obj, drawn = A.poll()
+        local ad = hostA(el.place.host)
+        if not ad then return false end
+        local obj, drawn = ad.poll()
         if not obj or not drawn then return false end
-        container = A.canvas(obj)
+        container = ad.canvas(obj)
     end
     if not container then return false end
     local okP, p = pcall(function() return w:GetParent() end)
@@ -1313,7 +1619,7 @@ local function sameFull(a, b)
     return a.hover == nil or (sameStyle(a.hover, b.hover) and sameStyle(a.pressed, b.pressed))
 end
 function X._setStyle(el, s)
-    if sameFull(s, el.style) then return end
+    if sameFull(s, el.style) and s.look == el.style.look and s.font == el.style.font and s.explicitBg == el.style.explicitBg then return end
     el.style = s
     local w = liveWidget(el)
     if w then
@@ -1407,29 +1713,32 @@ P.place = function(h, intent)
     local pl = P.validate(intent)
     if pl.panelEl then
         local p = pl.panelEl
-        if el.kind == "panel" then C.fail("%s.place: a panel can't go inside a panel (one level only)", C.UI) end
-        if p == el.panel then return end
+        if p == el.panel then
+            -- Story 21: the same row with another fill weight changes only the slot.
+            if el.fill ~= pl.fill then el.fill, el.padKey = pl.fill, nil; applyGaps(p); resized(p) end
+            return
+        end
         checkJoin(p, el.kind, "place")
         detach(el)
-        el.panel, el.place = p, { inPanel = true }
+        el.panel, el.place, el.fill = p, { inPanel = true }, pl.fill
         p.children[#p.children + 1] = el
         ensureHost(el)
-        attachNow(el, "place in panel '" .. p.id .. "'")
+        attachNow(el, "place in " .. p.kind .. " '" .. p.id .. "'")
         return
     end
     if X.checkHost then X.checkHost(el.kind, pl.host, "place", el) end
     if el.panel then
         detach(el)
-        el.place = pl
+        el.place, el.fill = pl, nil
         ensureHost(el)
         attachNow(el, "place on host " .. pl.host)
         return
     end
     local oldHost, oldCorner, oldRegion = el.place.host, el.place.corner, el.place.region
-    if pl.host == "journal" then ensureJournal() end
     if oldHost ~= pl.host then
         detach(el)
         el.place = pl
+        ensureHost(el)
         attachNow(el, "place on host " .. pl.host)
         return
     end
@@ -1461,6 +1770,16 @@ end
 
 -- The tag a widget of this mod's element carries (for tests and diagnostics).
 function X.tagOf(id) return tagOf(id) end
+
+-- Story 21: assets.lua reads the cache only inside a hook, and its LoadMap preload also loads core's widget classes
+-- in use (they are unloaded after a map change, research 8.1), so a new menu's Construct finds them cached.
+A.setHookCheck(X._inHook)
+A.extra = function()
+    local need = {}
+    for _, el in ipairs(C.order) do if not el.removed then need[el.kind] = true end end
+    for kind in pairs(need) do classOf(kind) end
+    if next(C.windows) then classOf("screen"); classOf("button") end
+end
 
 X._validId, X._validText, X._sameStyle, X._sameFull = validId, validText, sameStyle, sameFull
 X._liveWidget, X._applyGaps, X._ensureOrder = liveWidget, applyGaps, ensureOrder

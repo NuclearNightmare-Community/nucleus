@@ -82,14 +82,18 @@ local REGION_NAMES = "ammo, binder, cover, map, map-header, match, page-left, pa
 local JOURNAL_CORNER_REGION = "cover" -- a plain journal corner (no region) is a corner of the cover (0.6.0)
 
 local KEYS = {
-    corner = { host = true, corner = true, gap = true, offset = true, region = true, inset = true },
-    near = { host = true, near = true, side = true, align = true, gap = true, offset = true },
-    absolute = { host = true, absolute = true },
+    corner = { host = true, corner = true, gap = true, offset = true, region = true, inset = true, screen = true },
+    near = { host = true, near = true, side = true, align = true, gap = true, offset = true, screen = true },
+    absolute = { host = true, absolute = true, screen = true },
 }
 
 local ALL_KEYS = { host = true, corner = true, near = true, absolute = true, gap = true, side = true, align = true, offset = true, panel = true,
-    region = true, inset = true }
-local ALL_KEY_NAMES = "absolute, align, corner, gap, host, inset, near, offset, panel, region, side"
+    region = true, inset = true, list = true, row = true, fill = true, screen = true }
+local ALL_KEY_NAMES = "absolute, align, corner, fill, gap, host, inset, list, near, offset, panel, region, row, screen, side"
+local HOSTS = { hud = true, journal = true, menu = true, screen = true }
+-- Story 21: the containers an intent can name (one of them, alone; fill only with row) and a row child's fill weight.
+local CONTAINER_KEYS = { "panel", "list", "row" }
+local FILL_MIN, FILL_MAX = 0.1, 16
 
 P.DEFAULT = { host = "hud", corner = "top-right", gap = "normal", gapUnits = 16, offset = { x = 0, y = 0 } }
 
@@ -112,29 +116,51 @@ local function sortedKeys(t)
     return table.concat(ks, ", ")
 end
 
--- Story 14: the panel element an intent names, or a clean error.
-local function panelOf(ph)
-    if type(ph) ~= "table" then bad("panel must be a panel handle, got %s", C.describe(ph)) end
+-- Story 14: the container element an intent names (story 21: a panel, a list or a row), or a clean error.
+local function containerOf(key, ph)
+    local art = C.ARTICLE[key]
+    if type(ph) ~= "table" then bad("%s must be %s handle, got %s", key, art, C.describe(ph)) end
     local rid = C.removedHandle[ph]
-    if rid then C.fail("%s.%s: handle '%s' was removed", C.UI, C.removedKind[ph] or "panel", rid) end
+    if rid then C.fail("%s.%s: handle '%s' was removed", C.UI, C.removedKind[ph] or key, rid) end
     local pel = C.handleOf[ph]
-    if not pel then bad("panel is not a panel handle (use the handle that panel.create returned)") end
-    if pel.kind ~= "panel" then bad("panel is %s ('%s'), not a panel", C.ARTICLE[pel.kind], pel.id) end
+    if not pel then bad("%s is not %s handle (use the handle that %s.create returned)", key, art, key) end
+    if pel.kind ~= key then bad("%s is %s ('%s'), not %s", key, C.ARTICLE[pel.kind], pel.id, art) end
     return pel
 end
 
+-- Story 21: the window record an intent's screen = <window handle> names, or a clean error.
+local function windowOf(wh)
+    local rec = type(wh) == "table" and C.windowOf[wh] or nil
+    if not rec then bad("screen must be a window handle, got %s", C.describe(wh)) end
+    return rec
+end
+
 -- Validates an intent and returns a normalized copy (plain values only). Raises nucleus.ui.place: <problem>.
--- A panel intent comes back as { panelEl = <the panel element> } (the caller checks the panel's limits).
+-- A container intent comes back as { panelEl = <the container element>, fill = <weight|nil> } (the caller checks the
+-- container's limits and the nesting rules).
 function P.validate(intent)
     if type(intent) ~= "table" then bad("intent must be a table, got %s", C.describe(intent)) end
     for k in pairs(intent) do
         if type(k) ~= "string" or not ALL_KEYS[k] then bad("unknown key %s in an intent (valid keys: %s)", C.describe(k), ALL_KEY_NAMES) end
     end
-    if intent.panel ~= nil then
-        for k in pairs(intent) do
-            if k ~= "panel" then bad("%s is not allowed with panel (the panel arranges its children; valid keys: panel)", k) end
+    if intent.fill ~= nil and intent.row == nil then bad("fill is allowed only with row") end
+    for _, ck in ipairs(CONTAINER_KEYS) do
+        if intent[ck] ~= nil then
+            for k in pairs(intent) do
+                if k ~= ck and not (ck == "row" and k == "fill") then
+                    bad("%s is not allowed with %s (the %s arranges its children; valid keys: %s)", k, ck, ck, ck == "row" and "fill, row" or ck)
+                end
+            end
+            local out = { panelEl = containerOf(ck, intent[ck]) }
+            if ck == "row" and intent.fill ~= nil then
+                local f = intent.fill
+                if type(f) ~= "number" or not finite(f) or f < FILL_MIN or f > FILL_MAX then
+                    bad("fill must be a number from 0.1 to 16, got %s", C.describe(f))
+                end
+                out.fill = f + 0.0
+            end
+            return out
         end
-        return { panelEl = panelOf(intent.panel) }
     end
     local kinds = {}
     if intent.corner ~= nil then kinds[#kinds + 1] = "corner" end
@@ -148,14 +174,23 @@ function P.validate(intent)
         if not KEYS[kind][k] then bad("%s is not allowed with %s (valid keys: %s)", k, kind, sortedKeys(KEYS[kind])) end
     end
     local host = intent.host
+    local win = nil
+    if intent.screen ~= nil then
+        if host ~= nil and host ~= "screen" then bad("screen is not allowed with host '%s' (a window is on host 'screen')", tostring(host)) end
+        win = windowOf(intent.screen)
+        host = "screen"
+    end
     if host == nil then host = "hud" end
-    if host ~= "hud" and host ~= "journal" then bad("unknown host %s (valid: %s)", C.describe(host), C.HOST_NAMES) end
+    if type(host) ~= "string" or not HOSTS[host] then bad("unknown host %s (valid: %s)", C.describe(host), C.HOST_NAMES) end
+    if host == "screen" and not win then bad("host 'screen' needs screen = <window handle> (the handle that screen.open returned)") end
     if kind == "corner" and host ~= "journal" then
         if intent.region ~= nil then bad("region is not available on host '%s' (journal only)", host) end
         if intent.inset ~= nil then bad("inset is not available on host '%s' (journal only)", host) end
     end
+    if kind == "near" and (host == "menu" or host == "screen") then bad("near is not available on host '%s' (corner or absolute)", host) end
 
-    local out = { host = host }
+    -- Story 21: each window is a host of its own ("screen#<id>"), so its corners stack apart from other windows'.
+    local out = { host = win and C.windowHost(win.id) or host, window = win and win.id or nil }
     if kind ~= "absolute" then
         local gap = intent.gap
         if gap == nil then gap = "normal" end
@@ -732,6 +767,9 @@ end
 -- absent; otherwise SelfHitTestInvisible (shown, and never hit-tested, so its tag tooltip never shows).
 function P.wantedVisibility(el)
     if not el.visible or el.nearAbsent then return C.VIS.Collapsed end
+    -- Story 21: a host that is hidden now (the menu under Create Server) collapses its elements, so a transparent
+    -- button can't take a click; a container's children go with it.
+    if not el.panel and C.hostHidden[el.place.host] then return C.VIS.Collapsed end
     return C.VIS.SelfHitTestInvisible
 end
 
@@ -866,7 +904,13 @@ end
 local NEAR_RECT_TICKS = 4
 local REGION_TICKS = 4
 local SETTLE_TICKS = 4
-local settle = { hud = {}, journal = {} } -- host -> stack key (region|corner) -> ticks left to re-measure
+-- host -> stack key (region|corner) -> ticks left to re-measure. Story 21: one table per host met (menu, each window).
+local settle = setmetatable({ hud = {}, journal = {} }, { __index = function(t, k)
+    if type(k) ~= "string" then return nil end
+    local v = {}
+    rawset(t, k, v)
+    return v
+end })
 local tickNo = 0
 
 -- Marks one stack of a host (corner and region), or every stack of the host (corner nil), for re-measuring on the
@@ -957,7 +1001,7 @@ end
 -- the journal context; made here when not given (its canvas is looked up only when a measured region is read).
 function P.tick(host, hostObj, live, ctx)
     if host == "hud" then tickNo = tickNo + 1
-    else
+    elseif host == "journal" then
         ctx = ctx or P.journalCtx(hostObj, nil)
         regionTick(hostObj, live, ctx)
     end
@@ -1021,8 +1065,9 @@ function P.elements(...)
     if n > 1 then C.fail("%s.elements: expected 0 or 1 arguments, got %d", C.UI, n) end
     local host = ...
     if host == nil then host = "hud" end
-    if host ~= "hud" and host ~= "journal" then C.fail("%s.elements: unknown host %s (valid: %s)", C.UI, C.describe(host), C.HOST_NAMES) end
+    if type(host) ~= "string" or not HOSTS[host] then C.fail("%s.elements: unknown host %s (valid: %s)", C.UI, C.describe(host), C.HOST_NAMES) end
     local out = {}
+    if host == "menu" or host == "screen" then return out end -- story 21: no named elements there (corner, absolute)
     for k, v in pairs(host == "hud" and ELEMENTS or REGIONS) do out[k] = v.desc end
     return out
 end
