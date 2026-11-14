@@ -4,9 +4,9 @@
 --   offThread(P)     presence, watchPresence and compatible off the game thread (versionsCompatible works there)
 --   run(scenario)    the pair-run roles, each on its own 250 ms game-thread loop:
 --     presence-host         watches skeltest, skeltest-forge and core's own id (PRESENCEEV lines with the server
---                           clock); logs the host's own record; from B's first "joined" logs, 6 + 2k s later (1 s after
---                           B's forge step k, k = 0..4), "PRESENCE step=k host=<record> b=<record>", after steps 0 and
---                           4 "COMPAT b=<compatible(B, skeltest)>", then "PRESENCE forge-done"; then waits for B to
+--                           clock); logs the host's own record; at B's first "joined" step 0's line and COMPAT, at
+--                           B's step-3 events steps 1-3, at its step-4 events step 4 and COMPAT (each "PRESENCE
+--                           step=k host=<record> b=<record>"), then "PRESENCE forge-done"; then waits for B to
 --                           leave: "left" for each of B's mods, presence(B) nil, absent, and no <Core>Presence left.
 --     presence-vanilla-host the same watches; once 2 players are in the game state's PlayerArray, waits 20 s and
 --                           checks: one <Core>Presence, owned by the other player's controller, and no record or
@@ -48,6 +48,15 @@ return function(X)
         local w = world()
         return w and try(function() return w.GameState.PlayerArray:GetArrayNum() end) or 0
     end
+    -- Live, by the KismetSystemLibrary:IsValid UFunction: FindAllOf keeps returning a destroyed actor until the next GC,
+    -- and UE4SS's IsValid() still says it's fine (AGENTS.md).
+    local function alive(o)
+        if not X.valid(o) then return false end
+        local ok, r = pcall(function()
+            return StaticFindObject("/Script/Engine.KismetSystemLibrary:IsValid")(StaticFindObject("/Script/Engine.Default__KismetSystemLibrary"), o)
+        end)
+        return ok and r == true
+    end
     -- <Core>Presence actors in this machine's current world, by full class path.
     local function presActors()
         local out = {}
@@ -55,7 +64,7 @@ return function(X)
         for _, a in ipairs(FindAllOf(PRES_SHORT) or {}) do
             local cp = try(function() return a:GetClass():GetFullName() end)
             local aw = try(function() return a:GetWorld():GetFullName() end)
-            if X.valid(a) and type(cp) == "string" and cp:sub(-#PRES_CLASS) == PRES_CLASS and aw == wp then out[#out + 1] = a end
+            if alive(a) and type(cp) == "string" and cp:sub(-#PRES_CLASS) == PRES_CLASS and aw == wp then out[#out + 1] = a end
         end
         return out
     end
@@ -278,7 +287,46 @@ return function(X)
             elseif not R.two and now - R.t0 >= 600 then rcheck(false, "PRESENCE no second player within 600 s") finish("no-join") end
             return
         end
-        -- B's first "joined" starts the forge clock
+        -- The forge checks follow B's events, not a clock: B starts its forge 5 s after it SENDS its first report, and on
+        -- a real join that first report can reach the host seconds late (B's game stalls right after loading the map),
+        -- so a host clock started at B's "joined" runs behind B's steps (pair run 2026-11-14 16:22). Reliable RPCs on one
+        -- actor arrive in order, so step 3's events (left skeltest, joined skeltest-forge) come after steps 0-2 were
+        -- handled, and no event for B before them means steps 0-2 left B's record unchanged; step 4's events (joined
+        -- skeltest 7.7.7, left skeltest-forge) end the sequence.
+        local WANT = {
+            [0] = LOWER .. "=" .. V() .. ",skeltest=0.1.0",
+            [1] = LOWER .. "=" .. V() .. ",skeltest=0.1.0",
+            [2] = LOWER .. "=" .. V() .. ",skeltest=0.1.0",
+            [3] = LOWER .. "=" .. V() .. ",skeltest-forge=1.0.0",
+            [4] = LOWER .. "=" .. V() .. ",skeltest=7.7.7",
+        }
+        local function stepLine(k, b)
+            local h = record(R.pid)
+            rcheck(h == LOWER .. "=" .. V() .. ",skeltest=0.1.0" and b == WANT[k], "PRESENCE step=%d host=%s b=%s server=%s", k, h, b, serverTime())
+        end
+        local function compatLine(want)
+            local c1, c2 = net.compatible(R.b, "skeltest")
+            local got = tostring(c1) .. (c2 and (" " .. tostring(c2)) or "")
+            rcheck(got == want, "COMPAT b=%s", got)
+        end
+        -- B's events after index i, leaving out its own join (the first "joined" for each id of its joined record)
+        local function bEvents(i)
+            local out, seen = {}, {}
+            for j = 1, #R.ev do
+                local e = R.ev[j]
+                if e.pid == R.b then
+                    local isJoin = e.ev == "joined" and e.prev == nil and R.joinIds[e.mod] and not seen[e.mod]
+                    if isJoin then seen[e.mod] = true end
+                    if j > i and not isJoin then out[#out + 1] = e end
+                end
+            end
+            return out
+        end
+        local function desc(list)
+            local t = {}
+            for _, e in ipairs(list) do t[#t + 1] = e.ev .. ":" .. e.mod .. "=" .. tostring(e.v) .. "<-" .. tostring(e.prev) end
+            return table.concat(t, ";")
+        end
         if not R.b then
             for _, e in ipairs(R.ev) do
                 if e.ev == "joined" and e.pid ~= R.pid then R.b, R.joinAt = e.pid, now break end
@@ -287,37 +335,58 @@ return function(X)
             if not R.b then return end
             local rb = record(R.b)
             rcheck(rb == LOWER .. "=" .. V() .. ",skeltest=0.1.0", "PRESENCE joined b=%d %s server=%s", R.b, rb, serverTime())
-            R.step = 0
+            R.joinIds = {}
+            for id in rb:gmatch("([^,=]+)=[^,]+") do R.joinIds[id] = true end
+            -- step 0 resends B's first report; the record (and compatible) it leaves is the joined one, and step 3's
+            -- check below proves nothing changed in between
+            stepLine(0, rb)
+            compatLine("true")
+            R.phase, R.mark = 3, 0
+            return
         end
-        local WANT = {
-            [0] = LOWER .. "=" .. V() .. ",skeltest=0.1.0",
-            [1] = LOWER .. "=" .. V() .. ",skeltest=0.1.0",
-            [2] = LOWER .. "=" .. V() .. ",skeltest=0.1.0",
-            [3] = LOWER .. "=" .. V() .. ",skeltest-forge=1.0.0",
-            [4] = LOWER .. "=" .. V() .. ",skeltest=7.7.7",
-        }
-        if R.step and R.step <= 4 and now - R.joinAt >= 6 + 2 * R.step then
-            local k = R.step
-            local h, b = record(R.pid), record(R.b)
-            rcheck(h == LOWER .. "=" .. V() .. ",skeltest=0.1.0" and b == WANT[k], "PRESENCE step=%d host=%s b=%s server=%s", k, h, b, serverTime())
-            if k == 0 or k == 4 then
-                local c1, c2 = net.compatible(R.b, "skeltest")
-                local want = k == 0 and "true" or "false incompatible"
-                local got = tostring(c1) .. (c2 and (" " .. tostring(c2)) or "")
-                rcheck(got == want, "COMPAT b=%s", got)
+        if R.phase == 3 or R.phase == 4 then
+            local evs = bEvents(R.mark)
+            if #evs == 0 then
+                if now - R.joinAt >= 60 then
+                    rcheck(false, "PRESENCE forge: no event for step %d within 60 s of B's join (B's events: %s)", R.phase, desc(bEvents(0)))
+                    R.phase, R.forged = nil, now
+                    say("PRESENCE forge-done server=%s", serverTime())
+                end
+                return
             end
-            R.step = k + 1
-            if R.step > 4 then R.forged = now; say("PRESENCE forge-done server=%s", serverTime()) end
+            R.batchAt = R.batchAt or now
+            if now - R.batchAt < (R.phase == 3 and 0.5 or 1.5) then return end   -- let the batch (and step 4's 49 floods) land
+            if R.phase == 3 then
+                local ok = #evs == 2
+                for _, e in ipairs(evs) do
+                    if not ((e.ev == "left" and e.mod == "skeltest" and e.prev == "0.1.0") or (e.ev == "joined" and e.mod == "skeltest-forge" and e.v == "1.0.0")) then ok = false end
+                end
+                local before = ok and WANT[1] or ("events:" .. desc(evs))
+                stepLine(1, before)
+                stepLine(2, before)
+                stepLine(3, record(R.b))
+                R.phase, R.mark, R.batchAt = 4, #R.ev, nil
+            else
+                stepLine(4, record(R.b))
+                compatLine("false incompatible")
+                R.phase, R.forged = nil, now
+                say("PRESENCE forge-done server=%s", serverTime())
+            end
             return
         end
         if R.forged and not R.left then
             local v, why = net.presence(R.b, "skeltest")
             if v == nil and why == "absent" then
-                R.left = now
+                -- presence() reads absent as soon as core drops the record; the "left" events reach the watches a moment
+                -- later (same tick, after this loop ran), so wait for both, up to 2 s
+                R.absentAt = R.absentAt or now
                 local leftMods = {}
                 for _, e in ipairs(R.ev) do if e.ev == "left" and e.pid == R.b and e.at >= R.forged then leftMods[#leftMods + 1] = e.mod end end
                 table.sort(leftMods)
-                rcheck(table.concat(leftMods, ",") == LOWER .. ",skeltest", "PRESENCE b-left mods=%s presence=%s,%s server=%s", table.concat(leftMods, ","), tostring(v), tostring(why), serverTime())
+                local mods = table.concat(leftMods, ",")
+                if mods ~= LOWER .. ",skeltest" and now - R.absentAt < 2 then return end
+                R.left = now
+                rcheck(mods == LOWER .. ",skeltest", "PRESENCE b-left mods=%s presence=%s,%s server=%s", mods, tostring(v), tostring(why), serverTime())
             elseif now - R.forged >= 120 then rcheck(false, "PRESENCE B did not leave within 120 s of forge-done") finish("no-leave") end
             return
         end
