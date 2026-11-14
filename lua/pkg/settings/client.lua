@@ -92,7 +92,9 @@ end
 
 local function callWatchers(changes)
     for _, c in ipairs(changes) do
-        for _, tok in ipairs(order) do
+        -- A copy: a watcher that unwatches (itself or another) must not shift the list under this loop.
+        local snapshot = { table.unpack(order) }
+        for _, tok in ipairs(snapshot) do
             local fn = watchers[tok]
             if fn then
                 local ok, err = pcall(fn, c[1], c[2])
@@ -203,7 +205,7 @@ local function doSet(fn, folder, key, value)
     if not payload then fail(fn, "value can't be sent: %s", why) end
     local ok, reply = B.call("settings-set", payload)
     if ok then
-        if folder == B.folder then
+        if B.folder and folder:lower() == B.folder:lower() then
             -- Own value: refresh now, so get returns it and the watchers run before set returns.
             local okR = pcall(refresh)
             if not okR then cache.values = nil end
@@ -219,8 +221,9 @@ local function doSet(fn, folder, key, value)
     return false, (code or "call-failed") .. " " .. q(code and detail or reply)
 end
 
-function M.get(key)
+function M.get(key, ...)
     enter("get")
+    if select("#", ...) > 0 then fail("get", "takes 1 argument (key)") end
     checkKey("get", key)
     local c = current("get")
     if not c.keys[key] then fail("get", "unknown key '%s' (not declared in %s's mod.json)", q(key), B.folder) end

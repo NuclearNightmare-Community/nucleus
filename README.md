@@ -213,7 +213,7 @@ Every mod's settings in one place: declared in the mod's `mod.json`, kept by cor
 | `settings-get:<Folder>` | `ok:<description as JSON>` |
 | `settings-set:{"mod":"<Folder>","key":"<key>","value":<value>}` | `ok:<the entry as JSON>` after a successful write; then `nucleus.settings.rev` is incremented |
 
-Errors: `err:bad-request`, `err:unknown-mod`, `err:no-settings`, `err:unknown-key`, `err:bad-value`, `err:read-only`, `err:locked`, `err:write-failed`, each followed by a detail of at most 64 printable bytes. `nucleus.settings.rev` is an integer shared variable: it starts at its previous value (a hot reload keeps it rising) or 0.
+Errors: `err:bad-request`, `err:unknown-mod`, `err:no-settings`, `err:unknown-key`, `err:bad-value`, `err:read-only`, `err:locked`, `err:write-failed`, and `err:internal` (the settings service is not running, or a reply could not be encoded), each followed by a detail of at most 64 printable bytes. `nucleus.settings.rev` is an integer shared variable: it starts at its previous value (a hot reload keeps it rising) or 0.
 
 **Description** (the `settings-get` reply and `describe`'s return): `{ id, name, folder, settings = { { key, type, default, min, max, step, values, label, help, changeable, scope, source, value, readOnly, restart, pendingRestart, saved }, ... in declaration order }, problems = { strings } }`. `restart` is true for `changeable = "restart"`; `saved` is present only while `pendingRestart` is.
 
