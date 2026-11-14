@@ -915,6 +915,39 @@ do
     tick()
     ok(w3 and w3.copied == T.TEMPLATE, "template inside a hook: copied on the next tick")
 end
+-- a template collected after it was copied (a map change) is looked up again, with no WARN
+do
+    A._reset()
+    SL.create{ id = "nt4", place = T.rp, min = 0, max = 1, step = 0.1, onChange = T.nop }
+    ok(T.tagged("nt4").copied == T.TEMPLATE, "template stale: the first slider copies it")
+    local w0 = countLogs("WARN the game's Settings slider (")
+    kill(T.TEMPLATE)
+    local fresh = obj({ __asset = "Slider" }, T.TPATH)
+    SL.create{ id = "nt5", place = T.rp, min = 0, max = 1, step = 0.1, onChange = T.nop }
+    ok(T.tagged("nt5").copied == fresh and countLogs("WARN the game's Settings slider (") == w0, "template stale: a stale handle is looked up again, no WARN")
+    T.TEMPLATE = fresh
+end
+
+-- ---------------------------------------------------------------- same id: checkbox and slider update the same widget
+do
+    local h = CK.create{ id = "cbs", place = T.rp, onChange = T.rec("cbs") }
+    local w = T.tagged("cbs")
+    local h2 = CK.create{ id = "cbs", place = T.rp, checked = true, size = 40, enabled = false, onChange = T.rec("cbs2") }
+    ok(h2 == h and T.tagged("cbs") == w and CK.get(h) == true and T.iconPath(w) == T.TICKED and w.icon[2] == 40, "checkbox: same id updates state and size on the same widget")
+    ok(w.opacity == theme.disabledOpacity and w.enabled == false, "checkbox: same id applies enabled = false")
+    CK.create{ id = "cbs", place = T.rp, checked = false, onChange = T.rec("cbs2") }
+    T.fire(T.CLICK, w)
+    ok(CK.get(h) == true and T.ncalls("cbs") == 0 and T.ncalls("cbs2") == 1, "checkbox: same id re-enables, and the new onChange hears the next click")
+end
+do
+    local h = SL.create{ id = "sls", place = T.rp, min = 0, max = 10, step = 1, value = 5, onChange = T.rec("sls") }
+    local w = T.tagged("sls")
+    local h2 = SL.create{ id = "sls", place = T.rp, min = 0, max = 2, step = 0.5, value = 1.5, defaultValue = 1, hint = "DEFAULT (1)", onChange = T.rec("sls2") }
+    ok(h2 == h and T.tagged("sls") == w and w.range[2] == 2 and w.range[3] == 0.5 and w.range[4] == 1, "slider: same id updates the range on the same widget")
+    ok(SL.get(h) == 1.5 and w.barValue == 1.5 and w.text == "1.5" and w.hint == "DEFAULT (1)" and w.boxW == SL._BOX_HINT_W, "slider: same id updates the value and the hint")
+    w.text = "0.5"; T.fire(T.COMMIT, w)
+    ok(SL.get(h) == 0.5 and T.ncalls("sls") == 0 and T.ncalls("sls2") == 1, "slider: same id, the new onChange hears the next commit")
+end
 
 print(string.format("controls_test: %d passed, %d failed", pass, failN))
 if failN > 0 then os.exit(1) end
