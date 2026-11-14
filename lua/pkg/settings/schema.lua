@@ -25,6 +25,21 @@ M.finite = finite
 local function q(s) return (tostring(s):sub(1, 64):gsub("[^%w%p ]", "?")) end
 M.quote = q
 
+M.MAX_PROBLEM = 256 -- bytes per problem string in a description
+
+-- cut(s, max) -> s, at most max bytes, cut at a UTF-8 character boundary (never in the middle of a character).
+function M.cut(s, max)
+    s = tostring(s)
+    if #s <= max then return s end
+    local i = max
+    while i > 0 do
+        local b = s:byte(i + 1)
+        if not b or b < 0x80 or b > 0xBF then break end -- the byte after the cut starts a character
+        i = i - 1
+    end
+    return s:sub(1, i)
+end
+
 function M.validKey(k) return type(k) == "string" and #k >= 1 and #k <= M.MAX_KEY and k:find(M.KEY) ~= nil end
 
 function M.check(d, v)
@@ -124,8 +139,8 @@ function M.parse(text, folder)
     if root == nil then return nil, "mod.json: " .. orders end
     if type(root) ~= "table" or json.isArray(root) or root == json.null then return nil, "mod.json: not a JSON object" end
     local m = { settings = {}, byKey = {}, problems = {}, hasSettings = false }
-    m.id = type(root.id) == "string" and root.id:sub(1, 64) or nil
-    m.name = type(root.name) == "string" and root.name:sub(1, 64) or nil
+    m.id = type(root.id) == "string" and M.cut(root.id, 64) or nil
+    m.name = type(root.name) == "string" and M.cut(root.name, 64) or nil
     local s = root.settings
     if s == nil or s == json.null then return m end
     m.hasSettings = true

@@ -600,6 +600,75 @@ do
     eq(table.concat(names, ","), "describe,get,getAll,set,setFor,unwatch,watch", "core.settings has the seven functions")
 end
 
+do -- review fixes: init without modsDir; one state per folder whatever the case; problems rebuilt per read; caps
+    raises(function() store.init{ core = "Nucleus" } end, "init needs a non-empty modsDir string", "init without modsDir raises")
+    raises(function() store.init{ modsDir = "" } end, "init needs a non-empty modsDir string", "init with an empty modsDir raises")
+    store.init{ modsDir = MODS, core = "Nucleus", log = logm.new("Nucleus"), rev = shared["nucleus.settings.rev"], world = function() return WORLD end,
+                publishRev = function(n) shared["nucleus.settings.rev"] = n end }
+    -- case: Windows paths ignore case, so "clock" and "Clock" are one state and one file
+    ok(store.op("settings-set", '{"mod":"clock","key":"updateEvery","value":33}'):sub(1, 3) == "ok:", "set through 'clock'")
+    eq(entryOf(decoded(desc("Clock")), "updateEvery").value, 33, "'Clock' sees the value set through 'clock'")
+    ok(store.op("settings-set", '{"mod":"CLOCK","key":"updateEvery","value":34}'):sub(1, 3) == "ok:", "set through 'CLOCK'")
+    eq(entryOf(decoded(desc("clock")), "updateEvery").value, 34, "one state: no stale copy overwrote it")
+    eq(read(file("Clock")), '{"updateEvery":34}', "one file")
+    local Cs = newState("Clock", "Clock")
+    local seen = {}
+    Cs.watch(function(k, v) seen[#seen + 1] = v end)
+    eq(Cs.setFor("clock", "updateEvery", 35), true, "setFor on the own folder in another case")
+    eq(seen[1], 35, "...refreshes the own cache at once (watcher called before setFor returns)")
+    -- a watcher that unwatches during the call doesn't make the next one miss the change
+    local Ws = newState("Waypoints", "Waypoints")
+    local calls = {}
+    local t1
+    t1 = Ws.watch(function() calls[#calls + 1] = "a"; Ws.unwatch(t1) end)
+    Ws.watch(function() calls[#calls + 1] = "b" end)
+    local now = Ws.get("onRevive")
+    Ws.set("onRevive", now == "clear" and "restore" or "clear")
+    eq(table.concat(calls, ","), "a,b", "unwatch inside a watcher: the next watcher is still called")
+    raises(function() Ws.get("onRevive", 2) end, "nucleus.settings.get: takes 1 argument (key)", "get with an extra argument raises")
+    -- problems from a corrupt / partly invalid values file go away once a write replaces it
+    modDir("Healed", SKEL)
+    write(file("Healed"), '{"test.count":99,"test.flag":true}')
+    local d = decoded(desc("Healed"))
+    ok(#d.problems == 1 and d.problems[1]:find("entries ignored", 1, true), "partly invalid file: one problem", d.problems[1])
+    ok(store.op("settings-set", '{"mod":"Healed","key":"test.count","value":5}'):sub(1, 3) == "ok:", "a set rewrites it")
+    eq(#decoded(desc("Healed")).problems, 0, "after the write: no stale problem")
+    modDir("Healed2", CLOCK)
+    write(file("Healed2"), '{"a":')
+    eq(#decoded(desc("Healed2")).problems, 1, "corrupt file: one problem")
+    store.op("settings-set", '{"mod":"Healed2","key":"updateEvery","value":4}')
+    eq(#decoded(desc("Healed2")).problems, 0, "corrupt file replaced: no stale problem")
+    -- UTF-8: id and name cut at a character boundary
+    eq(schema.cut(string.rep("a", 63) .. "\195\169", 64), string.rep("a", 63), "cut never splits a 2-byte character")
+    eq(schema.cut("ab\226\130\172", 4), "ab", "cut never splits a 3-byte character")
+    eq(schema.cut("abc", 64), "abc", "short strings unchanged")
+    modDir("Utf", '{"id":"' .. string.rep("i", 63) .. '\226\130\172","name":"' .. string.rep("n", 62) .. '\240\159\152\128x",'
+        .. '"settings":{"k":{"type":"bool","default":true}}}')
+    local r = desc("Utf")
+    local du = decoded(r)
+    ok(du and du.id == string.rep("i", 63) and du.name == string.rep("n", 62), "id and name cut at a UTF-8 boundary, reply decodes", r:sub(1, 80))
+end
+
+do -- a description near the manifest cap goes through the client (its raised reply caps); long problems are capped
+    local ents, vals = {}, {}
+    for v = 1, 8 do vals[v] = '"' .. string.format("%02d", v) .. string.rep("v", 62) .. '"' end
+    local valList = table.concat(vals, ",")
+    for i = 1, 64 do
+        ents[i] = string.format('"k%02d":{"type":"enum","values":[%s],"default":%s,"label":"%s","help":"%s","changeable":"anytime"}',
+            i, valList, vals[1], string.rep("L", 64), string.rep("H", 256))
+    end
+    local text = '{"id":"big","name":"Big","settings":{' .. table.concat(ents, ",") .. '}}'
+    ok(#text > 60000 and #text <= 65536, "the generated mod.json is near the 65,536-byte cap", #text)
+    modDir("Big", text)
+    -- three bad enum values: the "entries ignored" problem would be about 1.6 KB uncapped
+    write(file("Big"), '{"k01":"' .. string.rep("x", 60) .. '","k02":"' .. string.rep("y", 60) .. '","k03":"' .. string.rep("z", 60) .. '"}')
+    local B = newState("Big", "Big")
+    local d = B.describe("Big")
+    eq(d and #d.settings, 64, "client describe of a near-cap mod: 64 entries")
+    ok(d and #d.problems == 1 and #d.problems[1] <= 256, "a long problem is capped at 256 bytes", d and #d.problems[1])
+    eq(B.get("k64"), "01" .. string.rep("v", 62), "the mod's own get works")
+end
+
 do -- connect binds core.settings to the folder of the main.lua that called it
     function RegisterHook() return 1, 1 end
     function NotifyOnNewObject() end
@@ -622,7 +691,7 @@ do -- connect binds core.settings to the folder of the main.lua that called it
     for _ = 1, 3 do runLoops() end
     ok(got ~= nil and type(got.settings) == "table", "connect: core.settings on the api")
     ok(got and got.has("settings") == true, "connect: core.has('settings')")
-    eq(got and got.settings.get("updateEvery"), 5, "connect: core.settings.get reads the caller's own folder (Clock)")
+    eq(got and got.settings.get("updateEvery"), 35, "connect: core.settings.get reads the caller's own folder (Clock)")
 end
 
 print = realPrint

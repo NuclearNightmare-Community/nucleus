@@ -49,6 +49,9 @@ local function warn(fmt, ...) if E and E.log then pcall(E.log.warn, fmt, ...) en
 local function info(fmt, ...) if E and E.log then pcall(E.log.info, fmt, ...) end end
 
 function M.init(env)
+    if type(env) ~= "table" or type(env.modsDir) ~= "string" or env.modsDir == "" then
+        error("settings store: init needs a non-empty modsDir string", 0)
+    end
     E = env
     mods = {}
     rev = math.type(env.rev) == "integer" and env.rev or 0
@@ -71,23 +74,27 @@ local function loadValues(st)
         end
     end
     local values = {}
+    -- The values file's problems, rebuilt on every read (a later good write clears them); the WARNs stay once per session.
+    st.fileProblems = {}
     if not text then
         if why == "missing" then
             if not st.toldMissing then st.toldMissing = true; info("settings: %s: no settings.json; using the declared defaults", st.folder) end
-        elseif not st.warned then
-            st.warned = true
-            warn("settings: %s: settings.json %s; using the declared defaults", st.folder, why)
-            st.problems[#st.problems + 1] = "settings.json " .. why .. "; defaults used"
+        else
+            st.fileProblems[1] = "settings.json " .. why .. "; defaults used"
+            if not st.warned then
+                st.warned = true
+                warn("settings: %s: settings.json %s; using the declared defaults", st.folder, why)
+            end
         end
         return values
     end
     local root, err = json.decode(text, { maxBytes = M.MAX_VALUES_FILE })
     if root == nil or type(root) ~= "table" or json.isArray(root) or root == json.null then
+        local reason = root == nil and ("is corrupt (" .. quote(err) .. ")") or "is not a JSON object"
+        st.fileProblems[1] = "settings.json " .. reason .. "; defaults used"
         if not st.warned then
             st.warned = true
-            local reason = root == nil and ("is corrupt (" .. quote(err) .. ")") or "is not a JSON object"
             warn("settings: %s: settings.json %s; using the declared defaults", st.folder, reason)
-            st.problems[#st.problems + 1] = "settings.json " .. reason .. "; defaults used"
         end
         return values
     end
@@ -102,11 +109,13 @@ local function loadValues(st)
             if cv == nil then dropped[#dropped + 1] = k .. " (" .. bad .. ")" else values[k] = cv end
         end
     end
-    if #dropped > 0 and not st.warnedDropped then
-        st.warnedDropped = true
+    if #dropped > 0 then
         local list = table.concat(dropped, ", ", 1, math.min(#dropped, 8)) .. (#dropped > 8 and ", ..." or "")
-        warn("settings: %s: settings.json entries ignored: %s", st.folder, list)
-        st.problems[#st.problems + 1] = "settings.json entries ignored: " .. list
+        st.fileProblems[1] = "settings.json entries ignored: " .. list
+        if not st.warnedDropped then
+            st.warnedDropped = true
+            warn("settings: %s: settings.json entries ignored: %s", st.folder, list)
+        end
     end
     return values
 end
@@ -114,7 +123,8 @@ end
 -- The state of one folder, loaded on first use this session. -> st | nil, code, detail
 local function state(folder)
     if not validFolder(folder) then return nil, "bad-request", "folder must match [A-Za-z0-9_-]{1,64}" end
-    local st = mods[folder]
+    -- Windows paths ignore case, so Clock and clock are one folder: one state, keyed by the lowercase name.
+    local st = mods[folder:lower()]
     if st then return st end
     local text, why = readFile(path(folder, "mod.json"), M.MAX_MANIFEST)
     if not text then return nil, "unknown-mod", folder .. (why == "missing" and " has no mod.json" or (": mod.json " .. why)) end
@@ -129,7 +139,7 @@ local function state(folder)
     st.saved = m.hasSettings and loadValues(st) or {}
     st.session = {}
     for k, v in pairs(st.saved) do st.session[k] = v end
-    mods[folder] = st
+    mods[folder:lower()] = st
     return st
 end
 
@@ -181,7 +191,11 @@ function M.describe(folder)
         orders[e] = ENTRY_ORDER
         list[#list + 1] = e
     end
-    local problems = json.array({ table.unpack(st.problems) })
+    -- The manifest's problems, then the values file's (each capped at a UTF-8 boundary, so the reply stays readable).
+    local problems = json.array()
+    for _, list in ipairs({ st.problems, st.fileProblems or {} }) do
+        for _, p in ipairs(list) do problems[#problems + 1] = schema.cut(p, schema.MAX_PROBLEM) end
+    end
     local desc = { id = st.manifest.id, name = st.manifest.name, folder = folder, settings = list, problems = problems }
     orders[desc] = { "id", "name", "folder", "settings", "problems" }
     return desc, orders
