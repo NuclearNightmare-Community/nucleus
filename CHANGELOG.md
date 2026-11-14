@@ -2,6 +2,29 @@
 
 All notable changes to Nucleus are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). From 0.5.0 a dependent's `need` and `dependsOn` are minimum versions (`>=0.5.0`), so a newer Nucleus never asks dependents to raise them. Up to 0.3.0, below 1.0.0 a dependent connected only to the same minor version (`need = "0.3.0"` accepted 0.3.x).
 
+## [Unreleased] - 0.8.0
+
+Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
+
+For players: mods' screens can show small icons (a checkbox, a gear, a lock, a warning sign, a restart arrow), cut long names with "…" so they stay in their column, grey out a control, and show a tooltip when you hover over something (the Mod Manager's rows use all of these). The icons are placeholders for now; real art replaces them later.
+
+### Added
+
+- `core.ui.image`: `create{ id, place, image, size, style = { tint }, dimmed, tooltip }`, `set(h, { image, dimmed })`, `setVisible`, `remove`, `isShown`, `setTooltip`. An image shows one of Nucleus's own icons (`{ icon = "gear" | "checkbox-on" | "checkbox-off" | "lock" | "warning" | "restart" }`, white textures in Nucleus's pak, tinted at runtime) or one of five allow-listed game textures (`{ game = <path> }`, loaded by path at runtime, never shipped); anything else raises. `size` is a number or `{ w, h }` (4 to 512 units, default 32); an image without a source is an empty cell (a spacer). Images go on every host and in panels, lists and rows, where they keep their size. A texture that can't be loaded: one `WARN`, the image keeps its size and shows Nucleus's icon for the same meaning (or nothing).
+- A text's `style.overflow = "ellipsis" | "clip"`: the text is cut to its box, with `…` for `ellipsis` (where the box is narrower than the text: a row cell with `fill`, a fixed-size parent).
+- Buttons take `icon`, `iconSize` (default 24), `dimmed` and `tooltip`. With no label the button is only its icon and its box is exactly `iconSize`; with a label the icon sits left of it. `dimmed` draws the label and icon at the game's disabled colour; hover doesn't brighten it and it still clicks.
+- Tooltips: `tooltip` on `button.create` and `image.create`, and `setTooltip(h, tooltip | nil)` on text, buttons and images. A string or a per-language table (`en` required, at most 16 languages, 1 to 512 bytes, plain text), in the engine's tooltip look, on hosts with a cursor only (journal, menu, screen). A text's tag stays in its root `ToolTipText` and never shows on hover.
+- `core.has("ui.overflow")`, `core.has("ui.button.icon")` and the path of every new function (`ui.image.create`, `ui.image.set`, `ui.image.setVisible`, `ui.image.remove`, `ui.image.isShown`, `ui.image.setTooltip`, `ui.text.setTooltip`, `ui.button.setTooltip`) are true; `ui.image` is a listed feature.
+- Blueprint `WBP_NucleusImage`, Nucleus's icons `Icons/T_Gear`, `T_CheckboxOn`, `T_CheckboxOff`, `T_Lock`, `T_Warning`, `T_Restart` (placeholders drawn by `art/icons/draw.ps1`; `art/icons/README.md` says how real art replaces them), and the button's icon (`SetIcon`, `ClearIcon`, `SetContentColors`).
+
+### Changed
+
+- `unknown style key` now lists `background, font, look, overflow, padding`, and `button.create`'s unknown-key error lists its new keys. Nothing else changes for 0.7.0 callers: a button without an icon, a text without `overflow` and elements without tooltips make the same calls and look the same.
+
+### Notes
+
+- A disabled button (`enabled = false`) shows its tooltip too (seen in the VM).
+
 ## [Unreleased] - 0.7.0
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.

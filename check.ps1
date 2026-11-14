@@ -583,8 +583,58 @@ $menuChecks = $started + @(
     "\[$T\] OK MLOST "
     "\[$T\] OK MWINC window C lost with the map change"
     "\[$T\] SEVENT \d+ lost id=C "
+    # Core story 24 (core 0.8.0): text fitting, images and icons, tooltips, on window IC over the third menu.
+    "\[$T\] OK ICWIN window IC open with the icon rows"
+    "\[$T\] OK ICCASES ran 70 cases"
+    "\[$T\] OK ICHAS core\.has: ui\.image\.create, ui\.overflow, ui\.button\.icon"
+    "\[$T\] OK ICROW the five cells of row 1 "
+    # IMG: core's icons from core's pak, the five allow-listed game textures loaded by path, the spacer empty.
+    "\[$T\] OK IMG ic\.on tex=T_CheckboxOn tint=1\.00,1\.00,1\.00,1\.00"
+    "\[$T\] OK IMG ic\.gap tex=none tint=1\.00,1\.00,1\.00,0\.00"
+    "\[$T\] OK IMG ic\.g1 tex=checkbox_ticked "
+    "\[$T\] OK IMG ic\.g2 tex=checkbox_unticked "
+    "\[$T\] OK IMG ic\.g3 tex=T_Settings "
+    "\[$T\] OK IMG ic\.g4 tex=reset-icon "
+    "\[$T\] OK IMG ic\.g5 tex=T_Question "
+    "\[$T\] OK IMG ic\.cfg icon tex=T_Gear tint=0\.36,0\.41,0\.43,0\.55 \(dimmed\)"
+    "\[$T\] OK IMG ic\.cfg hover colour 0\.36,0\.41,0\.43,0\.55 "
+    # MEASURE: the name cut inside its column, the gear's box exactly 28x28, the image of the same size.
+    "\[$T\] OK MEASURE name allotted="
+    "\[$T\] OK MEASURE name right="
+    "\[$T\] OK MEASURE overflow name policy=1 clipping=1; version \(none\) policy=0 clipping=0"
+    "\[$T\] OK MEASURE gear box "
+    "\[$T\] OK MEASURE checkbox image "
+    "\[$T\] OK MEASURE spacer "
+    # TIP: tooltips on the inner widgets, tags unchanged, hit-testable only with a tooltip.
+    "\[$T\] OK TIP ic\.cfg Btn tooltip=CONFIGURE, CoreTag "
+    "\[$T\] OK TIP ic\.on Img tooltip=ON, Img visibility 0 "
+    "\[$T\] OK TIP ic\.ver Text tooltip=VERSION, root ToolTipText=\S+:ic\.ver \(the tag\), Text 0, Background 4"
+    "\[$T\] OK TIP ic\.name no tooltip: Text 4, Background 3 "
+    "\[$T\] OK TIP ic\.gap no tooltip: Img visibility 3 "
+    "\[$T\] OK TIP ic\.dis disabled button: tooltip DISABLED TIP, icon T_Restart, opacity 0\.45"
+    "\[$T\] ICDISABLED hovered the disabled button"
+    # The dimmed gear still clicks, exactly once.
+    "\[$T\] OK ICCLICK the dimmed gear's real click ran onClick exactly once \(1\)"
+    "#1|\[$T\] ICCLICK gear "
+    "!\[$T\] ICCLICK disabled"
+    "\[$T\] OK ICCLOSE window IC closed"
+    "!\[$T\] WARN .*(texture|icon|tooltip|overflow)"
     "\[$T\] END result=PASS"
 )
+# Core story 24: the ic-* group, on window IC (menu3), and every new function off the game thread.
+foreach ($id in 'style-key', 'overflow-bad', 'overflow-num', 'overflow-button', 'overflow-panel', 'overflow-list', 'overflow-row', 'overflow-clip-ok',
+                'img-none', 'img-args', 'img-unknown', 'img-id', 'img-kindid', 'img-src-path', 'img-src-long', 'img-src-icon', 'img-src-two',
+                'img-src-empty', 'img-src-str', 'img-src-key', 'img-size-3', 'img-size-600', 'img-size-str', 'img-size-inf', 'img-size-key',
+                'img-tint', 'img-style-key', 'img-dimmed', 'img-tip-hud', 'img-hud-ok', 'set-empty', 'set-unknown', 'set-dimmed', 'set-src',
+                'set-str', 'set-args', 'set-forged', 'set-text', 'set-ok', 'setvis-num', 'setvis-ok', 'isshown-text', 'isshown-ok',
+                'remove-forged', 'remove-ok', 'remove-again', 'removed', 'tip-empty', 'tip-513', 'tip-noen', 'tip-ctrl', 'tip-num', 'tip-tag',
+                'tip-17', 'tip-args', 'tip-forged', 'btip-text', 'itip-button', 'tip-newline-ok', 'tip-hud', 'tip-place-hud', 'tip-clear-ok',
+                'btn-icon-star', 'btn-icon-path', 'btn-iconsize-600', 'btn-iconsize-noicon', 'btn-dimmed', 'btn-tip-empty', 'btn-size',
+                'btn-icon-ok',
+                'off-image-create', 'off-image-set', 'off-image-setvis', 'off-image-remove', 'off-image-isshown', 'off-image-settip',
+                'off-text-settip', 'off-button-settip') {
+    $menuChecks += "\[$T\] OK CASE menu3\.ic-$id "
+}
 $manual = @(
     "\[$T\] SCENARIO manual "
     "\[$T\] CONNECT ok $N $Ver "

@@ -18,6 +18,8 @@
                from this build; without it they are left alone. Either way their layout is read back (CoreGen
                -LayoutOnly on the copies, swapped in for the generated files and swapped back) and must equal the
                golden file too; uncooked packages aren't byte-identical across runs, so layout, not bytes.
+               Icons (core story 24): CoreGen imports art/icons/*.png (-IconDir) as /Game/Mods/<name>/Icons/T_<Key>;
+               the pak must hold all six and WBP_<name>Image (and every other widget).
                Pack guard: the pak may hold only Content/Mods/<name>/ and must hold all 13; no staged file may name a
                /Game path outside /Game/Mods/<name>/, and no cooked marker may name BasicShapes, _Preview,
                EditorResources or a component template <Name>_GEN_VARIABLE other than DefaultSceneRoot's (the one
@@ -84,6 +86,10 @@ if (-not $Template) { $Template = Join-Path $root 'mods\map-spike\unreal\Nuclear
 $markerKinds = 'Start', 'Item', 'Intel', 'Computer', 'Generator', 'Lever', 'EnemySpawner', 'EnemyWaypoint', 'Landing', 'Map', 'Location', 'Sky'
 $mapAssets   = @($markerKinds | ForEach-Object { "BP_Marker_$_" }) + 'E_MarkerItem'
 $golden      = Join-Path $here 'unreal\map-markers.layout'
+# Core story 24: core's icons (art/icons/<file>.png -> Icons/T_<Asset>) and the widgets the pak must hold.
+$iconDir     = Join-Path $here 'art\icons'
+$iconAssets  = 'T_Gear', 'T_CheckboxOn', 'T_CheckboxOff', 'T_Lock', 'T_Warning', 'T_Restart'
+$iconFiles   = 'gear', 'checkbox-on', 'checkbox-off', 'lock', 'warning', 'restart'
 
 # The layout lines of a CoreGen -Layout= file, or of the golden file: every line but blanks and # comments.
 function Get-Layout([string] $file) { @(Get-Content $file | Where-Object { $_.Trim() -and -not $_.StartsWith('#') }) }
@@ -176,7 +182,10 @@ Step 'blueprint' {
     Remove-Item (Join-Path $proj 'Content\Mods') -Recurse -Force -ErrorAction SilentlyContinue
     $layoutGen = Join-Path $logs 'layout-generated.txt'
     Remove-Item $layoutGen -ErrorAction SilentlyContinue
-    Run 'bp-generate.log' $editor @($uproj, '-run=CoreGen', "-CoreName=$name", "-Layout=`"$layoutGen`"", '-unattended', '-nopause', '-nosplash', '-stdout', '-NoLogTimes')
+    $noIcon = @($iconFiles | Where-Object { -not (Test-Path (Join-Path $iconDir "$_.png")) })
+    if ($noIcon) { throw "Missing icon PNGs in $($iconDir): $($noIcon -join ', ') (art/icons/README.md)" }
+    Run 'bp-generate.log' $editor @($uproj, '-run=CoreGen', "-CoreName=$name", "-Layout=`"$layoutGen`"", "-IconDir=`"$iconDir`"", '-unattended', '-nopause', '-nosplash', '-stdout', '-NoLogTimes')
+    Select-String -Path (Join-Path $logs 'bp-generate.log') -Pattern 'ICON /Game' -CaseSensitive | ForEach-Object { Write-Host "   $($_.Line -replace '^.*?ICON', 'ICON')" }
     Select-String -Path (Join-Path $logs 'bp-generate.log') -Pattern 'MARKER .*(enum|markers and)' -CaseSensitive | ForEach-Object { Write-Host "   $($_.Line -replace '^.*?MARKER', 'MARKER')" }
     $mapSrc = Join-Path $proj "Content\Mods\$name\Map"
     $want = @($mapAssets | ForEach-Object { "$_.uasset" } | Sort-Object)
@@ -248,6 +257,10 @@ Step 'blueprint' {
     $foreign = @($list | Where-Object { $_ -notlike "NuclearNightmare/Content/Mods/$name/*" })
     if ($foreign) { Remove-Item $pak; throw "Refusing: $name.pak would hold files outside Content/Mods/$($name): $($foreign -join ', ')" }
     $missing = @($mapAssets | Where-Object { $list -notcontains "NuclearNightmare/Content/Mods/$name/Map/$_.uasset" })
+    # Core story 24: the six icons and every widget, the image's included.
+    $missing += @($iconAssets | Where-Object { $list -notcontains "NuclearNightmare/Content/Mods/$name/Icons/$_.uasset" } | ForEach-Object { "Icons/$_" })
+    $missing += @('Text', 'Panel', 'Button', 'List', 'Row', 'Screen', 'Image' | ForEach-Object { "WBP_$name$_" } |
+        Where-Object { $list -notcontains "NuclearNightmare/Content/Mods/$name/$_.uasset" })
     if ($missing) { Remove-Item $pak; throw "Refusing: $name.pak lacks $($missing -join ', ')" }
     Write-Host "   $name.pak:"; $list | ForEach-Object { Write-Host "     $_" }
 }

@@ -64,4 +64,35 @@ M.game = {
     buttonMinHeight = 44,
 }
 
+-- Story 24 (core 0.8.0, Mod Manager CAP-2): images and icons. Core's own icons are white on transparent 128x128
+-- textures in core's pak (/Game/Mods/<Core>/Icons/T_<Key in CamelCase>), tinted at runtime; key -> asset name.
+M.icons = {
+    gear = "T_Gear", ["checkbox-on"] = "T_CheckboxOn", ["checkbox-off"] = "T_CheckboxOff",
+    lock = "T_Lock", warning = "T_Warning", restart = "T_Restart",
+}
+M.iconNames = { "checkbox-off", "checkbox-on", "gear", "lock", "restart", "warning" }
+-- The game's textures an image may name ({ game = <path> }), loaded by path at runtime and never shipped (each one is in
+-- the workspace's tools/diff-dumps.watch.json). Path -> core's icon for the same meaning (shown when the texture can't
+-- be loaded), or false when core has none.
+M.gameTextures = {
+    ["/Game/Graphics/MainMenu/Textures/checkbox_ticked.checkbox_ticked"] = "checkbox-on",
+    ["/Game/Graphics/MainMenu/Textures/checkbox_unticked.checkbox_unticked"] = "checkbox-off",
+    ["/Game/AntizeVOIPSystem/Widgets/Settings/T_Settings.T_Settings"] = "gear",
+    ["/Game/HexTree/Widgets/reset-icon.reset-icon"] = "restart",
+    ["/Game/HexTree/Textures/T_Question.T_Question"] = false,
+}
+M.gameTextureNames = {
+    "/Game/Graphics/MainMenu/Textures/checkbox_ticked.checkbox_ticked",
+    "/Game/Graphics/MainMenu/Textures/checkbox_unticked.checkbox_unticked",
+    "/Game/AntizeVOIPSystem/Widgets/Settings/T_Settings.T_Settings",
+    "/Game/HexTree/Widgets/reset-icon.reset-icon",
+    "/Game/HexTree/Textures/T_Question.T_Question",
+}
+M.imageSize = 32                                   -- an image's default size (square), canvas units
+M.iconSize = 24                                    -- a button icon's default size
+M.iconGap = 8                                      -- between a button's icon and its label (core's widget, fixed)
+M.imageTint = { r = 1, g = 1, b = 1, a = 1 }       -- an image's default tint: the texture as it is
+M.dimmed = M.game.textDisabled                     -- dimmed = true: the game's disabled colour
+M.white = { r = 1, g = 1, b = 1, a = 1 }           -- a plain button's label and icon (the generator's)
+
 return M

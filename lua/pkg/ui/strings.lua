@@ -69,6 +69,19 @@ function S.core(key, lang)
     return (S.pick(byLang, lang))
 end
 
+-- The language-tag rules a per-language table shares (labels, tooltips): at most 16 languages, each key a tag of
+-- letters and "-" of at most 16 characters. what is "label" or "tooltip".
+local function checkLangs(t, pre, what, n, k)
+    if n > S.MAX_LANGS then
+        local total = 0
+        for _ in pairs(t) do total = total + 1 end
+        C.fail("%s: %s has %d languages, at most %d", pre, what, total, S.MAX_LANGS)
+    end
+    if type(k) ~= "string" or #k == 0 or #k > S.MAX_TAG or not k:match("^[A-Za-z%-]+$") then
+        C.fail("%s: %s key %s is not a language tag (letters and -, at most %d characters)", pre, what, C.describe(k), S.MAX_TAG)
+    end
+end
+
 -- Validates a dependent's per-language label table and returns a copy. fn is e.g. "menu.entry".
 function S.validateLabel(label, fn)
     local pre = C.UI .. "." .. fn
@@ -79,14 +92,7 @@ function S.validateLabel(label, fn)
     local out = {}
     for k, v in pairs(label) do
         n = n + 1
-        if n > S.MAX_LANGS then
-            local total = 0
-            for _ in pairs(label) do total = total + 1 end
-            C.fail("%s: label has %d languages, at most %d", pre, total, S.MAX_LANGS)
-        end
-        if type(k) ~= "string" or #k == 0 or #k > S.MAX_TAG or not k:match("^[A-Za-z%-]+$") then
-            C.fail("%s: label key %s is not a language tag (letters and -, at most %d characters)", pre, C.describe(k), S.MAX_TAG)
-        end
+        checkLangs(label, pre, "label", n, k)
         if type(v) ~= "string" or #v < 1 or #v > S.MAX_BYTES then
             C.fail("%s: label.%s must be a string of 1 to %d bytes, got %s", pre, k, S.MAX_BYTES, C.describe(v))
         end
@@ -96,6 +102,38 @@ function S.validateLabel(label, fn)
     if out.en:upper() ~= out.en then
         C.fail("%s: label.en must be upper case like the menu's own labels, got %s", pre, C.describe(out.en))
     end
+    return out
+end
+
+-- Story 24 (core 0.8.0): a tooltip is a string or a per-language table (en required, the language tag rules above),
+-- each string 1 to 512 bytes of plain text: no byte below 0x20 but newline. No upper-case rule (a tooltip is a
+-- sentence, not one of the menu's labels). Returns a per-language copy ({ en = s } for a string), or nil for nil.
+-- pre is the error prefix, e.g. "nucleus.ui.button.create".
+S.MAX_TIP = 512
+local function tipString(v, pre, what)
+    if type(v) ~= "string" or #v < 1 or #v > S.MAX_TIP then
+        local got = type(v) == "string" and string.format("%d bytes", #v) or C.describe(v)
+        C.fail("%s: %s must be a string of 1 to %d bytes, got %s", pre, what, S.MAX_TIP, got)
+    end
+    local bad = v:find("[\0-\9\11-\31]")
+    if bad then
+        C.fail("%s: %s has the control byte 0x%02X at byte %d (plain text only; newline is the one byte below 0x20 allowed)", pre, what, v:byte(bad), bad)
+    end
+    return v
+end
+function S.validateTooltip(tip, pre)
+    if tip == nil then return nil end
+    if type(tip) == "string" then return { en = tipString(tip, pre, "tooltip") } end
+    if type(tip) ~= "table" then
+        C.fail("%s: tooltip must be a string or a table of strings by language, like { en = \"...\" }, got %s", pre, C.describe(tip))
+    end
+    local n, out = 0, {}
+    for k, v in pairs(tip) do
+        n = n + 1
+        checkLangs(tip, pre, "tooltip", n, k)
+        out[k] = tipString(v, pre, "tooltip." .. k)
+    end
+    if out.en == nil then C.fail("%s: tooltip needs an en string (the fallback)", pre) end
     return out
 end
 

@@ -29,6 +29,14 @@
 -- children (el.children): a panel, a list or a row; el.panel is an element's container. A row can sit in a list or a
 -- panel, so a text in a row is two levels down; everything else is one level. And the game's look (style.look):
 -- the Remaster fonts, colours and materials, loaded by path at runtime (assets.lua), the default on menu and screen.
+--
+-- Story 24 (core 0.8.0): a text's style.overflow ("ellipsis" | "clip" | nil) sets the TextBlock's overflow policy and
+-- clips it to its box (nil: the engine's defaults, the 0.7.0 look); images (image.lua, a kind of their own); and
+-- tooltips on text, buttons and images. A tooltip goes on the element's inner widget (a text's "Text", a button's
+-- "Btn", an image's "Img"), never on a text's root, whose ToolTipText is its tag: Slate shows the tooltip of the
+-- deepest hovered widget that has one, so the inner widget is made hit-testable only while it has a tooltip (a text's
+-- Background SelfHitTestInvisible and Text Visible; an image's Img Visible), and otherwise stays HitTestInvisible, so
+-- the hover never walks up to the tag. Tooltips need a host with a cursor (journal, menu, screen).
 local BASE = (...):gsub("%.ui%.text$", "")
 local C = require(BASE .. ".ui.common")
 local H = require(BASE .. ".ui.hud")
@@ -38,6 +46,7 @@ local P = require(BASE .. ".ui.place")
 local A = require(BASE .. ".ui.assets")
 local theme = require(BASE .. ".ui.theme")
 local D = require(BASE .. ".ui.debug")
+local S = require(BASE .. ".ui.strings")
 
 local X = {}
 
@@ -176,16 +185,60 @@ local function textLook(el, w, fresh)
     end
 end
 
+-- Story 24: a text's overflow. TextBlock overflow policy (ETextOverflowPolicy: Clip 0, Ellipsis 1) and clipping
+-- (EWidgetClipping: Inherit 0, ClipToBounds 1) on its "Text"; nil is the engine's defaults (Clip, Inherit), which a
+-- fresh widget already has, so no call. el.appliedOverflow: what the widget has now (nil: the defaults).
+local OVERFLOW = { ellipsis = { policy = 1, clip = 1 }, clip = { policy = 0, clip = 1 }, none = { policy = 0, clip = 0 } }
+local function overflowStyle(el, w, fresh)
+    if fresh then el.appliedOverflow = nil end
+    local want = el.style.overflow
+    if want == el.appliedOverflow then return end
+    local o = OVERFLOW[want or "none"]
+    local ok, err = pcall(function()
+        local t = w.Text
+        C.count(); t:SetTextOverflowPolicy(o.policy)
+        C.count(); t:SetClipping(o.clip)
+    end)
+    if ok then el.appliedOverflow = want
+    else warnFirst("overflow:" .. el.id, "text '%s': overflow %s not applied: %s", err, el.id, tostring(want)) end
+end
+
+-- Story 24: the tooltip on an element's inner widget, in the current language (picked on every apply). el.appliedTip:
+-- the string the widget shows now (nil: none, as a fresh widget). The inner widget is hit-testable only while it has
+-- one (top of this file).
+local TIP_INNER = { text = "Text", button = "Btn", image = "Img" }
+local function applyTooltip(el, w, fresh)
+    if fresh then el.appliedTip = nil end
+    local s = el.tooltip and S.pick(el.tooltip) or nil
+    if s == el.appliedTip then return end
+    local ok, err = pcall(function()
+        local inner = w[TIP_INNER[el.kind]]
+        C.count(); inner:SetToolTipText(FText(s or ""))
+        if el.kind == "text" then
+            -- On: the Background lets hits through to the Text, which takes them. Off: the generator's (Background
+            -- HitTestInvisible, so the whole subtree; Text SelfHitTestInvisible).
+            C.count(); w.Background:SetVisibility(s and C.VIS.SelfHitTestInvisible or C.VIS.HitTestInvisible)
+            C.count(); inner:SetVisibility(s and C.VIS.Visible or C.VIS.SelfHitTestInvisible)
+        elseif el.kind == "image" then
+            C.count(); inner:SetVisibility(s and C.VIS.Visible or C.VIS.HitTestInvisible)
+        end
+    end)
+    if ok then el.appliedTip = s
+    else warnFirst("tip:" .. el.id, "%s '%s': tooltip not applied (is %s's pak current?): %s", err, el.kind, el.id, C.NAME) end
+end
+X._applyTooltip = applyTooltip
+
 local KIND = {
     text = {
         pkg = C.TEXT_PKG, short = C.TEXT_SHORT, cls = C.TEXT_CLASS, toolTipTag = true,
         content = function(el, w, fresh)
-            if fresh and el.text == "" then return end
-            C.count(); w:SetText(el.text)
+            if not (fresh and el.text == "") then C.count(); w:SetText(el.text) end
+            applyTooltip(el, w, fresh)
         end,
         style = function(el, w, fresh)
             backgroundStyle(el, w, fresh)
             textLook(el, w, fresh)
+            overflowStyle(el, w, fresh)
         end,
     },
     panel = {
@@ -260,7 +313,8 @@ end
 -- error prefix and the defaults: text has no box, a panel is dim with normal padding (story 14), a button is the
 -- theme's face with its hover and pressed colours (story 15).
 local LOOKS = { game = true, plain = true }
-local STYLE_KEYS = { background = true, padding = true, look = true, font = true }
+local STYLE_KEYS = { background = true, padding = true, look = true, font = true, overflow = true }
+local OVERFLOWS = { ellipsis = true, clip = true }
 function X.resolveStyle(style, kind)
     kind = kind or "text"
     local pre = C.UI .. "." .. kind
@@ -272,7 +326,13 @@ function X.resolveStyle(style, kind)
     end
     if type(style) ~= "table" then C.fail("%s: style must be a table { background = ..., padding = ... }, got %s", pre, C.describe(style)) end
     for k in pairs(style) do
-        if not STYLE_KEYS[k] then C.fail("%s: unknown style key %s (valid: background, font, look, padding)", pre, C.describe(k)) end
+        if not STYLE_KEYS[k] then C.fail("%s: unknown style key %s (valid: background, font, look, overflow, padding)", pre, C.describe(k)) end
+    end
+    -- Story 24: overflow, on a text only (it fits a text to its box: a row column with fill, a fixed-size parent).
+    local overflow = style.overflow
+    if overflow ~= nil then
+        if kind ~= "text" then C.fail("%s: style key overflow is available on text only", pre) end
+        if type(overflow) ~= "string" or not OVERFLOWS[overflow] then C.fail("%s: unknown overflow %s (valid: ellipsis, clip)", pre, C.describe(overflow)) end
     end
     -- Story 21: the look (nil: the host's default) and, on a text, its font (game look only).
     local look = style.look
@@ -308,7 +368,7 @@ function X.resolveStyle(style, kind)
         C.fail("%s: unknown padding %s (valid: %s)", pre, C.describe(pad), table.concat(theme.paddingNames, ", "))
     end
     col.pad = theme.padding[pad]
-    col.look, col.font, col.explicitBg = look, font, style.background ~= nil
+    col.look, col.font, col.explicitBg, col.overflow = look, font, style.background ~= nil, overflow
     if kind == "button" then
         local h, q = theme.buttonHover, theme.buttonPressed
         col.hover = { r = h.r, g = h.g, b = h.b, a = h.a }
@@ -465,6 +525,10 @@ X._boxOf = boxOf
 -- Story 21: a row's child also gets its fill (a Fill slot with that weight: equal weights line up as columns; none:
 -- Auto).
 local SIZE_AUTO, SIZE_FILL = 0, 1
+-- Story 24: an image, or a button that is only an icon, keeps its own size in a box (a box slot fills across by
+-- default, which would stretch it): centred across a horizontal box (a row), at the start of a vertical one. Other
+-- children keep the 0.7.0 slots. EVerticalAlignment Center 2, EHorizontalAlignment Left 1; Fill 0 for both.
+local function keepsSize(ch) return ch.kind == "image" or (ch.kind == "button" and ch.icon ~= nil and ch.label == "") end
 local function applyGaps(p)
     local first = true
     local horiz = p.layout == "horizontal"
@@ -475,7 +539,8 @@ local function applyGaps(p)
             if w then
                 local pad = first and 0 or p.gapUnits
                 first = false
-                local key = isRow and (tostring(pad) .. "/" .. tostring(ch.fill)) or tostring(pad)
+                local fixed = keepsSize(ch)
+                local key = (isRow and (tostring(pad) .. "/" .. tostring(ch.fill)) or tostring(pad)) .. (fixed and "/k" or "")
                 if ch.padKey ~= key then
                     local ok, err = pcall(function()
                         C.count()
@@ -483,6 +548,11 @@ local function applyGaps(p)
                         if isRow then
                             C.count()
                             w.Slot:SetSize({ SizeRule = ch.fill and SIZE_FILL or SIZE_AUTO, Value = ch.fill or 1.0 })
+                        end
+                        if fixed or ch.alignKept then
+                            C.count()
+                            if horiz then w.Slot:SetVerticalAlignment(fixed and 2 or 0) else w.Slot:SetHorizontalAlignment(fixed and 1 or 0) end
+                            ch.alignKept = fixed
                         end
                     end)
                     if ok then ch.padKey = key else warnFirst("gap:" .. p.id, "panel '%s': setting a child's gap failed: %s", err, p.id) end
@@ -1479,10 +1549,27 @@ X._ensureMenu = function() ensureMenu() end
 
 -- ---------------------------------------------------------------- the element registry (all kinds)
 
+-- Story 24: whether an element (or, for a container, anything in it) has a tooltip.
+local function holdsTip(el)
+    if el.tooltip then return true end
+    for _, ch in ipairs(el.children or {}) do
+        if not ch.removed and holdsTip(ch) then return true end
+    end
+    return false
+end
+X._holdsTip = holdsTip
+-- Story 24: a tooltip needs a host with a cursor; raises nucleus.ui.<kind>: ... for one on the HUD.
+function X._checkTipHost(kind, host, hasTip)
+    if hasTip and host == "hud" then
+        C.fail("%s.%s: tooltip needs a host with a cursor (%s), got 'hud'", C.UI, kind, C.CURSOR_HOSTS)
+    end
+end
+
 -- Story 14: whether a container can take one more child; raises otherwise. kind: the joining element's kind.
 -- Story 21 nesting: a panel takes text, buttons and rows; a list takes text, buttons and rows; a row takes text and
--- buttons. A list goes inside nothing; a panel inside no container.
-local function checkJoin(p, kind, fn)
+-- buttons. A list goes inside nothing; a panel inside no container. Story 24: images go where text goes (panel, list,
+-- row); el (an existing element) or hasTip (a new one's): a tooltip can't join a container on the HUD.
+local function checkJoin(p, kind, fn, el, hasTip)
     if kind == "list" then C.fail("%s.%s: a list can't go inside a panel, list or row", C.UI, fn) end
     if kind == "panel" then
         if p.kind == "panel" then C.fail("%s.%s: a panel can't go inside a panel (one level only)", C.UI, fn) end
@@ -1494,6 +1581,7 @@ local function checkJoin(p, kind, fn)
     local cap = CHILD_CAP[p.kind] or MAX_CHILDREN
     if n >= cap then C.fail("%s.place: %s '%s' already has %d children (at most %d)", C.UI, p.kind, p.id, n, cap) end
     if X.checkHost then X.checkHost(kind, C.hostOf(p), fn) end
+    X._checkTipHost(kind, C.hostOf(p), hasTip or (el ~= nil and holdsTip(el)))
 end
 X._checkJoin = checkJoin
 
@@ -1619,7 +1707,8 @@ local function sameFull(a, b)
     return a.hover == nil or (sameStyle(a.hover, b.hover) and sameStyle(a.pressed, b.pressed))
 end
 function X._setStyle(el, s)
-    if sameFull(s, el.style) and s.look == el.style.look and s.font == el.style.font and s.explicitBg == el.style.explicitBg then return end
+    if sameFull(s, el.style) and s.look == el.style.look and s.font == el.style.font and s.explicitBg == el.style.explicitBg
+        and s.overflow == el.style.overflow then return end
     el.style = s
     local w = liveWidget(el)
     if w then
@@ -1703,6 +1792,21 @@ function X.isShown(h)
     return shown(el)
 end
 
+-- Story 24: setTooltip for any kind that has one (text, button, image): validated (strings.lua) and checked against
+-- the element's host before anything changes; nil clears it. Applied now when the widget is live, else at its attach.
+function X._setTooltipOf(kind, h, tip, nargs)
+    local fn = kind .. ".setTooltip"
+    C.enter(fn)
+    local el = C.element(h, fn, kind)
+    if nargs > 2 then C.fail("%s.%s: expected 2 arguments (handle, tooltip), got %d", C.UI, fn, nargs) end
+    local t = S.validateTooltip(tip, C.UI .. "." .. fn)
+    X._checkTipHost(kind, C.hostOf(el), t ~= nil)
+    el.tooltip = t
+    local w = liveWidget(el)
+    if w then applyTooltip(el, w, false) end
+end
+function X.setTooltip(h, ...) return X._setTooltipOf("text", h, (...), 1 + select("#", ...)) end
+
 -- UI-3: place(handle, intent), any kind. Pending: stores the intent; attach applies it. Live: re-places now. A new
 -- host moves the element: its widget leaves the old host's canvas, the old corner closes up, and it attaches on the
 -- new host now (or when that host next appears). Story 14: { panel = p } moves it into a panel (at the end; already
@@ -1718,7 +1822,7 @@ P.place = function(h, intent)
             if el.fill ~= pl.fill then el.fill, el.padKey = pl.fill, nil; applyGaps(p); resized(p) end
             return
         end
-        checkJoin(p, el.kind, "place")
+        checkJoin(p, el.kind, "place", el)
         detach(el)
         el.panel, el.place, el.fill = p, { inPanel = true }, pl.fill
         p.children[#p.children + 1] = el
@@ -1727,6 +1831,7 @@ P.place = function(h, intent)
         return
     end
     if X.checkHost then X.checkHost(el.kind, pl.host, "place", el) end
+    X._checkTipHost(el.kind, pl.host, holdsTip(el)) -- story 24
     if el.panel then
         detach(el)
         el.place, el.fill = pl, nil

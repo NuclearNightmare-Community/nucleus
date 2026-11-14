@@ -20,6 +20,11 @@ M.HAND = {
     "map.setup", -- map service (0.5.0): the nucleus.map.setup shared variable, outside the api table (user 2026-11-08)
     "ui.journal.regions", -- story 19 (0.6.0): named Journal regions in core.ui.place (region, inset, near = <region>) and elements("journal")
     "ui.look", -- story 21 (0.7.0): style.look = "game" | "plain" and a text's style.font; buttons, lists and rows on the menu and screen hosts
+    -- story 24 (0.8.0): a text's style.overflow; icon, iconSize and dimmed on buttons; and the path of every new
+    -- function (ui.image is a module, so the rule lists only "ui.image"; setTooltip is new inside ui.text and ui.button)
+    "ui.overflow", "ui.button.icon",
+    "ui.image.create", "ui.image.set", "ui.image.setVisible", "ui.image.remove", "ui.image.isShown", "ui.image.setTooltip",
+    "ui.text.setTooltip", "ui.button.setTooltip",
 }
 
 -- The UI part of the api table: path -> { module, function } (client.lua builds api.ui from this).
@@ -32,6 +37,7 @@ M.UI = {
     { "text.create", "text", "create" }, { "text.set", "text", "set" }, { "text.setStyle", "text", "setStyle" },
     { "text.setVisible", "text", "setVisible" }, { "text.remove", "text", "remove" }, { "text.isShown", "text", "isShown" },
     { "text.stats", "text", "stats" }, { "text.tagOf", "text", "tagOf" },
+    { "text.setTooltip", "text", "setTooltip" }, -- story 24
     -- story 14 (core 0.3.0): panels, with reordering
     { "panel.create", "panel", "create" }, { "panel.setStyle", "panel", "setStyle" }, { "panel.setVisible", "panel", "setVisible" },
     { "panel.remove", "panel", "remove" }, { "panel.isShown", "panel", "isShown" }, { "panel.order", "panel", "order" },
@@ -40,6 +46,7 @@ M.UI = {
     { "button.create", "button", "create" }, { "button.setLabel", "button", "setLabel" }, { "button.setEnabled", "button", "setEnabled" },
     { "button.setVisible", "button", "setVisible" }, { "button.remove", "button", "remove" }, { "button.isShown", "button", "isShown" },
     { "button.stats", "button", "stats" },
+    { "button.setTooltip", "button", "setTooltip" }, -- story 24
     -- story 21 (core 0.7.0, Mod Manager story 2): the title-screen menu (host and entry), windows, lists and rows
     { "menu.entry", "entry", "entry" }, { "menu.removeEntry", "entry", "removeEntry" },
     { "menu.isOpen", "menu", "isOpen" }, { "menu.watch", "menu", "watch" }, { "menu.unwatch", "menu", "unwatch" },
@@ -49,6 +56,9 @@ M.UI = {
     { "list.remove", "list", "remove" }, { "list.isShown", "list", "isShown" },
     { "row.create", "row", "create" }, { "row.setStyle", "row", "setStyle" }, { "row.setVisible", "row", "setVisible" },
     { "row.remove", "row", "remove" }, { "row.isShown", "row", "isShown" },
+    -- story 24 (core 0.8.0, Mod Manager CAP-2): images and icons
+    { "image.create", "image", "create" }, { "image.set", "image", "set" }, { "image.setVisible", "image", "setVisible" },
+    { "image.remove", "image", "remove" }, { "image.isShown", "image", "isShown" }, { "image.setTooltip", "image", "setTooltip" },
     { "place", "place", "place" },
     { "elements", "place", "elements" },
     { "debug.overlaps", "debug", "overlaps" }, -- story 12: a diagnostic for testing a mod's UI

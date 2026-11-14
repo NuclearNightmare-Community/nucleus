@@ -13,12 +13,15 @@
 #include "Components/BorderSlot.h"
 #include "Components/CanvasPanel.h"
 #include "Components/HorizontalBox.h"
+#include "Components/HorizontalBoxSlot.h"
+#include "Components/Image.h"
 #include "Components/Overlay.h"
 #include "Components/OverlaySlot.h"
 #include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
 #include "Components/SizeBoxSlot.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/Spacer.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
@@ -32,6 +35,8 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/Texture2D.h"
 #include "Engine/UserDefinedEnum.h"
+#include "ImageCore.h"
+#include "ImageUtils.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/PlayerStart.h"
 #include "K2Node_CallFunction.h"
@@ -52,6 +57,7 @@
 #include "Materials/MaterialInterface.h"
 #include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
+#include "Misc/Paths.h"
 #include "UObject/EnumProperty.h"
 #include "UObject/SavePackage.h"
 #include "WidgetBlueprint.h"
@@ -649,8 +655,10 @@ namespace
 	}
 
 	/**
-	 * WBP_<Core>Button (story 15): SizeBox "Box" (story 2) -> Button "Btn" -> TextBlock "Label" (white, drop shadow, size 18,
-	 * centred). Functions:
+	 * WBP_<Core>Button (story 15): SizeBox "Box" (story 2) -> Button "Btn" -> HorizontalBox "Content" (core story 24) ->
+	 * [SizeBox "IconBox" (collapsed until SetIcon) -> Image "Icon"], Spacer "IconGap" (8 x 1, collapsed), TextBlock "Label"
+	 * (white, drop shadow, size 18, centred). Lua makes an icon-only button by collapsing Label and IconGap and setting
+	 * Box's width and height overrides to the icon's size, and shows IconGap for an icon with a label. Functions:
 	 *   SetLabel(NewLabel: String)          Label.SetText(NewLabel)
 	 *   SetEnabledState(Enabled: Bool)      Btn.SetIsEnabled(Enabled) (a disabled button never fires OnClicked)
 	 *   SetColors(NR, NG, NB, NA, HR, HG, HB, HA, PR, PG, PB, PA, Padding: Float)
@@ -669,7 +677,14 @@ namespace
 	 *   SetTag(NewTag: String)              CoreTag = NewTag
 	 *   <Core>_OnClicked()                  ClickCount += 1. The button's OnClicked calls it and nothing else; each
 	 *                                       dependent's Lua post-hooks it by full path (bp-spike's NNSpike_OnClicked)
-	 * Lua draws it disabled at the theme's opacity (SetRenderOpacity on the widget).
+	 * Core story 24 (icons, dimmed):
+	 *   SetIcon(Texture: Object, W, H: Float)   IconBox width/height overrides W/H, Icon's brush resource = Texture,
+	 *                                       IconBox HitTestInvisible (shown)
+	 *   ClearIcon()                         IconBox Collapsed, Icon's brush resource cleared
+	 *   SetContentColors(NR, NG, NB, NA, HR, HG, HB, HA: Float)   NormalTextColor/HoverTextColor = N/H, Label and Icon
+	 *                                       drawn in N now; Btn.OnHovered/OnUnhovered colour the Icon like the Label
+	 *                                       (SetLabelLook colours the Icon too)
+	 * Lua draws it disabled at the theme's opacity (SetRenderOpacity on the widget), its icon included.
 	 */
 	UWidgetBlueprint* BuildButton(const FString& Dir, const FString& Core)
 	{
@@ -677,7 +692,7 @@ namespace
 			UUserWidget::StaticClass(), UWidgetBlueprint::StaticClass(), UWidgetBlueprintGeneratedClass::StaticClass()));
 		const FString ClickFn = Core + TEXT("_OnClicked");
 		CheckNames({TEXT("SetLabel"), TEXT("SetEnabledState"), TEXT("SetColors"), TEXT("SetTag"), *ClickFn,
-			TEXT("SetMaterials"), TEXT("SetLabelLook")});
+			TEXT("SetMaterials"), TEXT("SetLabelLook"), TEXT("SetIcon"), TEXT("ClearIcon"), TEXT("SetContentColors")});
 
 		UWidgetTree* T = WBP->WidgetTree;
 		USizeBox* Box = T->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Box"));
@@ -700,12 +715,43 @@ namespace
 		Label->SetJustification(ETextJustify::Center);
 		Label->SetVisibility(ESlateVisibility::HitTestInvisible);
 		Label->bIsVariable = true;
-		UButtonSlot* LabelSlot = CastChecked<UButtonSlot>(Btn->AddChild(Label));
-		LabelSlot->SetPadding(FMargin(0.f));
-		LabelSlot->SetHorizontalAlignment(HAlign_Center);
-		LabelSlot->SetVerticalAlignment(VAlign_Center);
+		// Core story 24: the button's content is a row [icon box, gap, label], centred as the label alone was; with no
+		// icon the icon box and the gap are collapsed (zero size), so a 0.7.0 button looks and measures the same.
+		UHorizontalBox* Content = T->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("Content"));
+		Content->SetVisibility(ESlateVisibility::HitTestInvisible);
+		Content->bIsVariable = true;
+		UButtonSlot* ContentSlot = CastChecked<UButtonSlot>(Btn->AddChild(Content));
+		ContentSlot->SetPadding(FMargin(0.f));
+		ContentSlot->SetHorizontalAlignment(HAlign_Center);
+		ContentSlot->SetVerticalAlignment(VAlign_Center);
+		USizeBox* IconBox = T->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("IconBox"));
+		IconBox->SetVisibility(ESlateVisibility::Collapsed);
+		IconBox->SetWidthOverride(24.f);
+		IconBox->SetHeightOverride(24.f);
+		IconBox->bIsVariable = true;
+		UImage* Icon = T->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("Icon"));
+		Icon->SetVisibility(ESlateVisibility::HitTestInvisible);
+		Icon->bIsVariable = true;
+		USizeBoxSlot* IconSlot = CastChecked<USizeBoxSlot>(IconBox->AddChild(Icon));
+		IconSlot->SetHorizontalAlignment(HAlign_Fill);
+		IconSlot->SetVerticalAlignment(VAlign_Fill);
+		USpacer* IconGap = T->ConstructWidget<USpacer>(USpacer::StaticClass(), TEXT("IconGap"));
+		IconGap->SetSize(FVector2D(8.f, 1.f));
+		IconGap->SetVisibility(ESlateVisibility::Collapsed);
+		IconGap->bIsVariable = true;
+		for (UWidget* W : {static_cast<UWidget*>(IconBox), static_cast<UWidget*>(IconGap), static_cast<UWidget*>(Label)})
+		{
+			UHorizontalBoxSlot* S = CastChecked<UHorizontalBoxSlot>(Content->AddChild(W));
+			S->SetPadding(FMargin(0.f));
+			S->SetHorizontalAlignment(HAlign_Center);
+			S->SetVerticalAlignment(VAlign_Center);
+		}
 		WBP->OnVariableAdded(TEXT("Box"));
 		WBP->OnVariableAdded(TEXT("Btn"));
+		WBP->OnVariableAdded(TEXT("Content"));
+		WBP->OnVariableAdded(TEXT("IconBox"));
+		WBP->OnVariableAdded(TEXT("Icon"));
+		WBP->OnVariableAdded(TEXT("IconGap"));
 		WBP->OnVariableAdded(TEXT("Label"));
 		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("ClickCount"), IntT(), TEXT("0"));
 		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("NormalTextColor"), LinearColorT(), WhiteColor);
@@ -740,8 +786,69 @@ namespace
 		}
 		LookIn.Add({TEXT("ShadowA"), RealT()});
 		FFunc SetLook = AddFunction(WBP, TEXT("SetLabelLook"), LookIn, {});
+		FFunc SetIcon = AddFunction(WBP, TEXT("SetIcon"), {{TEXT("Texture"), ObjT(UObject::StaticClass())}, {TEXT("W"), RealT()}, {TEXT("H"), RealT()}}, {});
+		FFunc ClearIcon = AddFunction(WBP, TEXT("ClearIcon"), {}, {});
+		FParams ContentIn;
+		for (const TCHAR* State : {TEXT("N"), TEXT("H")})
+		{
+			for (const TCHAR* Ch : {TEXT("R"), TEXT("G"), TEXT("B"), TEXT("A")})
+			{
+				ContentIn.Add({FName(FString(State) + Ch), RealT()});
+			}
+		}
+		FFunc SetContent = AddFunction(WBP, TEXT("SetContentColors"), ContentIn, {});
 		if (!Compile(WBP)) return nullptr;
 		FillTag(WBP, SetTag);
+		{
+			// SetIcon(Texture, W, H): IconBox overrides, Icon's brush resource, IconBox shown (hit-test invisible).
+			FGraph G(WBP, SetIcon.G);
+			UK2Node_VariableGet* GetBox = G.Get(TEXT("IconBox"));
+			UK2Node_CallFunction* SetW = G.Call(USizeBox::StaticClass(), GET_FUNCTION_NAME_CHECKED(USizeBox, SetWidthOverride));
+			G.Link(GetBox, TEXT("IconBox"), SetW, PN_Self);
+			G.Link(SetIcon.Entry, TEXT("W"), SetW, TEXT("InWidthOverride"));
+			UK2Node_CallFunction* SetH = G.Call(USizeBox::StaticClass(), GET_FUNCTION_NAME_CHECKED(USizeBox, SetHeightOverride));
+			G.Link(GetBox, TEXT("IconBox"), SetH, PN_Self);
+			G.Link(SetIcon.Entry, TEXT("H"), SetH, TEXT("InHeightOverride"));
+			UK2Node_VariableGet* GetIcon = G.Get(TEXT("Icon"));
+			UK2Node_CallFunction* SetRes = G.Call(UImage::StaticClass(), GET_FUNCTION_NAME_CHECKED(UImage, SetBrushResourceObject));
+			G.Link(GetIcon, TEXT("Icon"), SetRes, PN_Self);
+			G.Link(SetIcon.Entry, TEXT("Texture"), SetRes, TEXT("ResourceObject"));
+			UK2Node_CallFunction* Show = G.Call(UWidget::StaticClass(), GET_FUNCTION_NAME_CHECKED(UWidget, SetVisibility));
+			G.Link(GetBox, TEXT("IconBox"), Show, PN_Self);
+			G.Default(Show, TEXT("InVisibility"), TEXT("HitTestInvisible"));
+			G.Chain({SetIcon.Entry, SetW, SetH, SetRes, Show});
+		}
+		{
+			// ClearIcon(): IconBox collapsed, Icon's brush resource cleared.
+			FGraph G(WBP, ClearIcon.G);
+			UK2Node_VariableGet* GetBox = G.Get(TEXT("IconBox"));
+			UK2Node_CallFunction* Hide = G.Call(UWidget::StaticClass(), GET_FUNCTION_NAME_CHECKED(UWidget, SetVisibility));
+			G.Link(GetBox, TEXT("IconBox"), Hide, PN_Self);
+			G.Default(Hide, TEXT("InVisibility"), TEXT("Collapsed"));
+			UK2Node_VariableGet* GetIcon = G.Get(TEXT("Icon"));
+			UK2Node_CallFunction* SetRes = G.Call(UImage::StaticClass(), GET_FUNCTION_NAME_CHECKED(UImage, SetBrushResourceObject));
+			G.Link(GetIcon, TEXT("Icon"), SetRes, PN_Self);
+			G.Chain({ClearIcon.Entry, Hide, SetRes});
+		}
+		{
+			// SetContentColors(N, H): the two colour variables, then the Label and the Icon in N.
+			FGraph G(WBP, SetContent.G);
+			UK2Node_CallFunction* N = ColorFrom(G, SetContent.Entry, TEXT("N"));
+			UK2Node_CallFunction* H = ColorFrom(G, SetContent.Entry, TEXT("H"));
+			UK2Node_VariableSet* SetN = G.Set(TEXT("NormalTextColor"));
+			G.Link(N, PN_Ret, SetN, TEXT("NormalTextColor"));
+			UK2Node_VariableSet* SetHv = G.Set(TEXT("HoverTextColor"));
+			G.Link(H, PN_Ret, SetHv, TEXT("HoverTextColor"));
+			UK2Node_VariableGet* GetLabel = G.Get(TEXT("Label"));
+			UK2Node_CallFunction* SetC = G.Call(UTextBlock::StaticClass(), GET_FUNCTION_NAME_CHECKED(UTextBlock, SetColorAndOpacity));
+			G.Link(GetLabel, TEXT("Label"), SetC, PN_Self);
+			G.Link(SlateColorOf(G, G.Pin(N, PN_Ret)), G.Pin(SetC, TEXT("InColorAndOpacity")));
+			UK2Node_VariableGet* GetIcon = G.Get(TEXT("Icon"));
+			UK2Node_CallFunction* SetI = G.Call(UImage::StaticClass(), GET_FUNCTION_NAME_CHECKED(UImage, SetColorAndOpacity));
+			G.Link(GetIcon, TEXT("Icon"), SetI, PN_Self);
+			G.Link(N, PN_Ret, SetI, TEXT("InColorAndOpacity"));
+			G.Chain({SetContent.Entry, SetN, SetHv, SetC, SetI});
+		}
 		{
 			FGraph G(WBP, SetLabel.G);
 			UK2Node_VariableGet* GetLabel = G.Get(TEXT("Label"));
@@ -861,7 +968,12 @@ namespace
 			UK2Node_CallFunction* SetS = G.Call(UTextBlock::StaticClass(), GET_FUNCTION_NAME_CHECKED(UTextBlock, SetShadowColorAndOpacity));
 			G.Link(GetLabel, TEXT("Label"), SetS, PN_Self);
 			G.Link(Shadow, PN_Ret, SetS, TEXT("InShadowColorAndOpacity"));
-			G.Chain({SetLook.Entry, SetN, SetH, SetF, SetC, SetS});
+			// Core story 24: the icon takes the label's colour.
+			UK2Node_VariableGet* GetIcon = G.Get(TEXT("Icon"));
+			UK2Node_CallFunction* SetI = G.Call(UImage::StaticClass(), GET_FUNCTION_NAME_CHECKED(UImage, SetColorAndOpacity));
+			G.Link(GetIcon, TEXT("Icon"), SetI, PN_Self);
+			G.Link(N, PN_Ret, SetI, TEXT("InColorAndOpacity"));
+			G.Chain({SetLook.Entry, SetN, SetH, SetF, SetC, SetS, SetI});
 		}
 		{
 			// <Core>_OnClicked(): ClickCount = ClickCount + 1.
@@ -905,7 +1017,12 @@ namespace
 				UK2Node_CallFunction* SetC = G.Call(UTextBlock::StaticClass(), GET_FUNCTION_NAME_CHECKED(UTextBlock, SetColorAndOpacity));
 				G.Link(GetLabel, TEXT("Label"), SetC, PN_Self);
 				G.Link(SlateColorOf(G, G.Pin(GetColor, E.Value)), G.Pin(SetC, TEXT("InColorAndOpacity")));
-				G.Chain({HoverBound, SetC});
+				// Core story 24: the icon follows the label (dimmed: both colours are the disabled one, no change).
+				UK2Node_VariableGet* GetIcon = G.Get(TEXT("Icon"));
+				UK2Node_CallFunction* SetI = G.Call(UImage::StaticClass(), GET_FUNCTION_NAME_CHECKED(UImage, SetColorAndOpacity));
+				G.Link(GetIcon, TEXT("Icon"), SetI, PN_Self);
+				G.Link(GetColor, E.Value, SetI, TEXT("InColorAndOpacity"));
+				G.Chain({HoverBound, SetC, SetI});
 			}
 		}
 
@@ -1010,6 +1127,142 @@ namespace
 		FillBackground(WBP, SetBg, SetPad);
 		FillTag(WBP, SetTag);
 		FillBackgroundMaterial(WBP, Mat);
+		if (!Compile(WBP) || !Save(WBP)) return nullptr;
+		return WBP;
+	}
+
+	/**
+	 * Core story 24: core's icons. Each <file>.png in -IconDir (build.ps1 passes art/icons) becomes the texture
+	 * /Game/Mods/<Core>/Icons/T_<Key in CamelCase>: UserInterface2D (TC_EditorIcon, uncompressed RGBA), no mips, the UI
+	 * texture group, never streamed, sRGB. The PNGs must be 128x128 (white on transparent; Lua tints them). A missing or
+	 * unreadable PNG fails the build: the pak would otherwise ship without an icon the Lua names.
+	 */
+	bool BuildIcons(const FString& Dir, const FString& IconDir)
+	{
+		struct FIcon { const TCHAR* File; const TCHAR* Asset; };
+		const FIcon Icons[] = {
+			{TEXT("gear"), TEXT("T_Gear")}, {TEXT("checkbox-on"), TEXT("T_CheckboxOn")}, {TEXT("checkbox-off"), TEXT("T_CheckboxOff")},
+			{TEXT("lock"), TEXT("T_Lock")}, {TEXT("warning"), TEXT("T_Warning")}, {TEXT("restart"), TEXT("T_Restart")},
+		};
+		if (IconDir.IsEmpty())
+		{
+			UE_LOG(LogCoreGen, Error, TEXT("ICONS: pass -IconDir=<the art/icons folder> (build.ps1 does)"));
+			return false;
+		}
+		for (const FIcon& I : Icons)
+		{
+			const FString File = FPaths::Combine(IconDir, FString(I.File) + TEXT(".png"));
+			if (!FPaths::FileExists(File))
+			{
+				UE_LOG(LogCoreGen, Error, TEXT("ICONS: %s is missing"), *File);
+				return false;
+			}
+			FImage Image;
+			if (!FImageUtils::LoadImage(*File, Image))
+			{
+				UE_LOG(LogCoreGen, Error, TEXT("ICONS: %s could not be read as an image"), *File);
+				return false;
+			}
+			if (Image.SizeX != 128 || Image.SizeY != 128)
+			{
+				UE_LOG(LogCoreGen, Error, TEXT("ICONS: %s is %dx%d; core's icons are 128x128"), *File, Image.SizeX, Image.SizeY);
+				return false;
+			}
+			Image.ChangeFormat(ERawImageFormat::BGRA8, EGammaSpace::sRGB);
+			const FString LongName = Dir / TEXT("Icons") / I.Asset;
+			UPackage* Pkg = CreatePackage(*LongName);
+			Pkg->FullyLoad();
+			UTexture2D* Tex = NewObject<UTexture2D>(Pkg, FName(I.Asset), RF_Public | RF_Standalone);
+			Tex->PreEditChange(nullptr);
+			Tex->Source.Init(Image);
+			Tex->SRGB = true;
+			Tex->MipGenSettings = TMGS_NoMipmaps;
+			Tex->CompressionSettings = TC_EditorIcon; // UserInterface2D (RGBA), uncompressed
+			Tex->LODGroup = TEXTUREGROUP_UI;
+			Tex->NeverStream = true;
+			Tex->PostEditChange();
+			if (!Save(Tex)) return false;
+			UE_LOG(LogCoreGen, Display, TEXT("ICON %s <- %s (%dx%d)"), *LongName, *File, Image.SizeX, Image.SizeY);
+		}
+		return true;
+	}
+
+	/**
+	 * WBP_<Core>Image (core story 24): SizeBox "Box" (32 x 32, self-hit-test-invisible) -> Image "Img" (fills the box,
+	 * hit-test invisible, tint alpha 0: nothing drawn until Lua sets a texture and a tint). Lua sets Img visible only
+	 * while the image has a tooltip. Functions:
+	 *   SetImageTexture(Texture: Object)   Img's brush resource = Texture (one of core's icons, or an allow-listed game
+	 *                                      texture loaded by path at runtime; nothing of the game's is cooked in)
+	 *   ClearImageTexture()                Img's brush resource cleared
+	 *   SetImageSize(W, H: Float)          Box width and height overrides
+	 *   SetImageTint(R, G, B, A: Float)    Img.SetColorAndOpacity((R, G, B, A))
+	 *   SetTag(NewTag: String)             CoreTag = NewTag
+	 */
+	UWidgetBlueprint* BuildImage(const FString& Dir, const FString& Core)
+	{
+		UWidgetBlueprint* WBP = CastChecked<UWidgetBlueprint>(NewBlueprint(Dir / FString::Printf(TEXT("WBP_%sImage"), *Core),
+			UUserWidget::StaticClass(), UWidgetBlueprint::StaticClass(), UWidgetBlueprintGeneratedClass::StaticClass()));
+		CheckNames({TEXT("SetImageTexture"), TEXT("ClearImageTexture"), TEXT("SetImageSize"), TEXT("SetImageTint"), TEXT("SetTag")});
+
+		UWidgetTree* T = WBP->WidgetTree;
+		USizeBox* Box = T->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Box"));
+		Box->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		Box->SetWidthOverride(32.f);
+		Box->SetHeightOverride(32.f);
+		Box->bIsVariable = true;
+		T->RootWidget = Box;
+		UImage* Img = T->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("Img"));
+		Img->SetVisibility(ESlateVisibility::HitTestInvisible);
+		Img->SetColorAndOpacity(FLinearColor(1.f, 1.f, 1.f, 0.f));
+		Img->bIsVariable = true;
+		USizeBoxSlot* ImgSlot = CastChecked<USizeBoxSlot>(Box->AddChild(Img));
+		ImgSlot->SetHorizontalAlignment(HAlign_Fill);
+		ImgSlot->SetVerticalAlignment(VAlign_Fill);
+		WBP->OnVariableAdded(TEXT("Box"));
+		WBP->OnVariableAdded(TEXT("Img"));
+
+		FFunc SetTex = AddFunction(WBP, TEXT("SetImageTexture"), {{TEXT("Texture"), ObjT(UObject::StaticClass())}}, {});
+		FFunc ClearTex = AddFunction(WBP, TEXT("ClearImageTexture"), {}, {});
+		FFunc SetSize = AddFunction(WBP, TEXT("SetImageSize"), {{TEXT("W"), RealT()}, {TEXT("H"), RealT()}}, {});
+		FFunc SetTint = AddFunction(WBP, TEXT("SetImageTint"), {{TEXT("R"), RealT()}, {TEXT("G"), RealT()}, {TEXT("B"), RealT()}, {TEXT("A"), RealT()}}, {});
+		FFunc SetTag = AddTag(WBP);
+		if (!Compile(WBP)) return nullptr;
+		FillTag(WBP, SetTag);
+		{
+			FGraph G(WBP, SetTex.G);
+			UK2Node_VariableGet* GetImg = G.Get(TEXT("Img"));
+			UK2Node_CallFunction* Set = G.Call(UImage::StaticClass(), GET_FUNCTION_NAME_CHECKED(UImage, SetBrushResourceObject));
+			G.Link(GetImg, TEXT("Img"), Set, PN_Self);
+			G.Link(SetTex.Entry, TEXT("Texture"), Set, TEXT("ResourceObject"));
+			G.Chain({SetTex.Entry, Set});
+		}
+		{
+			FGraph G(WBP, ClearTex.G);
+			UK2Node_VariableGet* GetImg = G.Get(TEXT("Img"));
+			UK2Node_CallFunction* Set = G.Call(UImage::StaticClass(), GET_FUNCTION_NAME_CHECKED(UImage, SetBrushResourceObject));
+			G.Link(GetImg, TEXT("Img"), Set, PN_Self);
+			G.Chain({ClearTex.Entry, Set});
+		}
+		{
+			FGraph G(WBP, SetSize.G);
+			UK2Node_VariableGet* GetBox = G.Get(TEXT("Box"));
+			UK2Node_CallFunction* SetW = G.Call(USizeBox::StaticClass(), GET_FUNCTION_NAME_CHECKED(USizeBox, SetWidthOverride));
+			G.Link(GetBox, TEXT("Box"), SetW, PN_Self);
+			G.Link(SetSize.Entry, TEXT("W"), SetW, TEXT("InWidthOverride"));
+			UK2Node_CallFunction* SetH = G.Call(USizeBox::StaticClass(), GET_FUNCTION_NAME_CHECKED(USizeBox, SetHeightOverride));
+			G.Link(GetBox, TEXT("Box"), SetH, PN_Self);
+			G.Link(SetSize.Entry, TEXT("H"), SetH, TEXT("InHeightOverride"));
+			G.Chain({SetSize.Entry, SetW, SetH});
+		}
+		{
+			FGraph G(WBP, SetTint.G);
+			UK2Node_VariableGet* GetImg = G.Get(TEXT("Img"));
+			UK2Node_CallFunction* Make = ColorFrom(G, SetTint.Entry, TEXT(""));
+			UK2Node_CallFunction* Set = G.Call(UImage::StaticClass(), GET_FUNCTION_NAME_CHECKED(UImage, SetColorAndOpacity));
+			G.Link(GetImg, TEXT("Img"), Set, PN_Self);
+			G.Link(Make, PN_Ret, Set, TEXT("InColorAndOpacity"));
+			G.Chain({SetTint.Entry, Set});
+		}
 		if (!Compile(WBP) || !Save(WBP)) return nullptr;
 		return WBP;
 	}
@@ -1550,12 +1803,17 @@ int32 UCoreGenCommandlet::Main(const FString& Params)
 		if (LayoutFile.IsEmpty()) { UE_LOG(LogCoreGen, Error, TEXT("-LayoutOnly needs -Layout=<file>")); return 1; }
 		return WriteLayout(Dir, LayoutFile) ? 0 : 1;
 	}
+	// Core story 24: the icons first (their own folder, Icons/), then the widgets; no widget references a texture.
+	FString IconDir;
+	FParse::Value(*Params, TEXT("IconDir="), IconDir);
+	if (!BuildIcons(Dir, IconDir)) return 1;
 	if (!BuildText(Dir, Core)) return 1;
 	if (!BuildPanel(Dir, Core)) return 1;
 	if (!BuildButton(Dir, Core)) return 1;
 	if (!BuildList(Dir, Core)) return 1;
 	if (!BuildRow(Dir, Core)) return 1;
 	if (!BuildScreen(Dir, Core)) return 1;
+	if (!BuildImage(Dir, Core)) return 1;
 	if (!BuildActor(Dir, Core)) return 1;
 	if (!BuildMarkers(Dir)) return 1;
 	if (!LayoutFile.IsEmpty() && !WriteLayout(Dir, LayoutFile)) return 1;

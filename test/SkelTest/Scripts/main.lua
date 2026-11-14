@@ -740,7 +740,7 @@ buttonCases = function(P, f)
     local jp = { host = "journal", corner = "top-left" }
     local nop = function() end
     case(P .. "button-create-none", "ui.button.create()", f(B.create), E.err(BC .. "expected a table"))
-    case(P .. "button-create-unknown", "ui.button.create{ ..., colour = 1 }", f(B.create, { id = "bb", onClick = nop, place = jp, colour = 1 }), E.err(BC .. "unknown key 'colour' (valid: enabled, id, label, onClick, place, style)"))
+    case(P .. "button-create-unknown", "ui.button.create{ ..., colour = 1 }", f(B.create, { id = "bb", onClick = nop, place = jp, colour = 1 }), E.err(BC .. "unknown key 'colour' (valid: dimmed, enabled, icon, iconSize, id, label, onClick, place, style, tooltip)"))
     case(P .. "button-create-noid", "ui.button.create{ onClick = fn }", f(B.create, { onClick = nop, place = jp }), E.err(BC .. "id must be a string, got nil"))
     case(P .. "button-onclick-missing", "ui.button.create{ id, label, place } [no onClick]", f(B.create, { id = "bb", label = "x", place = jp }), E.err(BC .. "onClick must be a function, got nil"))
     case(P .. "button-onclick-str", "ui.button.create{ onClick = 'f' }", f(B.create, { id = "bb", label = "x", place = jp, onClick = "f" }), E.err(BC .. "onClick must be a function, got 'f'"))
@@ -1106,7 +1106,7 @@ local function uiCases(phase)
     case(P .. "style-bgbool", "create{ style = { background = true } }", f(T.create, { id = "bi", style = { background = true } }), E.err(ST .. "background must be a preset name or a colour table, got boolean"))
     case(P .. "style-pad5", "create{ style = { padding = 5 } }", f(T.create, { id = "bi", style = { padding = 5 } }), E.err(ST .. "unknown padding 5 (valid: none, tight, normal, loose)"))
     case(P .. "style-padhuge", "create{ style = { padding = 'huge' } }", f(T.create, { id = "bi", style = { padding = "huge" } }), E.err(ST .. "unknown padding 'huge'"))
-    case(P .. "style-bg", "create{ style = { bg = 'dim' } }", f(T.create, { id = "bi", style = { bg = "dim" } }), E.err(ST .. "unknown style key 'bg' (valid: background, font, look, padding)"))
+    case(P .. "style-bg", "create{ style = { bg = 'dim' } }", f(T.create, { id = "bi", style = { bg = "dim" } }), E.err(ST .. "unknown style key 'bg' (valid: background, font, look, overflow, padding)"))
 
     -- A real element for the handle cases (out of the way: absolute, below the centre).
     local h
@@ -4010,6 +4010,267 @@ local function buildMenu()
         UI.menu.unwatch(MM.mtok)
         UI.screen.unwatch(MM.stok)
     end)
+
+    -- ---- core story 24 (core 0.8.0): text fitting, images and icons, tooltips, on a window over the third menu.
+    -- The ic-* bad-input group (every new function and key, each one off the game thread, the new unknown-style-key
+    -- text), then the Mod Manager's row (checkbox image 28 | name text fill 4 ellipsis | version text fill 1 | spacer 28
+    -- | icon-only gear button 28, dimmed, tooltip), one image per allow-listed game texture, and a disabled button with an
+    -- icon and a tooltip. Every line is a check: IMG (texture and tint), MEASURE (allotted vs desired width, right edge vs
+    -- the next column, the gear's box), TIP (tooltip and tag reads), the gear's click; shots ic-tooltip and ic-row.
+    local function iconSteps()
+        local IC = { hits = 0, cases = 0 }
+        local UIP = CORE:lower() .. ".ui"
+        local LONG = ("SkelModManagerLongNameThatIsCutWithAnEllipsisAtTheColumnEdge0123"):sub(1, 64)
+        local GAME = {
+            { "g1", "/Game/Graphics/MainMenu/Textures/checkbox_ticked.checkbox_ticked", "checkbox_ticked" },
+            { "g2", "/Game/Graphics/MainMenu/Textures/checkbox_unticked.checkbox_unticked", "checkbox_unticked" },
+            { "g3", "/Game/AntizeVOIPSystem/Widgets/Settings/T_Settings.T_Settings", "T_Settings" },
+            { "g4", "/Game/HexTree/Widgets/reset-icon.reset-icon", "reset-icon" },
+            { "g5", "/Game/HexTree/Textures/T_Question.T_Question", "T_Question" },
+        }
+        local DIM = { 0.36, 0.41, 0.43, 0.55 }
+        local function f(fn, ...) local a = table.pack(...) return function() return fn(table.unpack(a, 1, a.n)) end end
+        local function icase(id, desc, fn, expect) IC.cases = IC.cases + 1; case("menu3.ic-" .. id, desc, fn, expect) end
+        local function col4(c) if not c then return "?" end return string.format("%.2f,%.2f,%.2f,%.2f", c.R, c.G, c.B, c.A) end
+        local function near4(c, want) return c ~= nil and math.abs(c.R - want[1]) < 0.01 and math.abs(c.G - want[2]) < 0.01 and math.abs(c.B - want[3]) < 0.01 and math.abs(c.A - want[4]) < 0.01 end
+        local function resName(img) return try(function() local o = img.Brush.ResourceObject if v(o) then return fname(o) end return "none" end) or "?" end
+        local function tip(w) return try(function() return w.ToolTipText:ToString() end) end
+        local function icWin() local _, c = screenWith("ic.title") return c end
+        local function listW() return childTagged(icWin(), "ic.list") end
+        local function rowW(n) return childTagged(prop(listW(), "VBox"), "ic.row" .. n) end
+        local function cell(n, id) return childTagged(prop(rowW(n), "HBox"), id) end
+
+        step("ic: window", function()
+            IC.W = UI.screen.open{ id = "IC", close = true }
+            UI.text.create{ id = "ic.title", text = "SKEL ICONS", place = { screen = IC.W, corner = "top-left" }, style = { font = "title" } }
+            IC.list = UI.list.create{ id = "ic.list", place = { screen = IC.W, absolute = { anchor = "center", x = 0, y = 0 } }, size = { w = 900, h = 300 }, gap = "tight" }
+            IC.row1 = UI.row.create{ id = "ic.row1", place = { list = IC.list } }
+            IC.on = UI.image.create{ id = "ic.on", place = { row = IC.row1 }, image = { icon = "checkbox-on" }, size = 28, tooltip = "ON" }
+            IC.name = UI.text.create{ id = "ic.name", text = LONG, place = { row = IC.row1, fill = 4 }, style = { overflow = "ellipsis" } }
+            IC.ver = UI.text.create{ id = "ic.ver", text = "1.0.0", place = { row = IC.row1, fill = 1 } }
+            IC.gap = UI.image.create{ id = "ic.gap", place = { row = IC.row1 }, size = 28 }
+            IC.cfg = UI.button.create{ id = "ic.cfg", place = { row = IC.row1 }, icon = { icon = "gear" }, iconSize = 28, dimmed = true,
+                tooltip = { en = "CONFIGURE", de = "KONFIGURIEREN" }, onClick = function() IC.hits = IC.hits + 1 say("ICCLICK gear %d", IC.hits) end }
+            UI.text.setTooltip(IC.ver, "VERSION")
+            IC.row2 = UI.row.create{ id = "ic.row2", place = { list = IC.list } }
+            for _, g in ipairs(GAME) do UI.image.create{ id = "ic." .. g[1], place = { row = IC.row2 }, image = { game = g[2] }, size = 40 } end
+            IC.row3 = UI.row.create{ id = "ic.row3", place = { list = IC.list } }
+            IC.dis = UI.button.create{ id = "ic.dis", label = "RESET", place = { row = IC.row3 }, icon = { icon = "restart" }, enabled = false,
+                tooltip = "DISABLED TIP", onClick = function() say("ICCLICK disabled") end }
+            check(UI.screen.isOpen(IC.W), "ICWIN window IC open with the icon rows")
+            return msAfter(1.5), 4
+        end)
+
+        -- ---- the ic-* bad-input group: every new function and key (the window is open, so cursor hosts are live)
+        step("ic: cases", function()
+            local T, B, IM, PN = UI.text, UI.button, UI.image, UI.panel
+            local ST, IMC, IMS = UIP .. ".text: ", UIP .. ".image.create: ", UIP .. ".image.set: "
+            local BC = UIP .. ".button.create: "
+            local nop = function() end
+            local rp = { row = IC.row3 }
+            local function img(o) o.id = o.id or "ic.bad"; o.place = o.place or rp return f(IM.create, o) end
+            local function btn(o) o.id = o.id or "ic.badb"; o.place = o.place or rp; o.onClick = o.onClick or nop return f(B.create, o) end
+            local TH = "tooltip needs a host with a cursor (journal, menu, screen), got 'hud'"
+            -- text style: overflow
+            icase("style-key", "ui.text.create{ style = { bg = 'dim' } } [the new unknown-key list]", f(T.create, { id = "ic.bt", style = { bg = "dim" } }), E.err(ST .. "unknown style key 'bg' (valid: background, font, look, overflow, padding)"))
+            icase("overflow-bad", "ui.text.setStyle(t, { overflow = 'fade' })", f(T.setStyle, IC.ver, { overflow = "fade" }), E.err(ST .. "unknown overflow 'fade' (valid: ellipsis, clip)"))
+            icase("overflow-num", "ui.text.setStyle(t, { overflow = 1 })", f(T.setStyle, IC.ver, { overflow = 1 }), E.err(ST .. "unknown overflow 1 (valid: ellipsis, clip)"))
+            icase("overflow-button", "ui.button.create{ style = { overflow = 'clip' } }", btn({ label = "x", style = { overflow = "clip" } }), E.err(UIP .. ".button: style key overflow is available on text only"))
+            icase("overflow-panel", "ui.panel.create{ style = { overflow = 'clip' } }", f(PN.create, { id = "ic.bp", place = { screen = IC.W, corner = "top-right" }, style = { overflow = "clip" } }), E.err(UIP .. ".panel: style key overflow is available on text only"))
+            icase("overflow-list", "ui.list.setStyle(l, { overflow = 'clip' })", f(UI.list.setStyle, IC.list, { overflow = "clip" }), E.err(UIP .. ".list: style key overflow is available on text only"))
+            icase("overflow-row", "ui.row.setStyle(r, { overflow = 'ellipsis' })", f(UI.row.setStyle, IC.row3, { overflow = "ellipsis" }), E.err(UIP .. ".row: style key overflow is available on text only"))
+            icase("overflow-clip-ok", "ui.text.setStyle(ver, { overflow = 'clip' }) then nil [control]", function() T.setStyle(IC.ver, { overflow = "clip" }) T.setStyle(IC.ver, nil) end, E.none)
+            -- image.create: the argument, keys, sources, sizes, style, dimmed, tooltip, host
+            icase("img-none", "ui.image.create()", f(IM.create), E.err(IMC .. "expected a table { id = ..., place = ..., image = ..., size = ... }, got nil"))
+            icase("img-args", "ui.image.create({ id = 'x' }, 2)", f(IM.create, { id = "ic.bad" }, 2), E.err(IMC .. "expected 1 argument (a table), got 2"))
+            icase("img-unknown", "ui.image.create{ ..., colour = 1 }", img({ colour = 1 }), E.err(IMC .. "unknown key 'colour' (valid: dimmed, id, image, place, size, style, tooltip)"))
+            icase("img-id", "ui.image.create{ id = 'a b' }", img({ id = "a b" }), E.err(IMC .. "id 'a b' has characters outside A-Z a-z 0-9 _ . -"))
+            icase("img-kindid", "ui.image.create{ id = 'ic.ver' } [a text's id]", img({ id = "ic.ver" }), E.err(IMC .. "id 'ic.ver' is already a text element of this mod"))
+            icase("img-src-path", "ui.image.create{ image = { game = '/Game/Foo.Foo' } }", img({ image = { game = "/Game/Foo.Foo" } }), E.err(IMC .. "game texture '/Game/Foo.Foo' is not allow-listed (valid: /Game/Graphics/MainMenu/Textures/checkbox_ticked.checkbox_ticked, "))
+            icase("img-src-long", "ui.image.create{ image = { game = <200 characters> } }", img({ image = { game = "/Game/" .. string.rep("a", 200) } }), E.err(IMC .. "game texture '/Game/" .. string.rep("a", 58) .. "'... is not allow-listed"))
+            icase("img-src-icon", "ui.image.create{ image = { icon = 'star' } }", img({ image = { icon = "star" } }), E.err(IMC .. "unknown icon 'star' (valid: checkbox-off, checkbox-on, gear, lock, restart, warning)"))
+            icase("img-src-two", "ui.image.create{ image = { icon = 'gear', game = <path> } }", img({ image = { icon = "gear", game = GAME[1][2] } }), E.err(IMC .. "image must have exactly one key, icon or game (got icon and game)"))
+            icase("img-src-empty", "ui.image.create{ image = {} }", img({ image = {} }), E.err(IMC .. "image must have exactly one key, icon or game (got none)"))
+            icase("img-src-str", "ui.image.create{ image = 'gear' }", img({ image = "gear" }), E.err(IMC .. "image must be { icon = <key> } or { game = <path> }, got 'gear'"))
+            icase("img-src-key", "ui.image.create{ image = { path = 'x' } }", img({ image = { path = "x" } }), E.err(IMC .. "unknown key 'path' in image (valid: game, icon)"))
+            local SZ = IMC .. "size must be a number from 4 to 512, or { w, h } with each from 4 to 512 "
+            icase("img-size-3", "ui.image.create{ size = 3 }", img({ size = 3 }), E.err(SZ .. "(got 3)"))
+            icase("img-size-600", "ui.image.create{ size = { w = 600 } }", img({ size = { w = 600 } }), E.err(SZ .. "(w is 600)"))
+            icase("img-size-str", "ui.image.create{ size = 'big' }", img({ size = "big" }), E.err(SZ .. "(got 'big')"))
+            icase("img-size-inf", "ui.image.create{ size = { 1/0, 4 } }", img({ size = { 1 / 0, 4 } }), E.err(SZ .. "(w is "))
+            icase("img-size-key", "ui.image.create{ size = { x = 4 } }", img({ size = { x = 4 } }), E.err(SZ .. "(unknown key 'x'; valid: w, h)"))
+            icase("img-tint", "ui.image.create{ style = { tint = { r = 2, g = 0, b = 0 } } }", img({ style = { tint = { r = 2, g = 0, b = 0 } } }), E.err(IMC .. "style.tint.r must be a number from 0 to 1, got 2"))
+            icase("img-style-key", "ui.image.create{ style = { background = 'dim' } }", img({ style = { background = "dim" } }), E.err(IMC .. "unknown style key 'background' (valid: tint)"))
+            icase("img-dimmed", "ui.image.create{ dimmed = 'yes' }", img({ dimmed = "yes" }), E.err(IMC .. "dimmed must be a boolean or nil, got 'yes'"))
+            icase("img-tip-hud", "ui.image.create{ (the HUD), tooltip = 'x' }", f(IM.create, { id = "ic.bad", image = { icon = "gear" }, tooltip = "x" }), E.err(UIP .. ".image: " .. TH))
+            icase("img-hud-ok", "ui.image.create{ (the HUD), icon warning, size { 20, 24 } } then remove [control]", function()
+                local h = IM.create{ id = "ic.hud", image = { icon = "warning" }, size = { 20, 24 } }
+                IM.remove(h) IM.remove(h)
+                return h.id
+            end, E.ret("'ic.hud'", function(r) return r[1] == "ic.hud" end))
+            -- image.set, setVisible, remove, isShown
+            local tmp = IM.create{ id = "ic.tmp", place = rp, image = { icon = "lock" } }
+            icase("set-empty", "ui.image.set(i, {})", f(IM.set, tmp, {}), E.err(IMS .. "changes is empty (give image, dimmed or both)"))
+            icase("set-unknown", "ui.image.set(i, { size = 3 })", f(IM.set, tmp, { size = 3 }), E.err(IMS .. "unknown key 'size' (valid: dimmed, image)"))
+            icase("set-dimmed", "ui.image.set(i, { dimmed = 'no' })", f(IM.set, tmp, { dimmed = "no" }), E.err(IMS .. "dimmed must be a boolean, got 'no'"))
+            icase("set-src", "ui.image.set(i, { image = { icon = 'star' } })", f(IM.set, tmp, { image = { icon = "star" } }), E.err(IMS .. "unknown icon 'star'"))
+            icase("set-str", "ui.image.set(i, 'x')", f(IM.set, tmp, "x"), E.err(IMS .. "changes must be a table { image = <source> | false, dimmed = <boolean> }, got 'x'"))
+            icase("set-args", "ui.image.set(i, {}, 1)", f(IM.set, tmp, {}, 1), E.err(IMS .. "expected 2 arguments (handle, changes), got 3"))
+            icase("set-forged", "ui.image.set({ id = 'ic.tmp' }, ...) [forged]", f(IM.set, { id = "ic.tmp" }, { dimmed = true }), E.err(IMS .. "not an image handle (use the handle that image.create returned)"))
+            icase("set-text", "ui.image.set(<text handle>, ...)", f(IM.set, IC.ver, { dimmed = true }), E.err(IMS .. "not an image handle ('ic.ver' is a text element)"))
+            icase("set-ok", "ui.image.set(i, { image = false, dimmed = true }) then { image = { game = <path> } } [control]", function()
+                IM.set(tmp, { image = false, dimmed = true }) IM.set(tmp, { image = { game = GAME[4][2] }, dimmed = false })
+            end, E.none)
+            icase("setvis-num", "ui.image.setVisible(i, 1)", f(IM.setVisible, tmp, 1), E.err(UIP .. ".image.setVisible: visible must be a boolean, got number"))
+            icase("setvis-ok", "ui.image.setVisible(i, false) then true [control]", function() IM.setVisible(tmp, false) IM.setVisible(tmp, true) end, E.none)
+            icase("isshown-text", "ui.image.isShown(<text handle>)", f(IM.isShown, IC.ver), E.err(UIP .. ".image.isShown: not an image handle ('ic.ver' is a text element)"))
+            icase("isshown-ok", "ui.image.isShown(i) [control: on the open window]", f(IM.isShown, tmp), E.ret("true", function(r) return r[1] == true end))
+            icase("remove-forged", "ui.image.remove({ id = 'ic.tmp' }) [forged]", f(IM.remove, { id = "ic.tmp" }), E.err(UIP .. ".image.remove: not an image handle"))
+            icase("remove-ok", "ui.image.remove(i) [control]", f(IM.remove, tmp), E.none)
+            icase("remove-again", "ui.image.remove(i) [again]", f(IM.remove, tmp), E.none)
+            icase("removed", "ui.image.isShown(<removed image>)", f(IM.isShown, tmp), E.err(UIP .. ".image: handle 'ic.tmp' was removed"))
+            -- tooltips (setTooltip on text, button, image)
+            local TT = UIP .. ".text.setTooltip: "
+            icase("tip-empty", "ui.text.setTooltip(t, '')", f(T.setTooltip, IC.ver, ""), E.err(TT .. "tooltip must be a string of 1 to 512 bytes, got 0 bytes"))
+            icase("tip-513", "ui.text.setTooltip(t, <513 bytes>)", f(T.setTooltip, IC.ver, string.rep("x", 513)), E.err(TT .. "tooltip must be a string of 1 to 512 bytes, got 513 bytes"))
+            icase("tip-noen", "ui.text.setTooltip(t, { de = 'x' })", f(T.setTooltip, IC.ver, { de = "x" }), E.err(TT .. "tooltip needs an en string (the fallback)"))
+            icase("tip-ctrl", "ui.text.setTooltip(t, 'a\\1b')", f(T.setTooltip, IC.ver, "a\1b"), E.err(TT .. "tooltip has the control byte 0x01 at byte 2"))
+            icase("tip-num", "ui.text.setTooltip(t, 5)", f(T.setTooltip, IC.ver, 5), E.err(TT .. "tooltip must be a string or a table of strings by language, like { en = \"...\" }, got 5"))
+            icase("tip-tag", "ui.text.setTooltip(t, { en = 'x', zh1 = 'y' })", f(T.setTooltip, IC.ver, { en = "x", zh1 = "y" }), E.err(TT .. "tooltip key 'zh1' is not a language tag"))
+            local many = { en = "x" }
+            for i = 1, 16 do many["l" .. string.char(96 + i)] = "y" end
+            icase("tip-17", "ui.text.setTooltip(t, <17 languages>)", f(T.setTooltip, IC.ver, many), E.err(TT .. "tooltip has 17 languages, at most 16"))
+            icase("tip-args", "ui.text.setTooltip(t, 'a', 3)", f(T.setTooltip, IC.ver, "a", 3), E.err(TT .. "expected 2 arguments (handle, tooltip), got 3"))
+            icase("tip-forged", "ui.text.setTooltip({ id = 'x' }, 'a')", f(T.setTooltip, { id = "x" }, "a"), E.err(TT .. "not an element handle"))
+            icase("btip-text", "ui.button.setTooltip(<text handle>, 'a')", f(B.setTooltip, IC.ver, "a"), E.err(UIP .. ".button.setTooltip: not a button handle ('ic.ver' is a text element)"))
+            icase("itip-button", "ui.image.setTooltip(<button handle>, 'a')", f(IM.setTooltip, IC.cfg, "a"), E.err(UIP .. ".image.setTooltip: not an image handle ('ic.cfg' is a button)"))
+            icase("tip-newline-ok", "ui.image.setTooltip(on, 'ON\\nCHECKED') then 'ON' [control: a newline is allowed]", function() IM.setTooltip(IC.on, "ON\nCHECKED") IM.setTooltip(IC.on, "ON") end, E.none)
+            -- tooltips need a cursor host
+            local ht = T.create{ id = "ic.ht", text = "hud" }
+            icase("tip-hud", "ui.text.setTooltip(<HUD text>, 'x')", f(T.setTooltip, ht, "x"), E.err(UIP .. ".text: " .. TH))
+            T.remove(ht)
+            local tt = T.create{ id = "ic.tt", text = "t", place = { screen = IC.W, corner = "bottom-left" } }
+            T.setTooltip(tt, "x")
+            icase("tip-place-hud", "ui.place(<text with a tooltip>, { host = 'hud', corner })", f(UI.place, tt, { host = "hud", corner = "top-left" }), E.err(UIP .. ".text: " .. TH))
+            icase("tip-clear-ok", "ui.text.setTooltip(t, nil) then place on the HUD [control]", function() T.setTooltip(tt, nil) UI.place(tt, { host = "hud", corner = "top-left" }) T.remove(tt) end, E.none)
+            -- button icons, dimmed, tooltip
+            icase("btn-icon-star", "ui.button.create{ icon = { icon = 'star' } }", btn({ icon = { icon = "star" } }), E.err(BC .. "unknown icon 'star'"))
+            icase("btn-icon-path", "ui.button.create{ icon = { game = '/Game/Foo.Foo' } }", btn({ icon = { game = "/Game/Foo.Foo" } }), E.err(BC .. "game texture '/Game/Foo.Foo' is not allow-listed"))
+            icase("btn-iconsize-600", "ui.button.create{ icon, iconSize = 600 }", btn({ icon = { icon = "gear" }, iconSize = 600 }), E.err(BC .. "iconSize must be a number from 4 to 512"))
+            icase("btn-iconsize-noicon", "ui.button.create{ iconSize = 28 } [no icon]", btn({ iconSize = 28 }), E.err(BC .. "iconSize needs an icon"))
+            icase("btn-dimmed", "ui.button.create{ dimmed = 1 }", btn({ dimmed = 1 }), E.err(BC .. "dimmed must be a boolean or nil, got 1"))
+            icase("btn-tip-empty", "ui.button.create{ tooltip = '' }", btn({ tooltip = "" }), E.err(BC .. "tooltip must be a string of 1 to 512 bytes, got 0 bytes"))
+            icase("btn-size", "ui.button.create{ size = 28 } [no size on buttons]", btn({ size = 28 }), E.err(BC .. "unknown key 'size' (valid: dimmed, enabled, icon, iconSize, id, label, onClick, place, style, tooltip)"))
+            icase("btn-icon-ok", "ui.button.create{ icon = { game = <reset-icon> }, label = 'X' } then remove [control]", function()
+                local b = B.create{ id = "ic.okb", label = "X", place = rp, icon = { game = GAME[4][2] }, onClick = nop }
+                B.remove(b)
+                return b.id
+            end, E.ret("'ic.okb'", function(r) return r[1] == "ic.okb" end))
+            check(true, "ICCASES ran %d cases", IC.cases)
+        end)
+
+        -- ---- every new function off the game thread
+        step("ic: off-thread", function()
+            local done = false
+            LoopAsync(10, function()
+                local ok, err = pcall(function()
+                    local function off(key, name, fn, ...)
+                        local a = table.pack(...)
+                        IC.cases = IC.cases + 1
+                        case("menu3.ic-off-" .. key, "ui." .. name .. "(...) [off thread]", function() return fn(table.unpack(a, 1, a.n)) end, E.err(UIP .. "." .. name .. " called off the game thread"))
+                    end
+                    off("image-create", "image.create", UI.image.create, { id = "off" })
+                    off("image-set", "image.set", UI.image.set, {}, { dimmed = true })
+                    off("image-setvis", "image.setVisible", UI.image.setVisible, {}, true)
+                    off("image-remove", "image.remove", UI.image.remove, {})
+                    off("image-isshown", "image.isShown", UI.image.isShown, {})
+                    off("image-settip", "image.setTooltip", UI.image.setTooltip, {}, "x")
+                    off("text-settip", "text.setTooltip", UI.text.setTooltip, {}, "x")
+                    off("button-settip", "button.setTooltip", UI.button.setTooltip, {}, "x")
+                end)
+                if not ok then check(false, "CASE menu3.ic-off block threw: %s", firstLine(err)) end
+                done = true
+                return true
+            end)
+            return function() return done end, 10, "ic off-thread cases"
+        end)
+        step("ic: features", function()
+            check(core.has("ui.image.create") and core.has("ui.overflow") and core.has("ui.button.icon") and core.has("ui.image")
+                and core.has("ui.text.setTooltip") and core.has("ui.button.setTooltip"), "ICHAS core.has: ui.image.create, ui.overflow, ui.button.icon, ui.image, ui.text.setTooltip, ui.button.setTooltip")
+            return msAfter(1), 3
+        end)
+
+        -- ---- the row read back from the live widgets
+        step("ic: read", function()
+            local sc = scale(menu())
+            local onW, nameW, verW, gapW, cfgW = cell(1, "ic.on"), cell(1, "ic.name"), cell(1, "ic.ver"), cell(1, "ic.gap"), cell(1, "ic.cfg")
+            if not check(onW and nameW and verW and gapW and cfgW, "ICROW the five cells of row 1 are in its HBox, in the list on window IC") then return end
+            -- IMG: texture and tint of every image, and the gear's icon
+            local function img(id, w, wantTex, wantTint)
+                local i = prop(w, "Img")
+                local tex, c = resName(i), try(function() return i.ColorAndOpacity end)
+                check(tex == wantTex and near4(c, wantTint), "IMG %s tex=%s tint=%s", id, tex, col4(c))
+            end
+            img("ic.on", onW, "T_CheckboxOn", { 1, 1, 1, 1 })
+            img("ic.gap", gapW, "none", { 1, 1, 1, 0 })
+            for _, g in ipairs(GAME) do img("ic." .. g[1], cell(2, "ic." .. g[1]), g[3], { 1, 1, 1, 1 }) end
+            local icon = prop(cfgW, "Icon")
+            local ic = try(function() return icon.ColorAndOpacity end)
+            check(resName(icon) == "T_Gear" and near4(ic, DIM), "IMG ic.cfg icon tex=%s tint=%s (dimmed)", resName(icon), col4(ic))
+            local hv = try(function() return cfgW.HoverTextColor end)
+            check(near4(hv, DIM), "IMG ic.cfg hover colour %s (dimmed: hover doesn't brighten)", col4(hv))
+            -- MEASURE: the name is cut inside its column; the gear's box is 28x28
+            pcall(function() nameW.Text:ForceLayoutPrepass() end)
+            local nr, vr = absR(nameW), absR(verW)
+            local allotted = nr and (nr.r - nr.l) / sc or -1
+            local desired = try(function() return nameW.Text:GetDesiredSize().X end) or -1
+            check(desired > allotted + 1 and allotted > 0, "MEASURE name allotted=%.1f desired=%.1f (cut)", allotted, desired)
+            check(nr and vr and nr.r <= vr.l + 0.5, "MEASURE name right=%.1f verLeft=%.1f (desktop px; no overlap)", nr and nr.r or -1, vr and vr.l or -1)
+            local pol = try(function() return nameW.Text.TextOverflowPolicy end)
+            local clip = try(function() return nameW.Text.Clipping end)
+            local vpol, vclip = try(function() return verW.Text.TextOverflowPolicy end), try(function() return verW.Text.Clipping end)
+            check(tonumber(pol) == 1 and tonumber(clip) == 1 and tonumber(vpol) == 0 and tonumber(vclip) == 0, "MEASURE overflow name policy=%s clipping=%s; version (none) policy=%s clipping=%s", tostring(pol), tostring(clip), tostring(vpol), tostring(vclip))
+            local gr, br = absR(cfgW), absR(onW)
+            local gw, gh = gr and (gr.r - gr.l) / sc or -1, gr and (gr.b - gr.t) / sc or -1
+            check(math.abs(gw - 28) <= 1 and math.abs(gh - 28) <= 1, "MEASURE gear box %.1fx%.1f units (28x28)", gw, gh)
+            local bw, bh = br and (br.r - br.l) / sc or -1, br and (br.b - br.t) / sc or -1
+            check(math.abs(bw - 28) <= 1 and math.abs(bh - 28) <= 1 and gr and br and math.abs((gr.b - gr.t) - (br.b - br.t)) <= 1, "MEASURE checkbox image %.1fx%.1f units, the gear's height", bw, bh)
+            local spR = absR(gapW)
+            check(spR and math.abs((spR.r - spR.l) / sc - 28) <= 1, "MEASURE spacer %.1f units wide (28)", spR and (spR.r - spR.l) / sc or -1)
+            -- TIP: tooltips on the inner widgets, tags unchanged
+            local tagOf = UI.text.tagOf
+            check(tip(prop(cfgW, "Btn")) == "CONFIGURE" and try(function() return cfgW.CoreTag:ToString() end) == tagOf("ic.cfg"), "TIP ic.cfg Btn tooltip=%s, CoreTag %s", tostring(tip(prop(cfgW, "Btn"))), tostring(try(function() return cfgW.CoreTag:ToString() end)))
+            check(tip(prop(onW, "Img")) == "ON" and visOf(prop(onW, "Img")) == 0 and try(function() return onW.CoreTag:ToString() end) == tagOf("ic.on"), "TIP ic.on Img tooltip=%s, Img visibility %s (Visible), CoreTag unchanged", tostring(tip(prop(onW, "Img"))), tostring(visOf(prop(onW, "Img"))))
+            check(tip(prop(verW, "Text")) == "VERSION" and tip(verW) == tagOf("ic.ver") and visOf(prop(verW, "Text")) == 0 and visOf(prop(verW, "Background")) == 4,
+                "TIP ic.ver Text tooltip=%s, root ToolTipText=%s (the tag), Text %s, Background %s", tostring(tip(prop(verW, "Text"))), tostring(tip(verW)), tostring(visOf(prop(verW, "Text"))), tostring(visOf(prop(verW, "Background"))))
+            check(tip(nameW) == tagOf("ic.name") and (tip(prop(nameW, "Text")) or "") == "" and visOf(prop(nameW, "Text")) == 4 and visOf(prop(nameW, "Background")) == 3,
+                "TIP ic.name no tooltip: Text %s, Background %s (hit-test invisible), root ToolTipText the tag", tostring(visOf(prop(nameW, "Text"))), tostring(visOf(prop(nameW, "Background"))))
+            check(visOf(prop(gapW, "Img")) == 3, "TIP ic.gap no tooltip: Img visibility %s (HitTestInvisible)", tostring(visOf(prop(gapW, "Img"))))
+            local dw = cell(3, "ic.dis")
+            check(tip(prop(dw, "Btn")) == "DISABLED TIP" and resName(prop(dw, "Icon")) == "T_Restart" and math.abs((try(function() return dw:GetRenderOpacity() end) or 0) - 0.45) < 0.01,
+                "TIP ic.dis disabled button: tooltip %s, icon %s, opacity %.2f", tostring(tip(prop(dw, "Btn"))), resName(prop(dw, "Icon")), try(function() return dw:GetRenderOpacity() end) or -1)
+        end)
+        moveTo("ic gear", widgetPoint(function() return cell(1, "ic.cfg") end))
+        step("ic: tooltip wait", function() return msAfter(1.5), 4 end)
+        shot("ic-tooltip")
+        moveTo("ic disabled", widgetPoint(function() return cell(3, "ic.dis") end))
+        step("ic: disabled tooltip wait", function() return msAfter(1.5), 4 end)
+        shot("ic-tooltip-disabled")
+        step("ic: disabled tooltip", function() say("ICDISABLED hovered the disabled button with a tooltip; see sp-ic-tooltip-disabled.png (recorded, not judged)") end)
+        moveTo("ic away", neutral)
+        shot("ic-row")
+        clickAt("ic gear", widgetPoint(function() return cell(1, "ic.cfg") end))
+        step("ic: gear clicked", function()
+            check(IC.hits == 1, "ICCLICK the dimmed gear's real click ran onClick exactly once (%d)", IC.hits)
+            check(UI.screen.isOpen(IC.W), "ICCLICK window IC still open")
+            UI.screen.close(IC.W)
+            return msAfter(1), 3
+        end)
+        step("ic: closed", function()
+            check(not UI.screen.isOpen(IC.W) and #liveAll(SCREEN_SHORT) == 0, "ICCLOSE window IC closed, no screen widget left")
+        end)
+    end
+    iconSteps()
 end
 
 -- ---------------------------------------------------------------- runner (game thread, every 250 ms)

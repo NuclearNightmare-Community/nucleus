@@ -19,7 +19,9 @@ local uiOk, uiErr = pcall(function()
              panel = require(BASE .. ".ui.panel"), button = require(BASE .. ".ui.button"),
              -- story 21 (Mod Manager story 2): the title-screen menu, its entry, windows, lists and rows
              menu = require(BASE .. ".ui.menu"), entry = require(BASE .. ".ui.entry"), screen = require(BASE .. ".ui.screen"),
-             list = require(BASE .. ".ui.list"), row = require(BASE .. ".ui.row") }
+             list = require(BASE .. ".ui.list"), row = require(BASE .. ".ui.row"),
+             -- story 24 (core 0.8.0): images and icons
+             image = require(BASE .. ".ui.image") }
 end)
 
 local NAME, LOWER = V.name, V.name:lower()

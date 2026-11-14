@@ -6,7 +6,7 @@
 -- Run from the repo root with any standalone Lua 5.3 or 5.4:  lua test/unit/menu_test.lua  (here: MiKTeX's texlua)
 local ROOT = (arg and arg[0] or ""):match("^(.*)[/\\]test[/\\]unit[/\\][^/\\]+$") or "."
 
-package.preload["nucleus.version"] = function() return { name = "Nucleus", version = "0.7.0", floor = "0.1.0" } end
+package.preload["nucleus.version"] = function() return { name = "Nucleus", version = "0.8.0", floor = "0.1.0" } end
 table.insert(package.searchers, 2, function(name)
     local rest = name:match("^nucleus%.(.+)$")
     if not rest then return nil end
