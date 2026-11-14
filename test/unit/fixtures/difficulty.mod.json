@@ -1,11 +1,11 @@
 {
-  "id": "difficulty",
+  "id": "nuclearnightmare-community.difficulty",
   "name": "Difficulty",
   "version": "0.1.0",
   "scope": "all",
   "game": { "version": "V8.2.3", "build": "26601774" },
   "ue4ss": "v3.0.1-1181-g83330635",
-  "dependsOn": [ { "id": "nucleus", "version": "^0.4.0" } ],
+  "dependsOn": [ { "id": "nuclearnightmare-community.nucleus", "version": "^0.4.0" } ],
   "settings": {
     "enemyDamage": { "type": "number", "min": 0, "max": 200, "step": 1, "default": null, "label": "Enemy Damage", "scope": "all", "changeable": "menu", "source": "presets" },
     "spread": { "type": "number", "min": 0, "max": 50, "step": 1, "default": null, "label": "Damage Spread", "scope": "host", "changeable": "menu", "source": "presets" },

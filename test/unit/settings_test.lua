@@ -46,14 +46,14 @@ end
 local function file(folder, name) return MODS .. "\\" .. folder .. "\\" .. (name or "settings.json") end
 
 local CLOCK = [[{
-  "id": "clock", "name": "Clock", "version": "0.2.0", "scope": "client",
+  "id": "nuclearnightmare-community.clock", "name": "Clock", "version": "0.2.0", "scope": "client",
   "settings": {
     "updateEvery": { "type": "int", "default": 1, "min": 1, "max": 60,
                      "label": "Update every N game minutes", "changeable": "anytime" }
   }
 }]]
 local WAYPOINTS = [[{
-  "id": "waypoints", "name": "Waypoints",
+  "id": "nuclearnightmare-community.waypoints", "name": "Waypoints",
   "settings": {
     "onRevive": { "type": "enum", "values": [ "restore", "clear" ], "default": "restore",
                   "label": "After a revive, your map waypoints", "changeable": "anytime" }
@@ -78,7 +78,7 @@ modDir("Difficulty", assert(read(ROOT .. "/test/unit/fixtures/difficulty.mod.jso
 modDir("Plain", '{ "id": "plain", "name": "Plain" }')
 modDir("Broken", '{ "id": "broken", ')
 modDir("NoManifest", nil)
-modDir("Nucleus", '{ "id": "nucleus", "name": "Nucleus" }')
+modDir("Nucleus", '{ "id": "nuclearnightmare-community.nucleus", "name": "Nucleus" }')
 
 -- ---------------------------------------------------------------- schema
 local schema = require("nucleus.settings.schema")
@@ -181,7 +181,7 @@ local function entryOf(d, key) for _, e in ipairs(d.settings) do if e.key == key
 do -- Fresh install: Clock with no settings.json -> default 1, one info line (spec revision: info, not WARN)
     local before = #LINES
     local d = decoded(desc("Clock"))
-    ok(d and d.folder == "Clock" and d.id == "clock" and d.name == "Clock", "describe: id, name, folder")
+    ok(d and d.folder == "Clock" and d.id == "nuclearnightmare-community.clock" and d.name == "Clock", "describe: id, name, folder")
     eq(entryOf(d, "updateEvery").value, 1, "fresh: updateEvery = 1")
     eq(linesMatching("^%[Nucleus%] settings: Clock: no settings%.json; using the declared defaults$"), 1, "fresh: one info line")
     eq(linesMatching("WARN"), 0, "fresh: no WARN")

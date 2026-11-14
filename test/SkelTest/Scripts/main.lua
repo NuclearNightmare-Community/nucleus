@@ -1743,6 +1743,26 @@ local function versionCases(phase)
     case(P .. "ver-has-nil", "core.has(nil)", has(nil), isFalse)
     case(P .. "ver-has-none", "core.has()", has(), isFalse)
     case(P .. "ver-has-table", "core.has({})", has({}), isFalse)
+    -- Distribution story 13: nucleus.modid, a pure module dependents load with require (the rule and its messages are
+    -- checked offline by test/unit/modid_test.lua on the shared cases; here: it loads in a dependent's state and never
+    -- raises on bad input).
+    do
+        local okM, MID = pcall(require, CORE:lower() .. ".modid")
+        check(okM and type(MID) == "table" and type(MID.normalize) == "function", "CASE %s require('%s.modid') -> %s (expected the module)",
+            P .. "modid-require", CORE:lower(), okM and type(MID) or ("error: " .. firstLine(MID)))
+        if okM and type(MID) == "table" and type(MID.normalize) == "function" then
+            local function norm(...) local a = table.pack(...) return function() return MID.normalize(table.unpack(a, 1, a.n)) end end
+            local function refused(msg) return E.ret("nil, '" .. msg .. "'", function(r) return r[1] == nil and r[2] == msg end) end
+            case(P .. "modid-nil", "modid.normalize(nil)", norm(nil), refused(MID.ERR.type))
+            case(P .. "modid-none", "modid.normalize()", norm(), refused(MID.ERR.type))
+            case(P .. "modid-num", "modid.normalize(5)", norm(5), refused(MID.ERR.type))
+            case(P .. "modid-table", "modid.normalize({})", norm({}), refused(MID.ERR.type))
+            case(P .. "modid-10k", "modid.normalize(<10 kB>)", norm(string.rep("a", 10240)), refused(MID.ERR.long))
+            case(P .. "modid-prefix", "modid.normalize('github.com/')", norm("github.com/"), refused(MID.ERR.bare))
+            case(P .. "modid-ok", "modid.normalize('GitHub.com/NuclearNightmare-Community.Nucleus')", norm("GitHub.com/NuclearNightmare-Community.Nucleus"),
+                E.ret("'nuclearnightmare-community.nucleus'", function(r) return r[1] == "nuclearnightmare-community.nucleus" end))
+        end
+    end
     case(P .. "ver-has-bool", "core.has(true)", has(true), isFalse)
     case(P .. "ver-has-skip", "core.has('version') [data, not a feature]", has("version"), isFalse)
 

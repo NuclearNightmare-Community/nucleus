@@ -33,36 +33,12 @@ local function raises(fn, text, name)
     ok(not okC and tostring(err):find(text, 1, true) ~= nil, name, okC and "did not raise" or tostring(err))
 end
 
--- ---------------------------------------------------------------- the normalizer (mod-ids.md cases, + legacy bare)
+-- ---------------------------------------------------------------- the net id (the normalizer itself: modid_test.lua, shared cases)
 local ID = require("nucleus.modid")
 do
     local function norm(id, want, name) local okP, got, err = pcall(ID.normalize, id) ok(okP and got == want, "normalize: " .. name, tostring(got) .. " / " .. tostring(err)) end
-    local function refused(id, part, name)
-        local okP, got, err = pcall(ID.normalize, id)
-        ok(okP and got == nil and type(err) == "string" and (not part or err:find(part, 1, true) ~= nil), "normalize refused: " .. name, tostring(got) .. " / " .. tostring(err))
-    end
-    norm("nuclearnightmare-community.waypoints", "nuclearnightmare-community.waypoints", "<owner>.<mod>")
     norm("github.com/NuclearNightmare-Community.waypoints", "nuclearnightmare-community.waypoints", "github.com/<owner>.<mod>")
-    norm("NuclearNightmare-Community.Nucleus", "nuclearnightmare-community.nucleus", "lowercased")
-    norm("GitHub.com/NuclearNightmare-Community.nucleus", "nuclearnightmare-community.nucleus", "the prefix in any case")
-    norm("nuclearnightmare-community.base-installer", "nuclearnightmare-community.base-installer", "a hyphen in the mod part")
-    norm("a.b", "a.b", "the shortest id")
-    refused("gitlab.com/alice.waypoints", "another host", "another host")
-    refused("gitlab.com/group/sub.waypoints", "another host", "a subgroup on another host")
-    refused("www.github.com/NuclearNightmare-Community.waypoints", "accepted forms", "www.github.com/")
-    refused("http://github.com/NuclearNightmare-Community.waypoints", "accepted forms", "http://")
-    refused("https://github.com/NuclearNightmare-Community.waypoints", "accepted forms", "https://")
-    refused("nucleus", "no namespace", "a bare id")
-    refused("other.nucleus.x", "not an id", "a dot in a GitHub owner")
-    refused("owner.mod_name", "not an id", "an underscore in the mod part")
-    refused("owner.", "not an id", "an empty mod part")
-    refused(".mod", "not an id", "an empty owner")
-    refused(" owner.mod", "not an id", "a leading space")
-    refused("", "empty", "empty")
-    refused(string.rep("a", 100) .. "." .. string.rep("b", 100), "at most 200", "201 characters")
-    norm(string.rep("a", 100) .. "." .. string.rep("b", 99), string.rep("a", 100) .. "." .. string.rep("b", 99), "200 characters")
-    for _, x in ipairs({ 1, true, {}, false }) do refused(x, "must be a string", "a " .. type(x)) end
-    do local okP, got = pcall(ID.normalize) ok(okP and got == nil, "normalize(nil): refused, never raises") end
+    ok(ID.normalize("nucleus") == nil, "normalize refused: a bare id")
     -- the net id: legacy bare ids too (spikes, test dependents), lowercased
     eq(ID.netId("skeltest"), "skeltest", "netId: a legacy bare id")
     eq(ID.netId("SkelTest"), "skeltest", "netId: a bare id is lowercased")

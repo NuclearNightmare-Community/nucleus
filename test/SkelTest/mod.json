@@ -3,7 +3,7 @@
   "name": "SkelTest",
   "version": "0.1.0",
   "scope": "client",
-  "dependsOn": [ { "id": "nucleus", "version": ">=0.9.0" } ],
+  "dependsOn": [ { "id": "nuclearnightmare-community.nucleus", "version": ">=0.9.0" } ],
   "settings": {
     "test.flag":   { "type": "bool", "default": false, "label": "A flag", "help": "Test only: on or off.", "changeable": "anytime" },
     "test.count":  { "type": "int", "default": 3, "min": 1, "max": 60, "label": "A count", "changeable": "anytime", "scope": "client" },

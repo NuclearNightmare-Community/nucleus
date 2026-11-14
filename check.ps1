@@ -241,7 +241,8 @@ foreach ($p in 'menu1', 'match1') {
                     'ver-core-old', 'ver-core-old-caret', 'ver-floor', 'ver-features-declared', 'ver-features-copy',
                     'ver-has-known-ui\.text', 'ver-has-known-ui\.panel', 'ver-has-known-ui\.button', 'ver-has-known-ui\.journal',
                     'ver-has-known-call', 'ver-has-known-ref', 'ver-has-unknown', 'ver-has-fn', 'ver-has-num', 'ver-has-empty', 'ver-has-300',
-                    'ver-has-nil', 'ver-has-none', 'ver-has-table', 'ver-has-bool', 'ver-has-skip', 'ver-deprecated-1', 'ver-deprecated-2') {
+                    'ver-has-nil', 'ver-has-none', 'ver-has-table', 'ver-has-bool', 'ver-has-skip', 'ver-deprecated-1', 'ver-deprecated-2',
+                    'modid-require', 'modid-nil', 'modid-none', 'modid-num', 'modid-table', 'modid-10k', 'modid-prefix', 'modid-ok') {
         $badInput += "\[$T\] OK CASE $p\.$id "
     }
 }

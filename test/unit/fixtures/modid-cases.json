@@ -1,0 +1,230 @@
+{
+  "_comment": "Shared cases for the mod id normalizer (_bmad-output/specs/spec-distribution-v0/mod-ids.md, Normalizer). Canonical: tools/release/tests/modid-cases.json; byte-identical copy: mods/Nucleus/test/unit/fixtures/modid-cases.json. A case has id (accepted, normalized) or error (refused, exact message).",
+  "max": 200,
+  "cases": [
+    {
+      "name": "stored form",
+      "input": "nuclearnightmare-community.waypoints",
+      "id": "nuclearnightmare-community.waypoints"
+    },
+    {
+      "name": "GitHub long form, mixed case",
+      "input": "GitHub.com/NuclearNightmare-Community.Waypoints",
+      "id": "nuclearnightmare-community.waypoints"
+    },
+    {
+      "name": "github.com/ long form",
+      "input": "github.com/NuclearNightmare-Community.waypoints",
+      "id": "nuclearnightmare-community.waypoints"
+    },
+    {
+      "name": "prefix in upper case",
+      "input": "GITHUB.COM/A.B",
+      "id": "a.b"
+    },
+    {
+      "name": "mixed case",
+      "input": "NuclearNightmare-Community.Nucleus",
+      "id": "nuclearnightmare-community.nucleus"
+    },
+    {
+      "name": "hyphen in the mod part",
+      "input": "nuclearnightmare-community.base-installer",
+      "id": "nuclearnightmare-community.base-installer"
+    },
+    {
+      "name": "digits",
+      "input": "0wner-1.m0d-2",
+      "id": "0wner-1.m0d-2"
+    },
+    {
+      "name": "shortest id",
+      "input": "a.b",
+      "id": "a.b"
+    },
+    {
+      "name": "200 characters",
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "name": "200 characters with the prefix",
+      "input": "github.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "name": "201 characters",
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "error": "an id must be at most 200 characters"
+    },
+    {
+      "name": "201 characters with the prefix",
+      "input": "github.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "error": "an id must be at most 200 characters"
+    },
+    {
+      "name": "non-ASCII counted in UTF-8 bytes (150 characters, 300 bytes)",
+      "input": "\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9",
+      "error": "an id must be at most 200 characters"
+    },
+    {
+      "name": "a number",
+      "input": 5,
+      "error": "an id must be a string"
+    },
+    {
+      "name": "true",
+      "input": true,
+      "error": "an id must be a string"
+    },
+    {
+      "name": "null",
+      "input": null,
+      "error": "an id must be a string"
+    },
+    {
+      "name": "an object",
+      "input": {
+        "id": "a.b"
+      },
+      "error": "an id must be a string"
+    },
+    {
+      "name": "an array",
+      "input": [
+        "a.b"
+      ],
+      "error": "an id must be a string"
+    },
+    {
+      "name": "empty",
+      "input": "",
+      "error": "an id must not be empty"
+    },
+    {
+      "name": "https://",
+      "input": "https://github.com/a.b",
+      "error": "an id is not a URL; use <owner>.<mod> or github.com/<owner>.<mod>"
+    },
+    {
+      "name": "http://",
+      "input": "http://github.com/NuclearNightmare-Community.waypoints",
+      "error": "an id is not a URL; use <owner>.<mod> or github.com/<owner>.<mod>"
+    },
+    {
+      "name": "github.com/ then ://",
+      "input": "github.com/https://a.b",
+      "error": "an id is not a URL; use <owner>.<mod> or github.com/<owner>.<mod>"
+    },
+    {
+      "name": "www.github.com/",
+      "input": "www.github.com/a.b",
+      "error": "an id is not a URL; use <owner>.<mod> or github.com/<owner>.<mod>"
+    },
+    {
+      "name": "WWW. in upper case",
+      "input": "WWW.GitHub.com/a.b",
+      "error": "an id is not a URL; use <owner>.<mod> or github.com/<owner>.<mod>"
+    },
+    {
+      "name": "www. without a slash",
+      "input": "www.example",
+      "error": "an id is not a URL; use <owner>.<mod> or github.com/<owner>.<mod>"
+    },
+    {
+      "name": "another host",
+      "input": "gitlab.com/a.b",
+      "error": "ids on hosts other than GitHub are not supported yet; use <owner>.<mod> or github.com/<owner>.<mod>"
+    },
+    {
+      "name": "another host with a subgroup",
+      "input": "gitlab.com/group/sub.waypoints",
+      "error": "ids on hosts other than GitHub are not supported yet; use <owner>.<mod> or github.com/<owner>.<mod>"
+    },
+    {
+      "name": "github.com/ twice",
+      "input": "github.com/github.com/a.b",
+      "error": "ids on hosts other than GitHub are not supported yet; use <owner>.<mod> or github.com/<owner>.<mod>"
+    },
+    {
+      "name": "bare id",
+      "input": "nucleus",
+      "error": "an id needs a namespace; use <owner>.<mod> or github.com/<owner>.<mod>"
+    },
+    {
+      "name": "bare id in mixed case",
+      "input": "Nucleus",
+      "error": "an id needs a namespace; use <owner>.<mod> or github.com/<owner>.<mod>"
+    },
+    {
+      "name": "prefix alone",
+      "input": "github.com/",
+      "error": "an id needs a namespace; use <owner>.<mod> or github.com/<owner>.<mod>"
+    },
+    {
+      "name": "bare id after the prefix",
+      "input": "github.com/nucleus",
+      "error": "an id needs a namespace; use <owner>.<mod> or github.com/<owner>.<mod>"
+    },
+    {
+      "name": "slash without a dot",
+      "input": "owner/mod",
+      "error": "an id needs a namespace; use <owner>.<mod> or github.com/<owner>.<mod>"
+    },
+    {
+      "name": "dot inside the owner",
+      "input": "other.nucleus.x",
+      "error": "an id must be <owner>.<mod> with only a-z, 0-9 and - in each part; use <owner>.<mod> or github.com/<owner>.<mod>"
+    },
+    {
+      "name": "slash inside the owner",
+      "input": "owner/sub.mod",
+      "error": "an id must be <owner>.<mod> with only a-z, 0-9 and - in each part; use <owner>.<mod> or github.com/<owner>.<mod>"
+    },
+    {
+      "name": "underscore",
+      "input": "owner.mod_name",
+      "error": "an id must be <owner>.<mod> with only a-z, 0-9 and - in each part; use <owner>.<mod> or github.com/<owner>.<mod>"
+    },
+    {
+      "name": "empty mod part",
+      "input": "owner.",
+      "error": "an id must be <owner>.<mod> with only a-z, 0-9 and - in each part; use <owner>.<mod> or github.com/<owner>.<mod>"
+    },
+    {
+      "name": "empty owner",
+      "input": ".mod",
+      "error": "an id must be <owner>.<mod> with only a-z, 0-9 and - in each part; use <owner>.<mod> or github.com/<owner>.<mod>"
+    },
+    {
+      "name": "leading space",
+      "input": " owner.mod",
+      "error": "an id must be <owner>.<mod> with only a-z, 0-9 and - in each part; use <owner>.<mod> or github.com/<owner>.<mod>"
+    },
+    {
+      "name": "trailing space",
+      "input": "owner.mod ",
+      "error": "an id must be <owner>.<mod> with only a-z, 0-9 and - in each part; use <owner>.<mod> or github.com/<owner>.<mod>"
+    },
+    {
+      "name": "trailing newline",
+      "input": "owner.mod\n",
+      "error": "an id must be <owner>.<mod> with only a-z, 0-9 and - in each part; use <owner>.<mod> or github.com/<owner>.<mod>"
+    },
+    {
+      "name": "NUL inside",
+      "input": "owner.m\u0000od",
+      "error": "an id must be <owner>.<mod> with only a-z, 0-9 and - in each part; use <owner>.<mod> or github.com/<owner>.<mod>"
+    },
+    {
+      "name": "Kelvin sign is not K",
+      "input": "owner.\u212aey",
+      "error": "an id must be <owner>.<mod> with only a-z, 0-9 and - in each part; use <owner>.<mod> or github.com/<owner>.<mod>"
+    },
+    {
+      "name": "non-ASCII letter",
+      "input": "\u00c4bc.def",
+      "error": "an id must be <owner>.<mod> with only a-z, 0-9 and - in each part; use <owner>.<mod> or github.com/<owner>.<mod>"
+    }
+  ]
+}
