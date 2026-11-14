@@ -102,8 +102,9 @@ ok(S.parse("1.2.3").major == 1 and S.parse(">=1.2.3") == nil and S.parse(5) == n
 local F = require("nucleus.features")
 local declared = F.declared()
 local want = { "call", "clock", "deref", "free", "map.setup",
-    -- core story 22 (0.11.0): core.net, a module, its functions hand-named
-    "net", "net.publish", "net.read", "net.role", "net.unwatch", "net.watch",
+    -- core story 22 (0.11.0): core.net, a module, its functions hand-named; core story 23 (0.12.0): presence, netCompat
+    "net", "net.compatible", "net.presence", "net.publish", "net.read", "net.role", "net.unwatch", "net.versionsCompatible", "net.watch",
+    "net.watchPresence",
     "ref", "settings", "ui", "ui.button", "ui.button.icon", "ui.button.setTooltip",
     -- Mod Manager story 4 (0.10.0): the controls, every function hand-named
     "ui.checkbox", "ui.checkbox.create", "ui.checkbox.get", "ui.checkbox.isShown", "ui.checkbox.remove", "ui.checkbox.set", "ui.checkbox.setEnabled",
@@ -116,7 +117,7 @@ local want = { "call", "clock", "deref", "free", "map.setup",
     "ui.slider", "ui.slider.create", "ui.slider.get", "ui.slider.isShown", "ui.slider.remove", "ui.slider.set", "ui.slider.setDefault", "ui.slider.setEnabled",
     "ui.slider.setTooltip", "ui.slider.setVisible",
     "ui.text", "ui.text.setTooltip" }
-eq(table.concat(declared, ","), table.concat(want, ","), "declared(): the 0.11.0 feature list (map.setup, ui.journal.regions, ui.look, story 24's, story 4's and story 22's names hand-named; settings, net), sorted")
+eq(table.concat(declared, ","), table.concat(want, ","), "declared(): the 0.12.0 feature list (map.setup, ui.journal.regions, ui.look, story 24's, story 4's, story 22's and story 23's names hand-named; settings, net), sorted")
 -- Mod Manager story 4 (AC 4): a 0.9.0 core's list answers false for ui.slider.create; this one true.
 do
     local old = {}

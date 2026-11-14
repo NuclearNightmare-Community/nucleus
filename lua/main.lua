@@ -21,6 +21,10 @@ local okSet, SETTINGS = pcall(require, LOWER .. ".settings.store")
 -- core.net's owner (lua/pkg/net/host.lua, core story 22): this machine's net state; spawns <Core>Net on the host, reads
 -- it on a client, answers the channel op net-publish. Loaded here, started in start(), driven from the LoadMap hook.
 local okNet, NET = pcall(require, LOWER .. ".net.host")
+-- core.net's player presence (lua/pkg/net/players.lua, core story 23): this machine's mod list, the per-player
+-- <Core>Presence actors on the host and the client's report; answers the channel ops net-mod and net-mod-off. Ticked
+-- on story 22's loop and reset from the same LoadMap post-hook.
+local okPl, PLAYERS = pcall(require, LOWER .. ".net.players")
 
 local CLASS_PKG = "/Game/Mods/" .. NAME .. "/ModActor"
 local CLASS = CLASS_PKG .. ".ModActor_C"
@@ -51,6 +55,7 @@ local settingsRev = math.tointeger(ModRef:GetSharedVariable(REV_KEY)) or 0
 ModRef:SetSharedVariable(REV_KEY, settingsRev)
 local settingsReady = false
 local netReady = false
+local playersReady = false
 -- The current world's full name (a string, never the UObject), from the LoadMap post-hook: the settings service
 -- refuses "menu" settings outside the title screen.
 local currentWorld
@@ -105,6 +110,12 @@ local function handle(request)
         if not netReady then return "err:internal net service not running" end
         local payload = #request > #op and request:sub(#op + 2) or nil
         return NET.op(payload)
+    end
+    -- Core story 23: a dependent's (id, version[, netCompat]) for presence, registered at connect and removed at unload.
+    if op == "net-mod" or op == "net-mod-off" then
+        if not playersReady then return "err:internal presence service not running" end
+        local payload = #request > #op and request:sub(#op + 2) or nil
+        return PLAYERS.op(op, payload)
     end
     return "err:unknown-op " .. quote(op)
 end
@@ -219,6 +230,8 @@ local function start()
             log = log, setShared = function(k, v) ModRef:SetSharedVariable(k, v) end,
             getShared = function(k) return ModRef:GetSharedVariable(k) end,
             isHost = mapReady and function(w) return MAP.isHost(w) end or nil,
+            -- story 23: presence runs on this loop, after core.net's own tick
+            tick = function() if playersReady then PLAYERS.tick() end end,
         })
         if okI then
             netReady = true
@@ -231,6 +244,28 @@ local function start()
             if not okN then log.warn("NET NotifyOnNewObject(%s) failed (%s); clients find the actor by the 2 s fallback only", NET.CLASS, tostring(errN):match("^[^\n]*")) end
         else
             log.error("net service could not start: %s", tostring(errI):match("^[^\n]*"))
+        end
+    end
+    -- core.net's presence (story 23): needs the net service (its role and loop).
+    if not okPl then
+        log.error("presence service did not load (%s); core.net.presence has no records on this machine", tostring(PLAYERS):match("^[^\n]*"))
+    elseif netReady then
+        local okI, errI = pcall(PLAYERS.init, {
+            log = log, setShared = function(k, v) ModRef:SetSharedVariable(k, v) end,
+            getShared = function(k) return ModRef:GetSharedVariable(k) end,
+            role = function() return NET.role() end,
+        })
+        if okI then
+            playersReady = true
+            -- A client learns of its own <Core>Presence from its creation (the callback only takes a weak handle).
+            local okN, errN = pcall(NotifyOnNewObject, PLAYERS.CLASS, function(obj)
+                local okC, errC = pcall(PLAYERS.onNewObject, obj)
+                if not okC then log.warn("PRESENCE creation callback failed: %s", tostring(errC):match("^[^\n]*")) end
+                return false
+            end)
+            if not okN then log.warn("PRESENCE NotifyOnNewObject(%s) failed (%s); clients find their actor by the 2 s fallback only", PLAYERS.CLASS, tostring(errN):match("^[^\n]*")) end
+        else
+            log.error("presence service could not start: %s", tostring(errI):match("^[^\n]*"))
         end
     end
 
@@ -265,6 +300,11 @@ local function start()
         if netReady then
             local okN, errN = pcall(function() NET.onLoadMap(world and world:get()) end)
             if not okN then log.error("net LoadMap part failed: %s", tostring(errN):match("^[^\n]*")) end
+            -- Story 23: presence records belong to this world (cleared); its role is the one just decided.
+            if playersReady then
+                local okP, errP = pcall(function() PLAYERS.onLoadMap(world and world:get()) end)
+                if not okP then log.error("presence LoadMap part failed: %s", tostring(errP):match("^[^\n]*")) end
+            end
             local okS, errS = pcall(NET.start)
             if not okS then log.error("net loop could not start: %s", tostring(errS):match("^[^\n]*")) end
         end
@@ -281,6 +321,7 @@ local function start()
         pcall(function() ModRef:SetSharedVariable(SETUP_KEY, "none") end)
         if jmapReady then pcall(JMAP.stop) end
         if netReady then pcall(NET.stop); pcall(NET.unload) end
+        if playersReady then pcall(PLAYERS.stop); pcall(PLAYERS.unload) end
         local okU, errU = pcall(setState, "stopped")
         log.info("STOPPED%s", okU and "" or (" (state not published: " .. tostring(errU) .. ")"))
     end

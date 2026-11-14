@@ -50,6 +50,7 @@ local HELPERS = "/Script/AssetRegistry.Default__AssetRegistryHelpers"
 local log = { info = function() end, warn = function() end, error = function() end, debug = function() end }
 local setShared = function() end
 local isHostFn -- env.isHost(world) -> boolean (map/setup.lua's cache), or nil: computed here
+local extraTick -- env.tick(): more work on this loop (story 23: net/players.lua), run under its own pcall
 local now = function() return clock.micros() end
 local allow -- the per-minute limiter (per key, or per actor for whole-state rejects)
 
@@ -116,12 +117,14 @@ local function limited(key, fmt, ...)
     pcall(log.warn, fmt, ...)
 end
 
--- init{ log, setShared = fn(key, value), getShared = fn(key), isHost = fn(world) | nil, now = fn() | nil }
+-- init{ log, setShared = fn(key, value), getShared = fn(key), isHost = fn(world) | nil, now = fn() | nil,
+--       tick = fn() | nil (core story 23: run on this loop after this module's own tick, under its own pcall) }
 function M.init(env)
     env = env or {}
     if env.log then log = env.log end
     if type(env.setShared) == "function" then setShared = env.setShared end
     isHostFn = type(env.isHost) == "function" and env.isHost or nil
+    extraTick = type(env.tick) == "function" and env.tick or nil
     if type(env.now) == "function" then now = env.now end
     allow = S.limiter(function() return now() end, 60000000, 256)
     -- A hot reload keeps the gen rising (shared variables outlive the state).
@@ -393,6 +396,10 @@ function M.start()
         end
         local okT, err = pcall(M.tick)
         if not okT then limited("tick", "NET tick failed: %s", firstLine(err)) end
+        if extraTick then
+            local okE, errE = pcall(extraTick)
+            if not okE then limited("tick:presence", "NET presence tick failed: %s", firstLine(errE)) end
+        end
     end)
     if ok and math.type(res) == "integer" then
         handle = res

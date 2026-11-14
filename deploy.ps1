@@ -16,6 +16,8 @@
   bad-input, ui, journal, menu, soak and manual install all parts like skeleton. The scenario goes to the test dependent's Scripts/scenario.txt.
   net-host and net-client (core story 22) are the pair-run roles of test/pair/nucleus-scenarios.ps1 (all parts, the
   test dependent only; its mod.json "id" is skeltest, the id its core.net keys use); they run in a pair.ps1 session.
+  presence-host, presence-client and presence-vanilla-host (core story 23) are the presence pair-run roles, installed
+  the same way (the test dependent's mod.json "version" 0.1.0 is what presence reports).
   manual is for hand testing: the test dependent never travels or presses keys, and keeps a text widget in the live
   HUD's top-right corner (README.md, "Hand testing").
   -Staged: $Instance is the host-side staging folder of a VM run (run.ps1 -Target vm, tools/vm/vm-sp.ps1), not a game
@@ -29,7 +31,8 @@
 param(
     [Parameter(Mandatory)] [string] $Instance,
     [switch] $Test,
-    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'soak', 'manual', 'net-host', 'net-client')]
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'soak', 'manual', 'net-host', 'net-client',
+                 'presence-host', 'presence-client', 'presence-vanilla-host')]
     [string] $Scenario = 'skeleton',
     [switch] $Remove,
     [switch] $Staged

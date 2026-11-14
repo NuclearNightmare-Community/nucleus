@@ -1,7 +1,7 @@
 {
   "id": "nucleus",
   "name": "Nucleus",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "scope": "all",
   "game": { "version": "V8.2.3", "build": "26601774" },
   "ue4ss": "v3.0.1-1181-g83330635",
