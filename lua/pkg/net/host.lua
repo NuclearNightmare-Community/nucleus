@@ -69,6 +69,12 @@ function M.alive(o)
 end
 local function alive(o) return M.alive(o) end -- (tests replace M.alive)
 local function pathOf(o) local full = o:GetFullName() return full:match("^%S+%s+(.+)$") or full end
+-- A replicated FString's length without copying it (UE4SS FString:Len()); a Lua string's own. nil: unreadable.
+local function lenOf(v)
+    if type(v) == "string" then return #v end
+    local ok, n = pcall(function() return v:Len() end)
+    return ok and math.tointeger(n) or nil
+end
 local function str(v)
     if type(v) == "string" then return v end
     if v == nil then return nil end
@@ -214,8 +220,8 @@ function M.onLoadMap(world)
     forgetActor()
     local prevRole = W.role
     W = { role = "none", T = S.new(), status = "no-state" }
+    share() -- the previous world's role and values are gone even if what follows fails
     if not alive(world) then
-        share()
         log.info("NET LoadMap gave no world; role none")
         return
     end
@@ -317,6 +323,18 @@ local function clientTick()
         return
     end
     local raw = try(function() return a.State end)
+    -- The length first: an oversized State is never copied into Lua (only a small marker is kept).
+    local n = lenOf(raw)
+    if n == nil or n > S.MAX_STATE then
+        local marker = "<oversized " .. tostring(n) .. ">"
+        if W.status == "ok" and W.raw == marker then return end
+        W.raw = marker
+        limited("actor:" .. tostring(W.actorName), "NET dropped from the host's State (%s): State is %s bytes, cap %d",
+            q("actor:" .. tostring(W.actorName)), n and tostring(n) or "an unreadable number of", S.MAX_STATE)
+        W.T, W.status = S.new(), "ok"
+        share()
+        return
+    end
     local s = str(raw)
     if W.status == "ok" and s == W.raw then return end
     W.raw = s
@@ -335,8 +353,8 @@ local function hostTick()
     if a then writeActor(a) return end
     if W.gone then
         W.gone = nil
-        log.warn("NET this world's %sNet went away; spawning another", NAME)
-        W.spawnTries, W.spawnErrorLogged = 0, nil
+        limited("respawn", "NET this world's %sNet went away; spawning another", NAME)
+        W.spawnTries = 0
     end
     if (W.spawnTries or 0) >= M.SPAWN_TRIES then return end
     if W.nextSpawn and now() < W.nextSpawn then return end
