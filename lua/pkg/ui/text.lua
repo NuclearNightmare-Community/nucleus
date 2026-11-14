@@ -211,7 +211,10 @@ end
 -- Story 24: the tooltip on an element's inner widget, in the current language (picked on every apply). el.appliedTip:
 -- the string the widget shows now (nil: none, as a fresh widget). The inner widget is hit-testable only while it has
 -- one (top of this file).
-local TIP_INNER = { text = "Text", button = "Btn", image = "Img" }
+-- Mod Manager story 4: a checkbox's on its Btn (it is a button widget), a choice's and a slider's on their Frame (the
+-- arrows, the bar and the box are its hit-testable children, so hovering any of them finds it; a choice's Background
+-- is made hit-testable while it has one, so its value text shows it too).
+local TIP_INNER = { text = "Text", button = "Btn", image = "Img", checkbox = "Btn", choice = "Frame", slider = "Frame" }
 local function applyTooltip(el, w, fresh)
     if fresh then el.appliedTip = nil end
     local s = el.tooltip and S.pick(el.tooltip) or nil
@@ -226,6 +229,8 @@ local function applyTooltip(el, w, fresh)
             C.count(); inner:SetVisibility(s and C.VIS.Visible or C.VIS.SelfHitTestInvisible)
         elseif el.kind == "image" then
             C.count(); inner:SetVisibility(s and C.VIS.Visible or C.VIS.HitTestInvisible)
+        elseif el.kind == "choice" then
+            C.count(); w.Background:SetVisibility(s and C.VIS.Visible or C.VIS.SelfHitTestInvisible)
         end
     end)
     if ok then el.appliedTip = s
@@ -272,10 +277,19 @@ X.KIND = KIND -- button.lua adds the button kind
 -- Widget classes that are not element kinds (story 21: the window).
 local EXTRA_CLASS = { screen = { pkg = C.SCREEN_PKG, short = C.SCREEN_SHORT } }
 
+-- Mod Manager story 4: a checkbox is a button widget, so two kinds share one class. A widget's class names a kind (the
+-- first of them, in a fixed order) only to read its tag; whether it belongs to an element compares classes (sameClass).
+local KIND_ORDER = { "text", "panel", "button", "list", "row", "image", "checkbox", "choice", "slider" }
 local function kindOfClass(short)
+    for _, k in ipairs(KIND_ORDER) do
+        local K = KIND[k]
+        if K and K.short == short then return k end
+    end
     for k, K in pairs(KIND) do if K.short == short then return k end end
     return nil
 end
+local function sameClass(a, b) return a == b or (KIND[a] ~= nil and KIND[b] ~= nil and KIND[a].short == KIND[b].short) end
+X._kindOfClass, X._sameClass = kindOfClass, sameClass
 
 -- ---------------------------------------------------------------- validation (pure)
 
@@ -466,7 +480,7 @@ local function scan(container, belongs)
                 if tag and tag:sub(1, #mine) == mine then
                     local id = tag:sub(#mine + 1)
                     local el = C.els[id]
-                    if el and not el.removed and el.kind == kind and belongs(el) then
+                    if el and not el.removed and sameClass(el.kind, kind) and belongs(el) then
                         byId[id] = byId[id] or {}
                         table.insert(byId[id], c)
                     else
@@ -534,7 +548,8 @@ local SIZE_AUTO, SIZE_FILL = 0, 1
 -- default, which would stretch it): centred in a horizontal box (a row; in its column when it has a fill), at the
 -- start of a vertical one. Other children keep the 0.7.0 slots. EVerticalAlignment Center 2, EHorizontalAlignment
 -- Center 2 / Left 1; Fill 0 for both.
-local function keepsSize(ch) return ch.kind == "image" or (ch.kind == "button" and ch.icon ~= nil and ch.label == "") end
+-- Mod Manager story 4: a checkbox too (an icon-only button); a choice and a slider fill like a text.
+local function keepsSize(ch) return ch.kind == "image" or ch.kind == "checkbox" or (ch.kind == "button" and ch.icon ~= nil and ch.label == "") end
 local function applyGaps(p)
     local first = true
     local horiz = p.layout == "horizontal"

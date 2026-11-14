@@ -19,7 +19,8 @@
                -LayoutOnly on the copies, swapped in for the generated files and swapped back) and must equal the
                golden file too; uncooked packages aren't byte-identical across runs, so layout, not bytes.
                Icons (core story 24): CoreGen imports art/icons/*.png (-IconDir) as /Game/Mods/<name>/Icons/T_<Key>;
-               the pak must hold all six and WBP_<name>Image (and every other widget).
+               the pak must hold all six and WBP_<name>Image (and every other widget, WBP_<name>Choice and
+               WBP_<name>Slider since Mod Manager story 4).
                Pack guard: the pak may hold only Content/Mods/<name>/ and must hold all 13; no staged file may name a
                /Game path outside /Game/Mods/<name>/, and no cooked marker may name BasicShapes, _Preview,
                EditorResources or a component template <Name>_GEN_VARIABLE other than DefaultSceneRoot's (the one
@@ -257,9 +258,9 @@ Step 'blueprint' {
     $foreign = @($list | Where-Object { $_ -notlike "NuclearNightmare/Content/Mods/$name/*" })
     if ($foreign) { Remove-Item $pak; throw "Refusing: $name.pak would hold files outside Content/Mods/$($name): $($foreign -join ', ')" }
     $missing = @($mapAssets | Where-Object { $list -notcontains "NuclearNightmare/Content/Mods/$name/Map/$_.uasset" })
-    # Core story 24: the six icons and every widget, the image's included.
+    # Core story 24: the six icons and every widget, the image's included. Mod Manager story 4: the choice and the slider.
     $missing += @($iconAssets | Where-Object { $list -notcontains "NuclearNightmare/Content/Mods/$name/Icons/$_.uasset" } | ForEach-Object { "Icons/$_" })
-    $missing += @('Text', 'Panel', 'Button', 'List', 'Row', 'Screen', 'Image' | ForEach-Object { "WBP_$name$_" } |
+    $missing += @('Text', 'Panel', 'Button', 'List', 'Row', 'Screen', 'Image', 'Choice', 'Slider' | ForEach-Object { "WBP_$name$_" } |
         Where-Object { $list -notcontains "NuclearNightmare/Content/Mods/$name/$_.uasset" })
     if ($missing) { Remove-Item $pak; throw "Refusing: $name.pak lacks $($missing -join ', ')" }
     Write-Host "   $name.pak:"; $list | ForEach-Object { Write-Host "     $_" }

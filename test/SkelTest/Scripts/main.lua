@@ -4448,6 +4448,398 @@ local function buildMenu()
         end)
     end
     iconSteps()
+    -- ---- Mod Manager story 4 (core 0.10.0, UI-11): checkbox, choice and slider-with-number controls, on window CT over
+    -- the third menu. The ct-* bad-input group (every new function and key, each new function off the game thread), then
+    -- real input: clicks on the checkbox and the choices' arrows, a drag on the slider, typing into its box (57, 999,
+    -- abc, empty; 2.3 on the 0.5-step slider), the disabled row (clicks, a drag and typing do nothing), a reopen of the
+    -- window (values and enabled state kept), and SkelPeer's checkbox on the menu (each mod gets only its own callbacks).
+    -- CT lines are checks (value and callback count); shots ct-hover and ct-controls.
+    MM.controlSteps = function()
+        local CT = { n = {}, last = {}, cases = 0 }
+        local UIP = CORE:lower() .. ".ui"
+        local OPTS = { "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX" }
+        local CHOICE_S, SLIDER_S = "WBP_" .. CORE .. "Choice_C", "WBP_" .. CORE .. "Slider_C"
+        local function f(fn, ...) local a = table.pack(...) return function() return fn(table.unpack(a, 1, a.n)) end end
+        local function ccase(id, desc, fn, expect) CT.cases = CT.cases + 1; case("menu3.ct-" .. id, desc, fn, expect) end
+        local function rec(id) return function(_, a, b)
+            CT.n[id] = (CT.n[id] or 0) + 1
+            CT.last[id] = { a = a, b = b }
+            say("CTCB %s %d %s%s", id, CT.n[id], tostring(a), b ~= nil and (" " .. tostring(b)) or "")
+        end end
+        local function calls(id) return CT.n[id] or 0 end
+        local function ctWin() local _, c = screenWith("ct.title") return c end
+        local function listW() return childTagged(ctWin(), "ct.list") end
+        local function rowW(n) return childTagged(prop(listW(), "VBox"), "ct.row" .. n) end
+        local function cell(n, id) return childTagged(prop(rowW(n), "HBox"), id) end
+        local function txt(w) return try(function() return w:GetText():ToString() end) end
+        local function iconOf(w) return try(function() local o = w.Icon.Brush.ResourceObject if v(o) then return fname(o) end return "none" end) or "?" end
+        local function enabledOf(w) return try(function() return w:GetIsEnabled() end) end
+        local function opacity(w) return try(function() return w:GetRenderOpacity() end) or -1 end
+        local function num(x) return x == nil and "nil" or string.format("%g", x) end
+        local function pointOf(w, fx, fy)
+            local r = absR(w)
+            if not (r and r.r > r.l) then return nil end
+            return math.floor(r.l + (r.r - r.l) * fx + 0.5), math.floor(r.t + (r.b - r.t) * fy + 0.5)
+        end
+        local function at(finder, fx, fy) return function() return pointOf(finder(), fx or 0.5, fy or 0.5) end end
+        -- one request step, then a settle
+        local function req(label, cmdOf, settle)
+            step("ct: " .. label, function()
+                local cmd = cmdOf()
+                if not check(cmd ~= nil, "CTPOINT %s has a point", label) then return end
+                say("CTREQ %s: %s", label, cmd)
+                return request(cmd), 40, label
+            end)
+            step("ct: settle " .. label, function() return msAfter(settle or 1.2), 4 end)
+        end
+        local function click(label, finder, fx, fy)
+            req(label, function() local x, y = at(finder, fx, fy)() if x then return string.format("click %d %d", x, y) end end)
+        end
+        -- Types into a slider's box: a click on it (the box selects all its text when focused), then the text, which
+        -- replaces the selection, or Backspace to empty it, then Enter. noEnter: a disabled box takes no focus, so Enter
+        -- would reach the menu instead; it is left out there.
+        local function typeInto(label, finder, text, noEnter)
+            click(label .. " focus", function() return prop(finder(), "Box") end, 0.85, 0.5)
+            if text == "" then req(label .. " back", function() return "key BACK" end, 0.8)
+            else req(label .. " type", function() return "type " .. text end, 0.8) end
+            if not noEnter then req(label .. " enter", function() return "key ENTER" end) end
+        end
+        local function sliderState(w)
+            return try(function() return w.Bar:GetValue() end), txt(prop(w, "Box")) or "?", try(function() return w.Box:GetHintText():ToString() end) or "?"
+        end
+
+        step("ct: window", function()
+            local UIx = UI
+            CT.W = UIx.screen.open{ id = "CT", close = true }
+            UIx.text.create{ id = "ct.title", text = "SKEL CONTROLS", place = { screen = CT.W, corner = "top-left" }, style = { font = "title" } }
+            CT.list = UIx.list.create{ id = "ct.list", place = { screen = CT.W, absolute = { anchor = "center", x = 0, y = 0 } }, size = { w = 900, h = 420 }, gap = "tight" }
+            local function row(n, label)
+                local r = UIx.row.create{ id = "ct.row" .. n, place = { list = CT.list } }
+                UIx.text.create{ id = "ct.l" .. n, text = label, place = { row = r, fill = 2 } }
+                return r
+            end
+            local r1 = row(1, "CHECKBOX")
+            CT.cb = UIx.checkbox.create{ id = "ct.cb", place = { row = r1 }, onChange = rec("ct.cb"), tooltip = "TOGGLE" }
+            local r2 = row(2, "CHOICE")
+            CT.ch = UIx.choice.create{ id = "ct.ch", place = { row = r2, fill = 3 }, options = OPTS, selected = 1, onChange = rec("ct.ch") }
+            local r3 = row(3, "RANGE")
+            CT.rg = UIx.choice.create{ id = "ct.rg", place = { row = r3, fill = 3 }, options = UIx.choice.range{ min = 0, max = 20, step = 1, extra = { "Default" } }, onChange = rec("ct.rg") }
+            local r4 = row(4, "SLIDER 0-200")
+            CT.s1 = UIx.slider.create{ id = "ct.s1", place = { row = r4, fill = 3 }, min = 0, max = 200, step = 1, value = 150, defaultValue = 100, hint = "DEFAULT (100)", onChange = rec("ct.s1") }
+            local r5 = row(5, "SLIDER 0-10 BY 0.5")
+            CT.s2 = UIx.slider.create{ id = "ct.s2", place = { row = r5, fill = 3 }, min = 0, max = 10, step = 0.5, value = 5, onChange = rec("ct.s2") }
+            local r6 = row(6, "DISABLED")
+            CT.dcb = UIx.checkbox.create{ id = "ct.dcb", place = { row = r6 }, checked = true, enabled = false, onChange = rec("ct.dcb") }
+            CT.dch = UIx.choice.create{ id = "ct.dch", place = { row = r6, fill = 1 }, options = OPTS, selected = 3, enabled = false, onChange = rec("ct.dch") }
+            CT.dsl = UIx.slider.create{ id = "ct.dsl", place = { row = r6, fill = 2 }, min = 0, max = 10, step = 1, value = 4, enabled = false, onChange = rec("ct.dsl") }
+            check(UIx.screen.isOpen(CT.W), "CTWIN window CT open with the controls")
+            return msAfter(2), 5 -- the hooks are registered from the UI poll
+        end)
+
+        -- ---- the ct-* bad-input group (draft 21 AC 8 plus wrong-kind handles, unknown keys, widget = 'game', size = 8)
+        step("ct: cases", function()
+            local CK, CHx, SLx = UI.checkbox, UI.choice, UI.slider
+            local KC, HC, SC, RG = UIP .. ".checkbox.create: ", UIP .. ".choice.create: ", UIP .. ".slider.create: ", UIP .. ".choice.range: "
+            local nop = function() end
+            local rp = { row = UI.row.create{ id = "ct.row7", place = { list = CT.list } } }
+            local function cb(o) o.id = o.id or "ct.bad"; o.place = o.place or rp; if o.onChange == nil then o.onChange = nop elseif o.onChange == false then o.onChange = nil end return f(CK.create, o) end
+            local function ch(o) o.id = o.id or "ct.bad"; o.place = o.place or rp; if o.options == nil then o.options = OPTS end; if o.onChange == nil then o.onChange = nop elseif o.onChange == false then o.onChange = nil end return f(CHx.create, o) end
+            local function sl(o) o.id = o.id or "ct.bad"; o.place = o.place or rp; if o.onChange == nil then o.onChange = nop elseif o.onChange == false then o.onChange = nil end; o.min = o.min or 0; o.max = o.max or 10; o.step = o.step or 1 return f(SLx.create, o) end
+            local HUD = { host = "hud", corner = "top-left" }
+            -- checkbox
+            ccase("cb-none", "ui.checkbox.create()", f(CK.create), E.err(KC .. "expected a table"))
+            ccase("cb-args", "ui.checkbox.create({...}, 2)", f(CK.create, { id = "ct.bad", onChange = nop }, 2), E.err(KC .. "expected 1 argument (a table), got 2"))
+            ccase("cb-unknown", "ui.checkbox.create{ label = 'x' }", cb({ label = "x" }), E.err(KC .. "unknown key 'label' (valid: checked, enabled, id, onChange, place, size, tooltip)"))
+            ccase("cb-onchange", "ui.checkbox.create{ no onChange }", cb({ onChange = false }), E.err(KC .. "onChange must be a function, got nil"))
+            ccase("cb-size-8", "ui.checkbox.create{ size = 8 }", cb({ size = 8 }), E.err(KC .. "size must be a number from 16 to 64, got 8"))
+            ccase("cb-size-65", "ui.checkbox.create{ size = 65 }", cb({ size = 65 }), E.err(KC .. "size must be a number from 16 to 64, got 65"))
+            ccase("cb-checked", "ui.checkbox.create{ checked = 1 }", cb({ checked = 1 }), E.err(KC .. "checked must be a boolean or nil, got 1"))
+            ccase("cb-enabled", "ui.checkbox.create{ enabled = 'no' }", cb({ enabled = "no" }), E.err(KC .. "enabled must be a boolean or nil, got 'no'"))
+            ccase("cb-hud", "ui.checkbox.create{ place = <hud corner> }", cb({ place = HUD }), E.err(KC .. "checkboxes need a host with a cursor (journal, menu, screen)"))
+            ccase("cb-kindid", "ui.checkbox.create{ id = 'ct.ch' } [a choice's id]", cb({ id = "ct.ch" }), E.err(KC .. "id 'ct.ch' is already a choice of this mod"))
+            ccase("cb-set-num", "ui.checkbox.set(cb, 1)", f(CK.set, CT.cb, 1), E.err(UIP .. ".checkbox.set: checked must be a boolean, got 1"))
+            ccase("cb-get-choice", "ui.checkbox.get(<choice handle>)", f(CK.get, CT.ch), E.err(UIP .. ".checkbox.get: not a checkbox handle ('ct.ch' is a choice)"))
+            ccase("cb-get-forged", "ui.checkbox.get({ id = 'ct.cb' }) [forged]", f(CK.get, { id = "ct.cb" }), E.err(UIP .. ".checkbox.get: not a checkbox handle (use the handle that checkbox.create returned)"))
+            ccase("cb-setenabled", "ui.checkbox.setEnabled(cb, nil)", f(CK.setEnabled, CT.cb, nil), E.err(UIP .. ".checkbox.setEnabled: enabled must be a boolean, got nil"))
+            ccase("cb-setvis", "ui.checkbox.setVisible(cb, 1)", f(CK.setVisible, CT.cb, 1), E.err(UIP .. ".checkbox.setVisible: visible must be a boolean, got number"))
+            ccase("cb-isshown-slider", "ui.checkbox.isShown(<slider handle>)", f(CK.isShown, CT.s1), E.err(UIP .. ".checkbox.isShown: not a checkbox handle ('ct.s1' is a slider)"))
+            ccase("cb-tip", "ui.checkbox.setTooltip(cb, '')", f(CK.setTooltip, CT.cb, ""), E.err(UIP .. ".checkbox.setTooltip: tooltip must be a string of 1 to 512 bytes"))
+            ccase("cb-label-button", "ui.button.setLabel(<checkbox handle>, 'x')", f(UI.button.setLabel, CT.cb, "x"), E.err(UIP .. ".button.setLabel: not a button handle ('ct.cb' is a checkbox)"))
+            ccase("cb-ok", "ui.checkbox.create{ size = 16 } then set, get, remove [control]", function()
+                local h = CK.create{ id = "ct.okc", place = rp, size = 16, onChange = nop }
+                CK.set(h, true)
+                local g = CK.get(h)
+                CK.remove(h) CK.remove(h)
+                return g
+            end, E.ret("true", function(r) return r[1] == true end))
+            -- choice
+            ccase("ch-none", "ui.choice.create()", f(CHx.create), E.err(HC .. "expected a table"))
+            ccase("ch-unknown", "ui.choice.create{ values = 1 }", ch({ values = 1 }), E.err(HC .. "unknown key 'values' (valid: enabled, id, onChange, options, place, selected, tooltip, widget)"))
+            ccase("ch-empty", "ui.choice.create{ options = {} }", ch({ options = {} }), E.err(HC .. "options is empty (1 to 64 strings)"))
+            local many = {}
+            for k = 1, 65 do many[k] = "O" .. k end
+            ccase("ch-65", "ui.choice.create{ options = <65 strings> }", ch({ options = many }), E.err(HC .. "options has 65 entries, at most 64"))
+            ccase("ch-nonstring", "ui.choice.create{ options = { 'A', 2 } }", ch({ options = { "A", 2 } }), E.err(HC .. "options[2] must be a string of 1 to 64 bytes, got 2"))
+            ccase("ch-long", "ui.choice.create{ options = { <65 bytes> } }", ch({ options = { string.rep("x", 65) } }), E.err(HC .. "options[1] must be a string of 1 to 64 bytes"))
+            ccase("ch-sel-7", "ui.choice.create{ selected = 7 } [6 options]", ch({ selected = 7 }), E.err(HC .. "selected must be an integer from 1 to 6, got 7"))
+            ccase("ch-sel-0", "ui.choice.create{ selected = 0 }", ch({ selected = 0 }), E.err(HC .. "selected must be an integer from 1 to 6, got 0"))
+            ccase("ch-onchange", "ui.choice.create{ no onChange }", ch({ onChange = false }), E.err(HC .. "onChange must be a function, got nil"))
+            ccase("ch-game", "ui.choice.create{ widget = 'game' }", ch({ widget = "game" }), E.err(HC .. "widget 'game' is not available yet"))
+            ccase("ch-widget", "ui.choice.create{ widget = 'fancy' }", ch({ widget = "fancy" }), E.err(HC .. "unknown widget 'fancy' (valid: core)"))
+            ccase("ch-hud", "ui.choice.create{ place = <hud corner> }", ch({ place = HUD }), E.err(HC .. "choices need a host with a cursor (journal, menu, screen)"))
+            ccase("ch-set-7", "ui.choice.set(ch, 7)", f(CHx.set, CT.ch, 7), E.err(UIP .. ".choice.set: index must be an integer from 1 to 6, got 7"))
+            ccase("ch-get-slider", "ui.choice.get(<slider handle>)", f(CHx.get, CT.s1), E.err(UIP .. ".choice.get: not a choice handle ('ct.s1' is a slider)"))
+            ccase("ch-get-forged", "ui.choice.get({ id = 'ct.ch' }) [forged]", f(CHx.get, { id = "ct.ch" }), E.err(UIP .. ".choice.get: not a choice handle (use the handle that choice.create returned)"))
+            ccase("ch-setenabled", "ui.choice.setEnabled(ch, 'no')", f(CHx.setEnabled, CT.ch, "no"), E.err(UIP .. ".choice.setEnabled: enabled must be a boolean, got 'no'"))
+            ccase("ch-ok", "ui.choice.create{ widget = 'core' } then set, get, remove [control]", function()
+                local h = CHx.create{ id = "ct.okh", place = rp, options = { "X", "Y" }, widget = "core", onChange = nop }
+                CHx.set(h, 2)
+                local i, o = CHx.get(h)
+                CHx.remove(h) CHx.remove(h)
+                return i, o
+            end, E.ret("2, 'Y'", function(r) return r[1] == 2 and r[2] == "Y" end))
+            -- range
+            ccase("rg-65", "ui.choice.range{ 0..64 step 1 }", f(CHx.range, { min = 0, max = 64, step = 1 }), E.err(RG .. "the range has 65 options, at most 64"))
+            ccase("rg-extra-65", "ui.choice.range{ 0..63, extra = { 'Default' } }", f(CHx.range, { min = 0, max = 63, step = 1, extra = { "Default" } }), E.err(RG .. "the range has 65 options (1 extra), at most 64"))
+            ccase("rg-step-0", "ui.choice.range{ step = 0 }", f(CHx.range, { min = 0, max = 10, step = 0 }), E.err(RG .. "step must be greater than 0, got 0"))
+            ccase("rg-minmax", "ui.choice.range{ min = 5, max = 1 }", f(CHx.range, { min = 5, max = 1, step = 1 }), E.err(RG .. "min (5) is greater than max (1)"))
+            ccase("rg-inf", "ui.choice.range{ max = 1/0 }", f(CHx.range, { min = 0, max = 1 / 0, step = 1 }), E.err(RG .. "max must be a finite number, got inf"))
+            ccase("rg-extra", "ui.choice.range{ extra = { 5 } }", f(CHx.range, { min = 0, max = 2, step = 1, extra = { 5 } }), E.err(RG .. "extra[1] must be a string of 1 to 64 bytes, got 5"))
+            ccase("rg-unknown", "ui.choice.range{ size = 1 }", f(CHx.range, { min = 0, max = 2, step = 1, size = 1 }), E.err(RG .. "unknown key 'size' (valid: extra, id, max, min, step)"))
+            ccase("rg-ok", "ui.choice.range{ 0..20, extra = { 'Default' } } [control]", function() local r = CHx.range{ id = "ct.r", min = 0, max = 20, step = 1, extra = { "Default" } } return #r, r[1] end,
+                E.ret("22, 'Default'", function(r) return r[1] == 22 and r[2] == "Default" end))
+            -- slider
+            ccase("sl-none", "ui.slider.create()", f(SLx.create), E.err(SC .. "expected a table"))
+            ccase("sl-unknown", "ui.slider.create{ width = 3 }", sl({ width = 3 }), E.err(SC .. "unknown key 'width' (valid: defaultValue, enabled, hint, id, max, min, onChange, place, step, tooltip, value)"))
+            ccase("sl-minmax", "ui.slider.create{ min = 6, max = 5 }", sl({ min = 6, max = 5 }), E.err(SC .. "min (6) must be less than max (5)"))
+            ccase("sl-step-0", "ui.slider.create{ step = 0 }", sl({ step = 0 }), E.err(SC .. "step must be greater than 0, got 0"))
+            ccase("sl-steps", "ui.slider.create{ 0..10001 step 1 }", sl({ max = 10001 }), E.err(SC .. "min..max in steps of 1 is 10001 steps, at most 10000"))
+            ccase("sl-value-out", "ui.slider.create{ value = 11 } [0..10]", sl({ value = 11 }), E.err(SC .. "value 11 is outside 0..10"))
+            ccase("sl-value-nan", "ui.slider.create{ value = 0/0 }", sl({ value = 0 / 0 }), E.err(SC .. "value must be a finite number or nil, got NaN"))
+            ccase("sl-default-out", "ui.slider.create{ defaultValue = -1 }", sl({ defaultValue = -1 }), E.err(SC .. "defaultValue -1 is outside 0..10"))
+            ccase("sl-default-inf", "ui.slider.create{ defaultValue = 1/0 }", sl({ defaultValue = 1 / 0 }), E.err(SC .. "defaultValue must be a finite number, got inf"))
+            ccase("sl-hint-65", "ui.slider.create{ hint = <65 bytes> }", sl({ hint = string.rep("h", 65) }), E.err(SC .. "hint must be a string of at most 64 bytes or nil, got 65 bytes"))
+            ccase("sl-onchange", "ui.slider.create{ no onChange }", sl({ onChange = false }), E.err(SC .. "onChange must be a function, got nil"))
+            ccase("sl-hud", "ui.slider.create{ place = <hud corner> }", sl({ place = HUD }), E.err(SC .. "sliders need a host with a cursor (journal, menu, screen)"))
+            ccase("sl-set-out", "ui.slider.set(s1, 201)", f(SLx.set, CT.s1, 201), E.err(UIP .. ".slider.set: value 201 is outside 0..200"))
+            ccase("sl-set-noarg", "ui.slider.set(s1)", f(SLx.set, CT.s1), E.err(UIP .. ".slider.set: expected 2 arguments (handle, value or nil), got 1"))
+            ccase("sl-setdefault-nil", "ui.slider.setDefault(s1, nil)", f(SLx.setDefault, CT.s1, nil), E.err(UIP .. ".slider.setDefault: defaultValue must be a finite number, got nil"))
+            ccase("sl-setdefault-hint", "ui.slider.setDefault(s1, 5, <65 bytes>)", f(SLx.setDefault, CT.s1, 5, string.rep("h", 65)), E.err(UIP .. ".slider.setDefault: hint must be a string of at most 64 bytes"))
+            ccase("sl-get-checkbox", "ui.slider.get(<checkbox handle>)", f(SLx.get, CT.cb), E.err(UIP .. ".slider.get: not a slider handle ('ct.cb' is a checkbox)"))
+            ccase("sl-get-forged", "ui.slider.get({ id = 'ct.s1' }) [forged]", f(SLx.get, { id = "ct.s1" }), E.err(UIP .. ".slider.get: not a slider handle (use the handle that slider.create returned)"))
+            ccase("sl-ok", "ui.slider.create{ 0..1 step 0.1 } then set(nil), setDefault, get, remove [control]", function()
+                local h = SLx.create{ id = "ct.oks", place = rp, min = 0, max = 1, step = 0.1, value = 0.5, onChange = nop }
+                SLx.set(h, nil) SLx.setDefault(h, 0.3, "D")
+                local g = SLx.get(h)
+                SLx.remove(h) SLx.remove(h)
+                return g
+            end, E.nilret)
+            UI.row.remove(rp.row)
+            ccase("removed", "ui.choice.get(<a removed choice>)", function()
+                local h = CHx.create{ id = "ct.gone", place = { list = CT.list }, options = { "X" }, onChange = nop }
+                CHx.remove(h)
+                return CHx.get(h)
+            end, E.err(UIP .. ".choice: handle 'ct.gone' was removed"))
+            check(true, "CTCASES ran %d cases", CT.cases)
+        end)
+        step("ct: off-thread", function()
+            local done = false
+            LoopAsync(10, function()
+                local ok, err = pcall(function()
+                    local function off(key, name, fn, ...)
+                        local a = table.pack(...)
+                        CT.cases = CT.cases + 1
+                        case("menu3.ct-off-" .. key, "ui." .. name .. "(...) [off thread]", function() return fn(table.unpack(a, 1, a.n)) end, E.err(UIP .. "." .. name .. " called off the game thread"))
+                    end
+                    off("cb-create", "checkbox.create", UI.checkbox.create, { id = "off" })
+                    off("cb-get", "checkbox.get", UI.checkbox.get, {})
+                    off("cb-set", "checkbox.set", UI.checkbox.set, {}, true)
+                    off("cb-setenabled", "checkbox.setEnabled", UI.checkbox.setEnabled, {}, true)
+                    off("ch-create", "choice.create", UI.choice.create, { id = "off" })
+                    off("ch-get", "choice.get", UI.choice.get, {})
+                    off("ch-set", "choice.set", UI.choice.set, {}, 1)
+                    off("ch-range", "choice.range", UI.choice.range, { min = 0, max = 1, step = 1 })
+                    off("sl-create", "slider.create", UI.slider.create, { id = "off" })
+                    off("sl-get", "slider.get", UI.slider.get, {})
+                    off("sl-set", "slider.set", UI.slider.set, {}, 1)
+                    off("sl-setdefault", "slider.setDefault", UI.slider.setDefault, {}, 1)
+                end)
+                if not ok then check(false, "CASE menu3.ct-off block threw: %s", firstLine(err)) end
+                done = true
+                return true
+            end)
+            return function() return done end, 10, "ct off-thread cases"
+        end)
+        step("ct: features", function()
+            check(core.has("ui.slider.create") and core.has("ui.choice.range") and core.has("ui.checkbox.create") and core.has("ui.slider.setDefault"),
+                "CTHAS core.has: ui.slider.create, ui.choice.range, ui.checkbox.create, ui.slider.setDefault")
+        end)
+
+        -- ---- the controls as created, read from the live widgets
+        step("ct: read", function()
+            local cbW, chW, rgW, s1W, s2W = cell(1, "ct.cb"), cell(2, "ct.ch"), cell(3, "ct.rg"), cell(4, "ct.s1"), cell(5, "ct.s2")
+            local dcbW, dchW, dslW = cell(6, "ct.dcb"), cell(6, "ct.dch"), cell(6, "ct.dsl")
+            if not check(cbW and chW and rgW and s1W and s2W and dcbW and dchW and dslW, "CTROW every control is in its row on window CT") then return end
+            check(cname(cbW) == BUTTON_S and cname(chW) == CHOICE_S and cname(s1W) == SLIDER_S, "CTCLASS checkbox %s, choice %s, slider %s", cname(cbW), cname(chW), cname(s1W))
+            check(iconOf(cbW) == "checkbox_unticked", "CT checkbox unchecked shows %s", iconOf(cbW))
+            check(txt(prop(chW, "Value")) == "ONE" and enabledOf(prop(chW, "Prev")) == false and enabledOf(prop(chW, "Next")) == true,
+                "CT choice first frame shows %s, prev enabled=%s, next enabled=%s", tostring(txt(prop(chW, "Value"))), tostring(enabledOf(prop(chW, "Prev"))), tostring(enabledOf(prop(chW, "Next"))))
+            check(txt(prop(rgW, "Value")) == "Default", "CT range shows %s first", tostring(txt(prop(rgW, "Value"))))
+            local bv, bt, bh = sliderState(s1W)
+            check(bv and math.abs(bv - 150) < 0.01 and bt == "150" and bh == "DEFAULT (100)", "CT slider s1 bar=%s box=%s hint=%s", num(bv), bt, bh)
+            local v2, t2 = sliderState(s2W)
+            check(v2 and math.abs(v2 - 5) < 0.01 and t2 == "5", "CT slider s2 bar=%s box=%s", num(v2), t2)
+            check(math.abs(opacity(dcbW) - 0.45) < 0.01 and math.abs(opacity(dchW) - 0.45) < 0.01 and math.abs(opacity(dslW) - 0.45) < 0.01
+                and enabledOf(prop(dslW, "Bar")) == false and enabledOf(prop(dslW, "Box")) == false and enabledOf(prop(dchW, "Next")) == false,
+                "CT disabled row dimmed (opacity %.2f/%.2f/%.2f), slider bar and box and choice arrows disabled", opacity(dcbW), opacity(dchW), opacity(dslW))
+            -- the look: the slider's bar style copied from the game's Settings slider, or the generated copy and one WARN
+            local tmpl = found("/Game/Graphics/MainMenu/SettingsMenu.SettingsMenu_C:WidgetTree.Slider")
+            local function thick(w) return try(function() return w.WidgetStyle.BarThickness end) end
+            local function tint(w) return try(function() local c = w.WidgetStyle.NormalBarImage.TintColor.SpecifiedColor return string.format("%.2f,%.2f,%.2f,%.2f", c.R, c.G, c.B, c.A) end) end
+            local bar = prop(s1W, "Bar")
+            say("CTSTYLE template=%s bar thickness=%s tint=%s; template thickness=%s tint=%s", tmpl and "found" or "missing", tostring(thick(bar)), tostring(tint(bar)), tostring(tmpl and thick(tmpl)), tostring(tmpl and tint(tmpl)))
+            check(tmpl == nil or (thick(bar) == thick(tmpl) and tint(bar) == tint(tmpl)), "CTSTYLE the slider bar matches the game's Settings slider (or the template is missing: one WARN)")
+            check(UI.slider.isShown(CT.s1) and UI.choice.isShown(CT.ch) and UI.checkbox.isShown(CT.cb), "CT isShown true for the controls on the open window")
+        end)
+
+        -- ---- the checkbox: a real click
+        click("checkbox", function() return cell(1, "ct.cb") end)
+        step("ct: checkbox clicked", function()
+            check(UI.checkbox.get(CT.cb) == true and calls("ct.cb") == 1 and CT.last["ct.cb"].a == true and iconOf(cell(1, "ct.cb")) == "checkbox_ticked",
+                "CT checkbox click value=%s calls=%d shows %s", tostring(UI.checkbox.get(CT.cb)), calls("ct.cb"), iconOf(cell(1, "ct.cb")))
+            UI.checkbox.set(CT.cb, false)
+            UI.checkbox.set(CT.cb, true)
+            check(calls("ct.cb") == 1 and iconOf(cell(1, "ct.cb")) == "checkbox_ticked", "CT checkbox set false then true: no callback (calls=%d)", calls("ct.cb"))
+        end)
+        -- ---- the choice: next, next, prev; the range: next
+        click("choice next 1", function() return prop(cell(2, "ct.ch"), "Next") end)
+        click("choice next 2", function() return prop(cell(2, "ct.ch"), "Next") end)
+        click("choice prev", function() return prop(cell(2, "ct.ch"), "Prev") end)
+        click("range next", function() return prop(cell(3, "ct.rg"), "Next") end)
+        step("ct: choices clicked", function()
+            local i, o = UI.choice.get(CT.ch)
+            check(i == 2 and o == "TWO" and calls("ct.ch") == 3 and CT.last["ct.ch"].a == 2 and txt(prop(cell(2, "ct.ch"), "Value")) == "TWO",
+                "CT choice next next prev value=%s %s calls=%d shows %s", tostring(i), tostring(o), calls("ct.ch"), tostring(txt(prop(cell(2, "ct.ch"), "Value"))))
+            local ri, ro = UI.choice.get(CT.rg)
+            check(ri == 2 and ro == "0" and calls("ct.rg") == 1, "CT range next value=%s %s calls=%d", tostring(ri), tostring(ro), calls("ct.rg"))
+            UI.choice.set(CT.ch, 1)
+            check(calls("ct.ch") == 3 and enabledOf(prop(cell(2, "ct.ch"), "Prev")) == false, "CT choice set(1): no callback, prev disabled at the first option")
+        end)
+        click("choice prev at 1", function() return prop(cell(2, "ct.ch"), "Prev") end)
+        step("ct: choice at 1", function()
+            check(UI.choice.get(CT.ch) == 1 and calls("ct.ch") == 3, "CT choice prev at option 1 does nothing (no wrap; calls=%d)", calls("ct.ch"))
+            UI.choice.set(CT.ch, 2)
+        end)
+        -- ---- the slider: a drag from the handle to 30% of the bar
+        req("slider drag", function()
+            local bar = prop(cell(4, "ct.s1"), "Bar")
+            local x1, y = pointOf(bar, 0.75, 0.5) -- 150 of 0..200
+            local x2 = pointOf(bar, 0.3, 0.5)
+            CT.s1Ends = try(function() return cell(4, "ct.s1").EndCount end) -- the widget's own count of <Core>_OnSliderEnd calls
+            if x1 then return string.format("drag %d %d %d %d", x1, y, x2, y) end
+        end, 1.5)
+        step("ct: slider dragged", function()
+            local w = cell(4, "ct.s1")
+            local val, box = sliderState(w)
+            local got = UI.slider.get(CT.s1)
+            check(got ~= nil and got ~= 150 and got >= 40 and got <= 80 and math.floor(got) == got and calls("ct.s1") == 1 and CT.last["ct.s1"].a == got,
+                "CT slider drag value=%s calls=%d", num(got), calls("ct.s1"))
+            check(box == string.format("%d", got or -1) and val and math.abs(val - (got or -1)) < 0.01, "CT slider drag box=%s bar=%s (the box followed the drag)", box, num(val))
+            local ends = (try(function() return w.EndCount end) or -1) - (CT.s1Ends or 0)
+            check(ends == 1 and calls("ct.s1") == 1, "CT slider drag: Lua heard one drag end, no drag frames (%d)", ends)
+        end)
+        -- ---- typing: 57, 999, abc, empty
+        local function s1() return cell(4, "ct.s1") end
+        typeInto("s1 57", s1, "57")
+        step("ct: s1 57", function()
+            local _, box = sliderState(s1())
+            check(UI.slider.get(CT.s1) == 57 and calls("ct.s1") == 2 and box == "57", "CT slider typed 57 value=%s calls=%d box=%s", num(UI.slider.get(CT.s1)), calls("ct.s1"), box)
+        end)
+        typeInto("s1 999", s1, "999")
+        step("ct: s1 999", function()
+            local val, box = sliderState(s1())
+            check(UI.slider.get(CT.s1) == 200 and calls("ct.s1") == 3 and box == "200" and val and math.abs(val - 200) < 0.01, "CT slider typed 999 value=%s calls=%d box=%s", num(UI.slider.get(CT.s1)), calls("ct.s1"), box)
+        end)
+        typeInto("s1 abc", s1, "abc")
+        step("ct: s1 abc", function()
+            local _, box = sliderState(s1())
+            check(UI.slider.get(CT.s1) == 200 and calls("ct.s1") == 3 and box == "200", "CT slider typed abc value=%s calls=%d box=%s (the last value restored)", num(UI.slider.get(CT.s1)), calls("ct.s1"), box)
+        end)
+        typeInto("s1 empty", s1, "")
+        step("ct: s1 empty", function()
+            local val, box, hint = sliderState(s1())
+            check(UI.slider.get(CT.s1) == nil and calls("ct.s1") == 4 and CT.last["ct.s1"].a == nil and box == "" and hint == "DEFAULT (100)" and val and math.abs(val - 100) < 0.01,
+                "CT slider emptied value=%s calls=%d box='%s' hint=%s bar=%s (Default)", num(UI.slider.get(CT.s1)), calls("ct.s1"), box, hint, num(val))
+            UI.slider.setDefault(CT.s1, 120, "DEFAULT (120)")
+            local v2, _, h2 = sliderState(s1())
+            check(calls("ct.s1") == 4 and v2 and math.abs(v2 - 120) < 0.01 and h2 == "DEFAULT (120)", "CT slider setDefault(120) moved the Default slider to %s, hint %s, no callback", num(v2), h2)
+        end)
+        typeInto("s2 2.3", function() return cell(5, "ct.s2") end, "2.3")
+        step("ct: s2 2.3", function()
+            local _, box = sliderState(cell(5, "ct.s2"))
+            check(UI.slider.get(CT.s2) == 2.5 and calls("ct.s2") == 1 and (box == "2.5" or box == "2,5"), "CT slider step 0.5 typed 2.3 value=%s calls=%d box=%s", num(UI.slider.get(CT.s2)), calls("ct.s2"), box)
+        end)
+        -- ---- the disabled row: a click, a click on next, a drag and typing change nothing
+        click("disabled checkbox", function() return cell(6, "ct.dcb") end)
+        click("disabled next", function() return prop(cell(6, "ct.dch"), "Next") end)
+        req("disabled drag", function()
+            local bar = prop(cell(6, "ct.dsl"), "Bar")
+            local x1, y = pointOf(bar, 0.4, 0.5)
+            local x2 = pointOf(bar, 0.9, 0.5)
+            if x1 then return string.format("drag %d %d %d %d", x1, y, x2, y) end
+        end, 1.5)
+        typeInto("disabled box", function() return cell(6, "ct.dsl") end, "9", true)
+        step("ct: disabled", function()
+            local val, box = sliderState(cell(6, "ct.dsl"))
+            check(UI.checkbox.get(CT.dcb) == true and UI.choice.get(CT.dch) == 3 and UI.slider.get(CT.dsl) == 4 and box == "4" and val and math.abs(val - 4) < 0.01
+                and calls("ct.dcb") + calls("ct.dch") + calls("ct.dsl") == 0, "CT disabled click/drag/type: values unchanged (true, 3, 4; box %s), calls=%d", box, calls("ct.dcb") + calls("ct.dch") + calls("ct.dsl"))
+        end)
+        -- ---- the look in a screenshot: hover the checkbox (lit), then the whole window
+        req("hover checkbox", function() local x, y = at(function() return cell(1, "ct.cb") end)() if x then return string.format("move %d %d", x, y) end end, 1.5)
+        shot("ct-hover")
+        moveTo("ct away", neutral)
+        shot("ct-controls")
+        -- ---- close and reopen: values and enabled state kept
+        step("ct: reopen", function()
+            CT.before = { cb = UI.checkbox.get(CT.cb), ch = UI.choice.get(CT.ch), rg = UI.choice.get(CT.rg), s1 = UI.slider.get(CT.s1), s2 = UI.slider.get(CT.s2) }
+            UI.screen.close(CT.W)
+            CT.W = UI.screen.open{ id = "CT", close = true }
+            return msAfter(1.5), 4
+        end)
+        step("ct: reopened", function()
+            local cbW, chW, rgW, s1W, s2W = cell(1, "ct.cb"), cell(2, "ct.ch"), cell(3, "ct.rg"), cell(4, "ct.s1"), cell(5, "ct.s2")
+            if not check(cbW and chW and rgW and s1W and s2W, "CTREOPEN the controls are back on window CT") then return end
+            local v1, b1, h1 = sliderState(s1W)
+            local v2, b2 = sliderState(s2W)
+            check(iconOf(cbW) == "checkbox_ticked" and txt(prop(chW, "Value")) == "TWO" and txt(prop(rgW, "Value")) == "0"
+                and b1 == "" and h1 == "DEFAULT (120)" and v1 and math.abs(v1 - 120) < 0.01 and v2 and math.abs(v2 - 2.5) < 0.01 and (b2 == "2.5" or b2 == "2,5"),
+                "CTREOPEN values kept: checkbox %s, choice %s, range %s, s1 box '%s' hint %s bar %s, s2 %s", iconOf(cbW), tostring(txt(prop(chW, "Value"))), tostring(txt(prop(rgW, "Value"))), b1, h1, num(v1), b2)
+            check(math.abs(opacity(cell(6, "ct.dcb")) - 0.45) < 0.01 and enabledOf(prop(cell(6, "ct.dsl"), "Bar")) == false and enabledOf(prop(cell(6, "ct.dch"), "Next")) == false,
+                "CTREOPEN the disabled row is still disabled")
+            check(UI.checkbox.get(CT.cb) == CT.before.cb and UI.choice.get(CT.ch) == CT.before.ch and UI.slider.get(CT.s1) == CT.before.s1, "CTREOPEN get() unchanged by the reopen")
+        end)
+        click("choice next after reopen", function() return prop(cell(2, "ct.ch"), "Next") end)
+        step("ct: after reopen", function()
+            check(UI.choice.get(CT.ch) == 3 and calls("ct.ch") == 4, "CTREOPEN the new choice widget takes clicks (value %s, calls %d)", tostring(UI.choice.get(CT.ch)), calls("ct.ch"))
+            UI.screen.close(CT.W)
+            CT.peerCalls = calls("ct.cb")
+            return msAfter(1), 3
+        end)
+        -- ---- two mods: SkelPeer's checkbox on the menu; only SkelPeer's callback runs
+        local function peerBox()
+            local want = CORE:lower() .. ":" .. CORE .. "SkelPeer:peer.cb"
+            for _, w in ipairs(FindAllOf(BUTTON_S) or {}) do
+                if v(w) and try(function() return w.CoreTag:ToString() end) == want and absR(w) then return w end
+            end
+            return nil
+        end
+        click("peer checkbox", peerBox)
+        step("ct: peer", function()
+            check(peerBox() ~= nil and calls("ct.cb") == CT.peerCalls and calls("ct.ch") == 4, "CTPEER a click on SkelPeer's checkbox ran none of this mod's callbacks (checkbox calls %d)", calls("ct.cb"))
+            say("CTPEER clicked SkelPeer's checkbox (its PEERCB line is checked by check.ps1)")
+        end)
+    end
+    MM.controlSteps()
 end
 
 -- ---------------------------------------------------------------- runner (game thread, every 250 ms)

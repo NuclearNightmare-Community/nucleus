@@ -658,6 +658,65 @@ $menuChecks = $started + @(
     "!\[$T\] ICCLICK disabled"
     "\[$T\] OK ICCLOSE window IC closed"
     "!\[$T\] WARN .*(texture|icon|tooltip|overflow)"
+    # Mod Manager story 4 (core 0.10.0, UI-11): checkbox, choice and slider-with-number controls on window CT over the
+    # third menu, driven by real clicks, a drag and typing (the I/O matrix rows), then SkelPeer's checkbox on the menu.
+    "\[$T\] OK CTWIN window CT open with the controls"
+    "\[$T\] OK CTCASES ran 64 cases"
+    "\[$T\] OK CTHAS core\.has: ui\.slider\.create, ui\.choice\.range, ui\.checkbox\.create"
+    "\[$T\] OK CTROW every control is in its row"
+    "\[$T\] OK CTCLASS checkbox WBP_${N}Button_C, choice WBP_${N}Choice_C, slider WBP_${N}Slider_C"
+    "\[$T\] OK CT checkbox unchecked shows checkbox_unticked"
+    "\[$T\] OK CT choice first frame shows ONE, prev enabled=false, next enabled=true"
+    "\[$T\] OK CT range shows Default first"
+    "\[$T\] OK CT slider s1 bar=150 box=150 hint=DEFAULT \(100\)"
+    "\[$T\] OK CT slider s2 bar=5 box=5"
+    "\[$T\] OK CT disabled row dimmed "
+    "\[$T\] CTSTYLE template="
+    "\[$T\] OK CTSTYLE the slider bar matches"
+    "\[$T\] OK CT isShown true for the controls"
+    # Checkbox click (onChange(h, true) once) and set (no callback).
+    "\[$T\] OK CT checkbox click value=true calls=1 shows checkbox_ticked"
+    "\[$T\] OK CT checkbox set false then true: no callback \(calls=1\)"
+    # Choice arrows: next, next, prev -> option 2, three callbacks; no wrap at 1; the range's next.
+    "\[$T\] OK CT choice next next prev value=2 TWO calls=3 shows TWO"
+    "\[$T\] OK CT range next value=2 0 calls=1"
+    "\[$T\] OK CT choice set\(1\): no callback, prev disabled"
+    "\[$T\] OK CT choice prev at option 1 does nothing"
+    # Slider: a drag (one callback at its end, the box followed it), typing 57, 999, abc, empty; step 0.5 typed 2.3.
+    "\[$T\] OK CT slider drag value=\d+ calls=1"
+    "\[$T\] OK CT slider drag box="
+    "\[$T\] OK CT slider drag: Lua heard one drag end, no drag frames \(1\)"
+    "\[$T\] OK CT slider typed 57 value=57 calls=2 box=57"
+    "\[$T\] OK CT slider typed 999 value=200 calls=3 box=200"
+    "\[$T\] OK CT slider typed abc value=200 calls=3 box=200"
+    "\[$T\] OK CT slider emptied value=nil calls=4 box='' hint=DEFAULT \(100\) bar=100"
+    "\[$T\] OK CT slider setDefault\(120\) moved the Default slider to 120"
+    "\[$T\] OK CT slider step 0\.5 typed 2\.3 value=2\.5 calls=1"
+    # Disabled: dimmed; a click, a drag and typing change nothing, no callback.
+    "\[$T\] OK CT disabled click/drag/type: values unchanged \(true, 3, 4; box 4\), calls=0"
+    "!\[$T\] CTCB ct\.d"
+    # Reopen: values and enabled state kept; the new widget takes clicks, the old ones are gone.
+    "\[$T\] OK CTREOPEN the controls are back"
+    "\[$T\] OK CTREOPEN values kept: "
+    "\[$T\] OK CTREOPEN the disabled row is still disabled"
+    "\[$T\] OK CTREOPEN get\(\) unchanged"
+    "\[$T\] OK CTREOPEN the new choice widget takes clicks"
+    # onChange exactly once per real change: the callback lines this test logged, in all.
+    "#1|\[$T\] CTCB ct\.cb "
+    "#4|\[$T\] CTCB ct\.ch "
+    "#1|\[$T\] CTCB ct\.rg "
+    "#4|\[$T\] CTCB ct\.s1 "
+    "#1|\[$T\] CTCB ct\.s2 "
+    # Two mods: SkelPeer's checkbox heard its own click only; this mod's callbacks didn't run for it.
+    "\[$Peer\] PEER ready: checkbox 'peer\.cb' created"
+    "#1|\[$Peer\] PEERCB \d+ "
+    "\[$Peer\] PEERCB 1 'peer\.cb' true"
+    "!\[$Peer\] (ERROR|WARN (?!$slowWarnOk))"
+    "\[$T\] OK CTPEER a click on SkelPeer's checkbox ran none of this mod's callbacks"
+    # The controls' own failures: none.
+    "!\[$T\] WARN (checkbox|choice|slider) "
+    "!\[$T\] WARN .*(click handling failed|RegisterHook failed|can't be hooked)"
+    "#1|\[$T\] (OK|FAIL) CTSTYLE "
     "\[$T\] END result=PASS"
 )
 # Core story 24: the ic-* group, on window IC (menu3), and every new function off the game thread.
@@ -673,6 +732,19 @@ foreach ($id in 'style-key', 'overflow-bad', 'overflow-num', 'overflow-button', 
                 'off-image-create', 'off-image-set', 'off-image-setvis', 'off-image-remove', 'off-image-isshown', 'off-image-settip',
                 'off-text-settip', 'off-button-settip') {
     $menuChecks += "\[$T\] OK CASE menu3\.ic-$id "
+}
+# Mod Manager story 4: the ct-* group, on window CT (menu3), and every new function off the game thread.
+foreach ($id in 'cb-none', 'cb-args', 'cb-unknown', 'cb-onchange', 'cb-size-8', 'cb-size-65', 'cb-checked', 'cb-enabled', 'cb-hud', 'cb-kindid',
+                'cb-set-num', 'cb-get-choice', 'cb-get-forged', 'cb-setenabled', 'cb-setvis', 'cb-isshown-slider', 'cb-tip', 'cb-label-button', 'cb-ok',
+                'ch-none', 'ch-unknown', 'ch-empty', 'ch-65', 'ch-nonstring', 'ch-long', 'ch-sel-7', 'ch-sel-0', 'ch-onchange', 'ch-game', 'ch-widget',
+                'ch-hud', 'ch-set-7', 'ch-get-slider', 'ch-get-forged', 'ch-setenabled', 'ch-ok',
+                'rg-65', 'rg-extra-65', 'rg-step-0', 'rg-minmax', 'rg-inf', 'rg-extra', 'rg-unknown', 'rg-ok',
+                'sl-none', 'sl-unknown', 'sl-minmax', 'sl-step-0', 'sl-steps', 'sl-value-out', 'sl-value-nan', 'sl-default-out', 'sl-default-inf',
+                'sl-hint-65', 'sl-onchange', 'sl-hud', 'sl-set-out', 'sl-set-noarg', 'sl-setdefault-nil', 'sl-setdefault-hint', 'sl-get-checkbox',
+                'sl-get-forged', 'sl-ok', 'removed',
+                'off-cb-create', 'off-cb-get', 'off-cb-set', 'off-cb-setenabled', 'off-ch-create', 'off-ch-get', 'off-ch-set', 'off-ch-range',
+                'off-sl-create', 'off-sl-get', 'off-sl-set', 'off-sl-setdefault') {
+    $menuChecks += "\[$T\] OK CASE menu3\.ct-$id "
 }
 $manual = @(
     "\[$T\] SCENARIO manual "

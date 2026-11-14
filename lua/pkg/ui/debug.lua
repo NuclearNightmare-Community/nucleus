@@ -159,7 +159,7 @@ function D._check(hud, w, journal)
         local vis = tonumber(x:GetVisibility())
         if vis == 1 or vis == 2 or x:GetRenderOpacity() <= 0 then return end -- not drawn, nor anything inside
         local clsName = x:GetClass():GetFName():ToString()
-        local tag = (clsName == C.TEXT_SHORT and readTag(x)) or ((clsName == C.PANEL_SHORT or clsName == C.BUTTON_SHORT) and readCoreTag(x)) or nil
+        local tag = (clsName == C.TEXT_SHORT and readTag(x)) or ((clsName == C.PANEL_SHORT or clsName == C.BUTTON_SHORT or clsName == C.CHOICE_SHORT or clsName == C.SLIDER_SHORT) and readCoreTag(x)) or nil
         local element = tag and tag:sub(1, #TAG_PREFIX) == TAG_PREFIX and tag or nil
         local kind = element and "element" or nil
         if not kind then

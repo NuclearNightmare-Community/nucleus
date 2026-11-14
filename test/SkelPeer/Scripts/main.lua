@@ -8,6 +8,9 @@
 -- wrote a corrupt settings.json: core falls back to the default with one WARN), then waits at the menu for the test
 -- dependent's cue (<core>.test.settings.watching = 1, its watcher registered) and changes the test dependent's int
 -- setting with core.settings.setFor; the test dependent's watcher must see it within 1 s.
+-- menu (Mod Manager story 4: two mods' controls on one screen): one checkbox "peer.cb" on the title-screen menu
+-- (bottom-right); it logs one PEERCB line per change it hears. The test dependent clicks it through the OS with its own
+-- controls live; check.ps1 checks that the peer heard exactly its own click and none of the test dependent's.
 -- It never travels, presses keys or logs FAIL.
 local scriptDir = debug.getinfo(1, "S").source:gsub("^@", ""):match("^(.*)[/\\]")
 local ME = scriptDir:match("([^/\\]+)[/\\][Ss]cripts$")
@@ -58,6 +61,18 @@ client.connect{
         if SCENARIO == "bad-input" then
             local ok, err = pcall(settingsPeer, core)
             if not ok then say("PEERSET failed: %s", tostring(err)) end
+            return
+        end
+        if SCENARIO == "menu" then
+            local changes = 0
+            local okC, hc = pcall(core.ui.checkbox.create, {
+                id = "peer.cb", place = { host = "menu", corner = "bottom-right" },
+                onChange = function(handle, checked)
+                    changes = changes + 1
+                    say("PEERCB %d '%s' %s", changes, tostring(handle.id), tostring(checked))
+                end,
+            })
+            say("PEER ready: checkbox %s", okC and ("'" .. hc.id .. "' created") or ("failed: " .. tostring(hc)))
             return
         end
         -- Story 18 AC 8: the test-only deprecated op, twice; one DEPRECATED line for this dependent (check.ps1, ui).

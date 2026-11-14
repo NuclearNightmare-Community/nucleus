@@ -23,7 +23,9 @@ local uiOk, uiErr = pcall(function()
              menu = require(BASE .. ".ui.menu"), entry = require(BASE .. ".ui.entry"), screen = require(BASE .. ".ui.screen"),
              list = require(BASE .. ".ui.list"), row = require(BASE .. ".ui.row"),
              -- story 24 (core 0.8.0): images and icons
-             image = require(BASE .. ".ui.image") }
+             image = require(BASE .. ".ui.image"),
+             -- Mod Manager story 4 (core story 26): checkbox, choice and slider-with-number controls
+             checkbox = require(BASE .. ".ui.checkbox"), choice = require(BASE .. ".ui.choice"), slider = require(BASE .. ".ui.slider") }
 end)
 
 local NAME, LOWER = V.name, V.name:lower()

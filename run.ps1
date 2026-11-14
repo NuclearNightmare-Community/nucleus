@@ -14,7 +14,10 @@
   VM (a screenshot); on the host it is acknowledged and skipped. Story 21's menu scenario also asks for "key DOWN" and
   "key UP" (arrow keys, posted like Enter), "move <x> <y>" (the cursor to that desktop point, no click; a hover) and
   "wheel <x> <y> <notches>" (the cursor there, then that many mouse-wheel notches, negative = down, |n| at most 20);
-  move and wheel bring the game window to the front first, like a click.
+  move and wheel bring the game window to the front first, like a click. Mod Manager story 4's slider adds
+  "drag <x1> <y1> <x2> <y2>" (the left button down at the first point, ten moves to the second, up there; to the front
+  first, like a click), "type <text>" (1-16 of 0-9 . , a-z -, each posted as WM_CHAR to the game window) and
+  "key BACK", "key TAB", "key ESCAPE" (posted like Enter).
   Keeps the log as <workspace>/dumps/<copy>/<name lowercase>/<scenario>.log (ignored by git) and runs check.ps1.
   Refuses to start while another runner's test or driver mod is enabled in the copy (the workspace's tools/run-guard:
   the refusal names each and the command that clears it); -AllowOtherDrivers runs anyway.
@@ -146,6 +149,26 @@ function Invoke-Click([int] $x, [int] $y) {
     Write-Host "  clicked at ($x, $y)"
 }
 
+# A drag on the game only (Mod Manager story 4's slider): the button down at the start, ten real moves, up at the end.
+function Invoke-Drag([int] $x, [int] $y, [int] $x2, [int] $y2) {
+    $h = Get-FrontGameWindow 'drag'
+    if ($h -eq [IntPtr]::Zero) { return }
+    [void][CoreRun.Win]::SetCursorPos($x, $y)
+    Start-Sleep -Milliseconds 150
+    [CoreRun.Win]::mouse_event(0x0001, 1, 0, 0, [UIntPtr]::Zero); [CoreRun.Win]::mouse_event(0x0001, -1, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 150
+    if ([CoreRun.Win]::GetForegroundWindow() -ne $h) { Write-Host '  drag skipped: the game window lost the front'; return }
+    [CoreRun.Win]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 120
+    for ($i = 1; $i -le 10; $i++) {
+        [void][CoreRun.Win]::SetCursorPos([int][Math]::Round($x + ($x2 - $x) * $i / 10), [int][Math]::Round($y + ($y2 - $y) * $i / 10))
+        [CoreRun.Win]::mouse_event(0x0001, 1, 0, 0, [UIntPtr]::Zero); [CoreRun.Win]::mouse_event(0x0001, -1, 0, 0, [UIntPtr]::Zero)
+        Start-Sleep -Milliseconds 40
+    }
+    Start-Sleep -Milliseconds 120
+    [CoreRun.Win]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+    Write-Host "  dragged ($x, $y) -> ($x2, $y2)"
+}
+
 function Invoke-Request([string] $cmd) {
     # 'key ENTER' (touchdown), 'key <A-Z>' (the journal scenario's map key), 'key UP' / 'key DOWN', 'click <x> <y>'
     # (story 15), 'move <x> <y>' and 'wheel <x> <y> <notches>' (story 21), 'shot <label>' (VM only); anything else is ignored.
@@ -164,12 +187,29 @@ function Invoke-Request([string] $cmd) {
         if ($x -le 16383 -and $y -le 16383 -and $n -ne 0 -and [Math]::Abs($n) -le 20) { Invoke-Wheel $x $y $n } else { Write-Host "  wheel skipped: ($x, $y) or $n notches out of range" }
         return
     }
+    if ($cmd -cmatch '^drag (\d{1,5}) (\d{1,5}) (\d{1,5}) (\d{1,5})$') {
+        $p = 1..4 | ForEach-Object { [int]$Matches[$_] }
+        if (-not ($p | Where-Object { $_ -gt 16383 })) { Invoke-Drag $p[0] $p[1] $p[2] $p[3] } else { Write-Host "  drag skipped: a point out of range" }
+        return
+    }
+    if ($cmd -cmatch '^type ([0-9.,a-z-]{1,16})$') {
+        $text = $Matches[1]
+        $g = Get-OurGame
+        $hw = if ($g) { $g.MainWindowHandle } else { [IntPtr]::Zero }
+        if ($hw -eq [IntPtr]::Zero) { Write-Host '  type skipped: no game window'; return }
+        foreach ($c in $text.ToCharArray()) { [void][CoreRun.Win]::PostMessage($hw, 0x0102, [IntPtr][int]$c, [IntPtr]1); Start-Sleep -Milliseconds 30 } # WM_CHAR
+        Write-Host "  typed '$text' into the game window"
+        return
+    }
     if ($cmd -cmatch '^shot [A-Za-z0-9._-]{1,40}$') { Write-Host "  $cmd skipped (screenshots only in the VM)"; return }
     $vk, $scan, $label = $null, $null, $null
     $ext = 0
     if ($cmd -ceq 'key ENTER') { $vk, $scan, $label = 0x0D, 0x1C, 'ENTER' }
     elseif ($cmd -ceq 'key UP') { $vk, $scan, $label, $ext = 0x26, 0x48, 'UP', 1 }      # arrow keys are extended keys
     elseif ($cmd -ceq 'key DOWN') { $vk, $scan, $label, $ext = 0x28, 0x50, 'DOWN', 1 }
+    elseif ($cmd -ceq 'key BACK') { $vk, $scan, $label = 0x08, 0x0E, 'BACK' }     # Mod Manager story 4: the slider box
+    elseif ($cmd -ceq 'key TAB') { $vk, $scan, $label = 0x09, 0x0F, 'TAB' }
+    elseif ($cmd -ceq 'key ESCAPE') { $vk, $scan, $label = 0x1B, 0x01, 'ESCAPE' }
     elseif ($cmd -cmatch '^key ([A-Z])$') {
         $letter = $Matches[1]
         # Set-1 scan codes of a US layout; the virtual key of a letter is its ASCII code.

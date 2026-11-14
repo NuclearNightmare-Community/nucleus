@@ -12,6 +12,7 @@
 #include "Components/ButtonSlot.h"
 #include "Components/BorderSlot.h"
 #include "Components/CanvasPanel.h"
+#include "Components/EditableText.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/Image.h"
@@ -21,6 +22,7 @@
 #include "Components/SizeBox.h"
 #include "Components/SizeBoxSlot.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/Slider.h"
 #include "Components/Spacer.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextBlock.h"
@@ -1326,6 +1328,484 @@ namespace
 		return WBP;
 	}
 
+	// ---------------------------------------------------------------- Mod Manager story 4 (core 0.10.0): controls
+
+	/** A solid brush of one colour (no resource: Slate draws a quad of the tint), optionally of a fixed image size. */
+	FSlateBrush SolidBrush(const FLinearColor& C, FVector2D Size = FVector2D::ZeroVector)
+	{
+		FSlateBrush B;
+		B.TintColor = FSlateColor(C);
+		if (!Size.IsZero()) B.ImageSize = Size;
+		return B;
+	}
+
+	/**
+	 * A component bound event on one of the widget's variables (Var, of WidgetClass) for its multicast delegate
+	 * DelegateName, placed in the event graph; returns the event node (its exec out is "then", its parameters outputs).
+	 */
+	UK2Node_ComponentBoundEvent* BindEvent(UWidgetBlueprint* WBP, UEdGraph* EG, FGraph& G, FName Var, UClass* WidgetClass, FName DelegateName)
+	{
+		FObjectProperty* Prop = FindFProperty<FObjectProperty>(WBP->SkeletonGeneratedClass, Var);
+		FMulticastDelegateProperty* Delegate = FindFProperty<FMulticastDelegateProperty>(WidgetClass, DelegateName);
+		checkf(Prop && Delegate, TEXT("No %s.%s to bind"), *Var.ToString(), *DelegateName.ToString());
+		FGraphNodeCreator<UK2Node_ComponentBoundEvent> C(*EG);
+		UK2Node_ComponentBoundEvent* Bound = C.CreateNode(false);
+		Bound->InitializeComponentBoundEventParams(Prop, Delegate);
+		G.Place(Bound);
+		C.Finalize();
+		return Bound;
+	}
+
+	/** <Fn>(): Count = Count + 1 (the hookable function a bound event calls; it does nothing else). */
+	void FillCounter(UBlueprint* BP, const FFunc& F, FName Count)
+	{
+		FGraph G(BP, F.G);
+		UK2Node_VariableGet* GetCount = G.Get(Count);
+		UK2Node_CallFunction* Add = G.Call(UKismetMathLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, Add_IntInt));
+		G.Link(GetCount, Count, Add, TEXT("A"));
+		G.Default(Add, TEXT("B"), TEXT("1"));
+		UK2Node_VariableSet* SetCount = G.Set(Count);
+		G.Link(Add, PN_Ret, SetCount, Count);
+		G.Chain({F.Entry, SetCount});
+	}
+
+	/** The choice's arrow buttons: no face, a faint light on hover and press (the game's picker has bare arrows). */
+	FButtonStyle ArrowStyle()
+	{
+		FButtonStyle S;
+		S.SetNormal(SolidBrush(FLinearColor(1.f, 1.f, 1.f, 0.f)));
+		S.SetDisabled(SolidBrush(FLinearColor(1.f, 1.f, 1.f, 0.f)));
+		S.SetHovered(SolidBrush(FLinearColor(1.f, 1.f, 1.f, 0.10f)));
+		S.SetPressed(SolidBrush(FLinearColor(1.f, 1.f, 1.f, 0.18f)));
+		S.SetNormalPadding(FMargin(10.f, 2.f));
+		S.SetPressedPadding(FMargin(10.f, 2.f));
+		return S;
+	}
+
+	/** A TextBlock in the generator's plain look (white, size 18, centred, no hit test). */
+	UTextBlock* PlainText(UWidgetTree* T, const TCHAR* Name, const TCHAR* Text)
+	{
+		UTextBlock* W = T->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), Name);
+		W->SetText(FText::FromString(Text));
+		W->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		FSlateFontInfo Font = W->GetFont();
+		Font.Size = 18;
+		W->SetFont(Font);
+		W->SetJustification(ETextJustify::Center);
+		W->SetVisibility(ESlateVisibility::HitTestInvisible);
+		W->bIsVariable = true;
+		return W;
+	}
+
+	/**
+	 * WBP_<Core>Choice (Mod Manager story 4, core.ui.choice): SizeBox "Frame" (min width 160) -> Border "Background" ->
+	 * HorizontalBox "HBox" -> [Button "Prev" -> TextBlock "PrevLabel" ("<"), TextBlock "Value" (fills, centred),
+	 * Button "Next" -> TextBlock "NextLabel" (">")]. The arrows have no face, a faint light on hover. Lua holds the options
+	 * and the index; the widget only shows them. Functions:
+	 *   SetValueText(NewText: String)       Value.SetText(NewText)
+	 *   SetArrows(PrevOn, NextOn: Bool, OnR, OnG, OnB, OnA, OffR, OffG, OffB, OffA: Float)
+	 *                                       Prev/Next SetIsEnabled(PrevOn/NextOn), their labels in On or Off colour
+	 *   SetValueLook(Font: Object, Size, R, G, B, A: Float)   Value, PrevLabel and NextLabel font (Font, Size); Value colour
+	 *   SetBackground(R, G, B, A), SetBackgroundPadding(Padding)                as on the text widget
+	 *   SetBackgroundMaterial(Material, R, G, B, A, Padding), SetBackgroundSolid() as on the text widget (the worn strip)
+	 *   SetTag(NewTag: String)              CoreTag = NewTag
+	 *   <Core>_OnPrev(), <Core>_OnNext()    PrevCount / NextCount += 1. Prev.OnClicked / Next.OnClicked call them and
+	 *                                       nothing else; each dependent's Lua post-hooks them by full path (story 15's
+	 *                                       click pattern)
+	 */
+	UWidgetBlueprint* BuildChoice(const FString& Dir, const FString& Core)
+	{
+		UWidgetBlueprint* WBP = CastChecked<UWidgetBlueprint>(NewBlueprint(Dir / FString::Printf(TEXT("WBP_%sChoice"), *Core),
+			UUserWidget::StaticClass(), UWidgetBlueprint::StaticClass(), UWidgetBlueprintGeneratedClass::StaticClass()));
+		const FString PrevFn = Core + TEXT("_OnPrev"), NextFn = Core + TEXT("_OnNext");
+		CheckNames({TEXT("SetValueText"), TEXT("SetArrows"), TEXT("SetValueLook"), TEXT("SetBackground"), TEXT("SetBackgroundPadding"),
+			TEXT("SetBackgroundMaterial"), TEXT("SetBackgroundSolid"), TEXT("SetTag"), *PrevFn, *NextFn});
+
+		UWidgetTree* T = WBP->WidgetTree;
+		USizeBox* Frame = T->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Frame"));
+		Frame->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		Frame->SetMinDesiredWidth(160.f);
+		Frame->bIsVariable = true;
+		T->RootWidget = Frame;
+		UBorder* Background = RootBackground(T);
+		USizeBoxSlot* BgSlot = CastChecked<USizeBoxSlot>(Frame->AddChild(Background));
+		BgSlot->SetHorizontalAlignment(HAlign_Fill);
+		BgSlot->SetVerticalAlignment(VAlign_Fill);
+		UHorizontalBox* HBox = T->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("HBox"));
+		HBox->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		HBox->bIsVariable = true;
+		UBorderSlot* BoxSlot = CastChecked<UBorderSlot>(Background->AddChild(HBox));
+		BoxSlot->SetPadding(FMargin(0.f));
+		BoxSlot->SetHorizontalAlignment(HAlign_Fill);
+		BoxSlot->SetVerticalAlignment(VAlign_Center);
+		auto Arrow = [&](const TCHAR* Name, const TCHAR* LabelName, const TCHAR* Glyph) -> UButton*
+		{
+			UButton* B = T->ConstructWidget<UButton>(UButton::StaticClass(), Name);
+			B->SetStyle(ArrowStyle());
+			B->bIsVariable = true;
+			UButtonSlot* S = CastChecked<UButtonSlot>(B->AddChild(PlainText(T, LabelName, Glyph)));
+			S->SetPadding(FMargin(0.f));
+			S->SetHorizontalAlignment(HAlign_Center);
+			S->SetVerticalAlignment(VAlign_Center);
+			return B;
+		};
+		UButton* Prev = Arrow(TEXT("Prev"), TEXT("PrevLabel"), TEXT("<"));
+		UTextBlock* Value = PlainText(T, TEXT("Value"), TEXT(""));
+		UButton* Next = Arrow(TEXT("Next"), TEXT("NextLabel"), TEXT(">"));
+		for (UWidget* W : {static_cast<UWidget*>(Prev), static_cast<UWidget*>(Value), static_cast<UWidget*>(Next)})
+		{
+			UHorizontalBoxSlot* S = CastChecked<UHorizontalBoxSlot>(HBox->AddChild(W));
+			S->SetPadding(FMargin(0.f));
+			S->SetVerticalAlignment(VAlign_Center);
+			S->SetHorizontalAlignment(W == Value ? HAlign_Fill : HAlign_Center);
+			if (W == Value) S->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		}
+		for (const TCHAR* W : {TEXT("Frame"), TEXT("Background"), TEXT("HBox"), TEXT("Prev"), TEXT("PrevLabel"), TEXT("Value"), TEXT("Next"), TEXT("NextLabel")})
+		{
+			WBP->OnVariableAdded(W);
+		}
+		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("PrevCount"), IntT(), TEXT("0"));
+		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("NextCount"), IntT(), TEXT("0"));
+
+		FFunc SetValueText = AddFunction(WBP, TEXT("SetValueText"), {{TEXT("NewText"), StrT()}}, {});
+		FParams ArrowsIn = {{TEXT("PrevOn"), BoolT()}, {TEXT("NextOn"), BoolT()}};
+		for (const TCHAR* State : {TEXT("On"), TEXT("Off")})
+		{
+			for (const TCHAR* Ch : {TEXT("R"), TEXT("G"), TEXT("B"), TEXT("A")}) ArrowsIn.Add({FName(FString(State) + Ch), RealT()});
+		}
+		FFunc SetArrows = AddFunction(WBP, TEXT("SetArrows"), ArrowsIn, {});
+		FFunc SetLook = AddFunction(WBP, TEXT("SetValueLook"), {{TEXT("Font"), ObjT(UObject::StaticClass())}, {TEXT("Size"), RealT()},
+			{TEXT("R"), RealT()}, {TEXT("G"), RealT()}, {TEXT("B"), RealT()}, {TEXT("A"), RealT()}}, {});
+		FFunc SetBg = AddSetBackground(WBP);
+		FFunc SetPad = AddFunction(WBP, TEXT("SetBackgroundPadding"), {{TEXT("Padding"), RealT()}}, {});
+		FMaterialFns Mat = AddBackgroundMaterial(WBP);
+		FFunc SetTag = AddTag(WBP);
+		FFunc OnPrev = AddFunction(WBP, FName(PrevFn), {}, {});
+		FFunc OnNext = AddFunction(WBP, FName(NextFn), {}, {});
+		if (!Compile(WBP)) return nullptr;
+		FillBackground(WBP, SetBg, SetPad);
+		FillBackgroundMaterial(WBP, Mat);
+		FillTag(WBP, SetTag);
+		FillCounter(WBP, OnPrev, TEXT("PrevCount"));
+		FillCounter(WBP, OnNext, TEXT("NextCount"));
+		{
+			FGraph G(WBP, SetValueText.G);
+			UK2Node_VariableGet* GetValue = G.Get(TEXT("Value"));
+			UK2Node_CallFunction* ToText = G.Call(UKismetTextLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetTextLibrary, Conv_StringToText));
+			G.Link(SetValueText.Entry, TEXT("NewText"), ToText, TEXT("InString"));
+			UK2Node_CallFunction* Set = G.Call(UTextBlock::StaticClass(), GET_FUNCTION_NAME_CHECKED(UTextBlock, SetText));
+			G.Link(GetValue, TEXT("Value"), Set, PN_Self);
+			G.Link(ToText, PN_Ret, Set, TEXT("InText"));
+			G.Chain({SetValueText.Entry, Set});
+		}
+		{
+			// SetArrows: each arrow enabled or not, its label in the On or the Off colour.
+			FGraph G(WBP, SetArrows.G);
+			UK2Node_CallFunction* On = ColorFrom(G, SetArrows.Entry, TEXT("On"));
+			UK2Node_CallFunction* Off = ColorFrom(G, SetArrows.Entry, TEXT("Off"));
+			TArray<UEdGraphNode*> Seq = {SetArrows.Entry};
+			const TPair<const TCHAR*, const TCHAR*> Arrows[] = {{TEXT("Prev"), TEXT("PrevOn")}, {TEXT("Next"), TEXT("NextOn")}};
+			for (const TPair<const TCHAR*, const TCHAR*>& A : Arrows)
+			{
+				UK2Node_VariableGet* GetBtn = G.Get(A.Key);
+				UK2Node_CallFunction* En = G.Call(UWidget::StaticClass(), GET_FUNCTION_NAME_CHECKED(UWidget, SetIsEnabled));
+				G.Link(GetBtn, A.Key, En, PN_Self);
+				G.Link(SetArrows.Entry, A.Value, En, TEXT("bInIsEnabled"));
+				UK2Node_CallFunction* Pick = G.Call(UKismetMathLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, SelectColor));
+				G.Link(On, PN_Ret, Pick, TEXT("A"));
+				G.Link(Off, PN_Ret, Pick, TEXT("B"));
+				G.Link(SetArrows.Entry, A.Value, Pick, TEXT("bPickA"));
+				const FName LabelVar = FName(FString(A.Key) + TEXT("Label"));
+				UK2Node_VariableGet* GetLabel = G.Get(LabelVar);
+				UK2Node_CallFunction* SetC = G.Call(UTextBlock::StaticClass(), GET_FUNCTION_NAME_CHECKED(UTextBlock, SetColorAndOpacity));
+				G.Link(GetLabel, LabelVar, SetC, PN_Self);
+				G.Link(SlateColorOf(G, G.Pin(Pick, PN_Ret)), G.Pin(SetC, TEXT("InColorAndOpacity")));
+				Seq.Add(En);
+				Seq.Add(SetC);
+			}
+			for (int32 I = 1; I < Seq.Num(); ++I) G.Link(Seq[I - 1], PN_Then, Seq[I], PN_Exec);
+		}
+		{
+			// SetValueLook: the three texts' font, the value's colour.
+			FGraph G(WBP, SetLook.G);
+			UEdGraphPin* Info = FontInfoOf(G, G.Pin(SetLook.Entry, TEXT("Font")), G.Pin(SetLook.Entry, TEXT("Size")));
+			TArray<UEdGraphNode*> Seq = {SetLook.Entry};
+			for (const TCHAR* Var : {TEXT("Value"), TEXT("PrevLabel"), TEXT("NextLabel")})
+			{
+				UK2Node_VariableGet* GetT = G.Get(Var);
+				UK2Node_CallFunction* SetF = G.Call(UTextBlock::StaticClass(), GET_FUNCTION_NAME_CHECKED(UTextBlock, SetFont));
+				G.Link(GetT, Var, SetF, PN_Self);
+				G.Link(Info, G.Pin(SetF, TEXT("InFontInfo")));
+				Seq.Add(SetF);
+			}
+			UK2Node_CallFunction* Make = ColorFrom(G, SetLook.Entry, TEXT(""));
+			UK2Node_VariableGet* GetValue = G.Get(TEXT("Value"));
+			UK2Node_CallFunction* SetC = G.Call(UTextBlock::StaticClass(), GET_FUNCTION_NAME_CHECKED(UTextBlock, SetColorAndOpacity));
+			G.Link(GetValue, TEXT("Value"), SetC, PN_Self);
+			G.Link(SlateColorOf(G, G.Pin(Make, PN_Ret)), G.Pin(SetC, TEXT("InColorAndOpacity")));
+			Seq.Add(SetC);
+			for (int32 I = 1; I < Seq.Num(); ++I) G.Link(Seq[I - 1], PN_Then, Seq[I], PN_Exec);
+		}
+		{
+			// Event graph: Prev.OnClicked -> <Core>_OnPrev(), Next.OnClicked -> <Core>_OnNext(), nothing else.
+			UEdGraph* EG = FBlueprintEditorUtils::FindEventGraph(WBP);
+			ClearGraph(WBP, EG);
+			FGraph G(WBP, EG);
+			UK2Node_ComponentBoundEvent* P = BindEvent(WBP, EG, G, TEXT("Prev"), UButton::StaticClass(), TEXT("OnClicked"));
+			G.Chain({P, G.CallSelf(FName(PrevFn))});
+			UK2Node_ComponentBoundEvent* N = BindEvent(WBP, EG, G, TEXT("Next"), UButton::StaticClass(), TEXT("OnClicked"));
+			G.Chain({N, G.CallSelf(FName(NextFn))});
+		}
+		if (!Compile(WBP) || !Save(WBP)) return nullptr;
+		return WBP;
+	}
+
+	/**
+	 * WBP_<Core>Slider (Mod Manager story 4, core.ui.slider): SizeBox "Frame" (min width 280) -> HorizontalBox "HBox" ->
+	 * [Slider "Bar" (fills; MouseUsesStep, not focusable; the game's Settings slider style as generated defaults: bar 2 px
+	 * (0.44, 0.51, 0.52, 0.8), hover (0.7, 0.79, 0.79, 1); handle 8x20 (0.86, 0.92, 0.89, 1), hover (1, 1, 0.97, 1)),
+	 * SizeBox "BoxSize" (112 wide, 8 units left of it: room for a short hint) -> Border "Background" -> EditableText "Box" (centred, selects all
+	 * on focus, Escape reverts)]. The sync lives here, never in Lua: Bar.OnValueChanged writes the box on every drag
+	 * frame (Conv_DoubleToText with at most Decimals fraction digits, no grouping). Lua hears only the end of a drag and
+	 * the box's commit. Functions:
+	 *   SetRange(Min, Max, Step: Float, NewDecimals: Int)   Bar min, max and step size; Decimals = NewDecimals
+	 *   SetSliderValue(Value: Float)        Bar.SetValue(Value), the box shows it (as a drag frame would)
+	 *   SetSliderEmpty(Value: Float)        Bar.SetValue(Value), the box empty (its hint shows): the Default state
+	 *   SetHint(Hint: String)               Box's hint text
+	 *   SetEnabledState(Enabled: Bool)      Bar and Box SetIsEnabled
+	 *   SetBoxLook(Font: Object, Size: Float)   Box's font (the colour is the game's text colour, generated)
+	 *   CopySliderStyle(Template: Slider)   Bar.WidgetStyle = Template.WidgetStyle (the game's Settings slider, read live)
+	 *   SetBackground(R, G, B, A), SetBackgroundPadding(Padding)                the box's Border, as on the text widget
+	 *   SetBackgroundMaterial(Material, R, G, B, A, Padding), SetBackgroundSolid() as on the text widget (the worn strip)
+	 *   SetTag(NewTag: String)              CoreTag = NewTag
+	 *   <Core>_OnSliderEnd()                EndCount += 1; Bar.OnMouseCaptureEnd and OnControllerCaptureEnd call it
+	 *   <Core>_OnSliderCommit()             CommitCount += 1; Box.OnTextCommitted (Enter or focus lost) calls it
+	 */
+	UWidgetBlueprint* BuildSlider(const FString& Dir, const FString& Core)
+	{
+		UWidgetBlueprint* WBP = CastChecked<UWidgetBlueprint>(NewBlueprint(Dir / FString::Printf(TEXT("WBP_%sSlider"), *Core),
+			UUserWidget::StaticClass(), UWidgetBlueprint::StaticClass(), UWidgetBlueprintGeneratedClass::StaticClass()));
+		const FString EndFn = Core + TEXT("_OnSliderEnd"), CommitFn = Core + TEXT("_OnSliderCommit");
+		CheckNames({TEXT("SetRange"), TEXT("SetSliderValue"), TEXT("SetSliderEmpty"), TEXT("SetHint"), TEXT("SetEnabledState"), TEXT("SetBoxLook"),
+			TEXT("CopySliderStyle"), TEXT("SetBackground"), TEXT("SetBackgroundPadding"), TEXT("SetBackgroundMaterial"), TEXT("SetBackgroundSolid"),
+			TEXT("SetTag"), *EndFn, *CommitFn});
+
+		UWidgetTree* T = WBP->WidgetTree;
+		USizeBox* Frame = T->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Frame"));
+		Frame->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		Frame->SetMinDesiredWidth(280.f);
+		Frame->bIsVariable = true;
+		T->RootWidget = Frame;
+		UHorizontalBox* HBox = T->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("HBox"));
+		HBox->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		HBox->bIsVariable = true;
+		USizeBoxSlot* HSlot = CastChecked<USizeBoxSlot>(Frame->AddChild(HBox));
+		HSlot->SetHorizontalAlignment(HAlign_Fill);
+		HSlot->SetVerticalAlignment(VAlign_Center);
+		USlider* Bar = T->ConstructWidget<USlider>(USlider::StaticClass(), TEXT("Bar"));
+		{
+			FSliderStyle St = Bar->GetWidgetStyle();
+			const FSlateBrush BarN = SolidBrush(FLinearColor(0.44f, 0.51f, 0.52f, 0.8f));
+			const FSlateBrush ThumbN = SolidBrush(FLinearColor(0.86f, 0.92f, 0.89f, 1.f), FVector2D(8.f, 20.f));
+			St.SetNormalBarImage(BarN).SetDisabledBarImage(BarN).SetHoveredBarImage(SolidBrush(FLinearColor(0.7f, 0.79f, 0.79f, 1.f)));
+			St.SetNormalThumbImage(ThumbN).SetDisabledThumbImage(ThumbN).SetHoveredThumbImage(SolidBrush(FLinearColor(1.f, 1.f, 0.97f, 1.f), FVector2D(8.f, 20.f)));
+			St.SetBarThickness(2.f);
+			Bar->SetWidgetStyle(St);
+		}
+		Bar->SetSliderBarColor(FLinearColor::White);
+		Bar->SetSliderHandleColor(FLinearColor::White);
+		Bar->MouseUsesStep = true;
+		Bar->IsFocusable = false;
+		Bar->SetMinValue(0.f);
+		Bar->SetMaxValue(1.f);
+		Bar->SetStepSize(0.01f);
+		Bar->SetVisibility(ESlateVisibility::Visible);
+		Bar->bIsVariable = true;
+		USizeBox* BoxSize = T->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("BoxSize"));
+		BoxSize->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		BoxSize->SetWidthOverride(112.f);
+		BoxSize->bIsVariable = true;
+		UBorder* Background = RootBackground(T);
+		USizeBoxSlot* BgSlot = CastChecked<USizeBoxSlot>(BoxSize->AddChild(Background));
+		BgSlot->SetHorizontalAlignment(HAlign_Fill);
+		BgSlot->SetVerticalAlignment(VAlign_Fill);
+		UEditableText* Box = T->ConstructWidget<UEditableText>(UEditableText::StaticClass(), TEXT("Box"));
+		{
+			FEditableTextStyle St = Box->WidgetStyle;
+			St.SetColorAndOpacity(FSlateColor(FLinearColor(0.82f, 0.85f, 0.84f, 1.f))); // theme.game.text
+			FSlateFontInfo Font = St.Font;
+			Font.Size = 18;
+			St.SetFont(Font);
+			Box->SetWidgetStyle(St);
+		}
+		Box->SetJustification(ETextJustify::Center);
+		Box->SetSelectAllTextWhenFocused(true);
+		Box->SetRevertTextOnEscape(true);
+		Box->SetClearKeyboardFocusOnCommit(true);
+		Box->SetVisibility(ESlateVisibility::Visible);
+		Box->bIsVariable = true;
+		UBorderSlot* TextSlot = CastChecked<UBorderSlot>(Background->AddChild(Box));
+		TextSlot->SetPadding(FMargin(4.f, 2.f));
+		TextSlot->SetHorizontalAlignment(HAlign_Fill);
+		TextSlot->SetVerticalAlignment(VAlign_Center);
+		{
+			UHorizontalBoxSlot* S = CastChecked<UHorizontalBoxSlot>(HBox->AddChild(Bar));
+			S->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			S->SetVerticalAlignment(VAlign_Center);
+			S->SetPadding(FMargin(0.f));
+			UHorizontalBoxSlot* B = CastChecked<UHorizontalBoxSlot>(HBox->AddChild(BoxSize));
+			B->SetVerticalAlignment(VAlign_Center);
+			B->SetPadding(FMargin(8.f, 0.f, 0.f, 0.f));
+		}
+		for (const TCHAR* W : {TEXT("Frame"), TEXT("HBox"), TEXT("Bar"), TEXT("BoxSize"), TEXT("Background"), TEXT("Box")}) WBP->OnVariableAdded(W);
+		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("Decimals"), IntT(), TEXT("0"));
+		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("EndCount"), IntT(), TEXT("0"));
+		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("CommitCount"), IntT(), TEXT("0"));
+
+		FFunc SetRange = AddFunction(WBP, TEXT("SetRange"), {{TEXT("Min"), RealT()}, {TEXT("Max"), RealT()}, {TEXT("Step"), RealT()}, {TEXT("NewDecimals"), IntT()}}, {});
+		FFunc SetValue = AddFunction(WBP, TEXT("SetSliderValue"), {{TEXT("Value"), RealT()}}, {});
+		FFunc SetEmpty = AddFunction(WBP, TEXT("SetSliderEmpty"), {{TEXT("Value"), RealT()}}, {});
+		FFunc SetHint = AddFunction(WBP, TEXT("SetHint"), {{TEXT("Hint"), StrT()}}, {});
+		FFunc SetEnabled = AddFunction(WBP, TEXT("SetEnabledState"), {{TEXT("Enabled"), BoolT()}}, {});
+		FFunc SetLook = AddFunction(WBP, TEXT("SetBoxLook"), {{TEXT("Font"), ObjT(UObject::StaticClass())}, {TEXT("Size"), RealT()}}, {});
+		FFunc CopyStyle = AddFunction(WBP, TEXT("CopySliderStyle"), {{TEXT("Template"), ObjT(USlider::StaticClass())}}, {});
+		FFunc SetBg = AddSetBackground(WBP);
+		FFunc SetPad = AddFunction(WBP, TEXT("SetBackgroundPadding"), {{TEXT("Padding"), RealT()}}, {});
+		FMaterialFns Mat = AddBackgroundMaterial(WBP);
+		FFunc SetTag = AddTag(WBP);
+		FFunc OnEnd = AddFunction(WBP, FName(EndFn), {}, {});
+		FFunc OnCommit = AddFunction(WBP, FName(CommitFn), {}, {});
+		if (!Compile(WBP)) return nullptr;
+		FillBackground(WBP, SetBg, SetPad);
+		FillBackgroundMaterial(WBP, Mat);
+		FillTag(WBP, SetTag);
+		FillCounter(WBP, OnEnd, TEXT("EndCount"));
+		FillCounter(WBP, OnCommit, TEXT("CommitCount"));
+		/** Box.SetText(Conv_DoubleToText(Value pin, at most Decimals fraction digits, no grouping)); returns the SetText node. */
+		auto BoxShows = [](FGraph& G, UEdGraphPin* ValuePin) -> UK2Node_CallFunction*
+		{
+			UK2Node_CallFunction* ToText = G.Call(UKismetTextLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetTextLibrary, Conv_DoubleToText));
+			G.Link(ValuePin, G.Pin(ToText, TEXT("Value")));
+			G.Default(ToText, TEXT("RoundingMode"), TEXT("HalfFromZero"));
+			G.Default(ToText, TEXT("bUseGrouping"), TEXT("false"));
+			G.Default(ToText, TEXT("MinimumFractionalDigits"), TEXT("0"));
+			UK2Node_VariableGet* GetDec = G.Get(TEXT("Decimals"));
+			G.Link(GetDec, TEXT("Decimals"), ToText, TEXT("MaximumFractionalDigits"));
+			UK2Node_VariableGet* GetBox = G.Get(TEXT("Box"));
+			UK2Node_CallFunction* Set = G.Call(UEditableText::StaticClass(), GET_FUNCTION_NAME_CHECKED(UEditableText, SetText));
+			G.Link(GetBox, TEXT("Box"), Set, PN_Self);
+			G.Link(ToText, PN_Ret, Set, TEXT("InText"));
+			return Set;
+		};
+		{
+			FGraph G(WBP, SetRange.G);
+			UK2Node_VariableGet* GetBar = G.Get(TEXT("Bar"));
+			TArray<UEdGraphNode*> Seq = {SetRange.Entry};
+			const TPair<FName, const TCHAR*> Calls[] = {{GET_FUNCTION_NAME_CHECKED(USlider, SetMinValue), TEXT("Min")},
+				{GET_FUNCTION_NAME_CHECKED(USlider, SetMaxValue), TEXT("Max")}, {GET_FUNCTION_NAME_CHECKED(USlider, SetStepSize), TEXT("Step")}};
+			for (const TPair<FName, const TCHAR*>& C : Calls)
+			{
+				UK2Node_CallFunction* N = G.Call(USlider::StaticClass(), C.Key);
+				G.Link(GetBar, TEXT("Bar"), N, PN_Self);
+				G.Link(SetRange.Entry, C.Value, N, TEXT("InValue"));
+				Seq.Add(N);
+			}
+			UK2Node_VariableSet* SetDec = G.Set(TEXT("Decimals"));
+			G.Link(SetRange.Entry, TEXT("NewDecimals"), SetDec, TEXT("Decimals"));
+			Seq.Add(SetDec);
+			for (int32 I = 1; I < Seq.Num(); ++I) G.Link(Seq[I - 1], PN_Then, Seq[I], PN_Exec);
+		}
+		for (const FFunc* F : {&SetValue, &SetEmpty})
+		{
+			FGraph G(WBP, F->G);
+			UK2Node_VariableGet* GetBar = G.Get(TEXT("Bar"));
+			UK2Node_CallFunction* SetV = G.Call(USlider::StaticClass(), GET_FUNCTION_NAME_CHECKED(USlider, SetValue));
+			G.Link(GetBar, TEXT("Bar"), SetV, PN_Self);
+			G.Link(F->Entry, TEXT("Value"), SetV, TEXT("InValue"));
+			UK2Node_CallFunction* SetT;
+			if (F == &SetValue)
+			{
+				SetT = BoxShows(G, G.Pin(F->Entry, TEXT("Value")));
+			}
+			else
+			{
+				UK2Node_VariableGet* GetBox = G.Get(TEXT("Box"));
+				SetT = G.Call(UEditableText::StaticClass(), GET_FUNCTION_NAME_CHECKED(UEditableText, SetText));
+				G.Link(GetBox, TEXT("Box"), SetT, PN_Self); // InText left at its default: empty
+			}
+			G.Chain({F->Entry, SetV, SetT});
+		}
+		{
+			FGraph G(WBP, SetHint.G);
+			UK2Node_VariableGet* GetBox = G.Get(TEXT("Box"));
+			UK2Node_CallFunction* ToText = G.Call(UKismetTextLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetTextLibrary, Conv_StringToText));
+			G.Link(SetHint.Entry, TEXT("Hint"), ToText, TEXT("InString"));
+			UK2Node_CallFunction* Set = G.Call(UEditableText::StaticClass(), GET_FUNCTION_NAME_CHECKED(UEditableText, SetHintText));
+			G.Link(GetBox, TEXT("Box"), Set, PN_Self);
+			G.Link(ToText, PN_Ret, Set, TEXT("InHintText"));
+			G.Chain({SetHint.Entry, Set});
+		}
+		{
+			FGraph G(WBP, SetEnabled.G);
+			TArray<UEdGraphNode*> Seq = {SetEnabled.Entry};
+			for (const TCHAR* Var : {TEXT("Bar"), TEXT("Box")})
+			{
+				UK2Node_VariableGet* GetW = G.Get(Var);
+				UK2Node_CallFunction* Set = G.Call(UWidget::StaticClass(), GET_FUNCTION_NAME_CHECKED(UWidget, SetIsEnabled));
+				G.Link(GetW, Var, Set, PN_Self);
+				G.Link(SetEnabled.Entry, TEXT("Enabled"), Set, TEXT("bInIsEnabled"));
+				Seq.Add(Set);
+			}
+			for (int32 I = 1; I < Seq.Num(); ++I) G.Link(Seq[I - 1], PN_Then, Seq[I], PN_Exec);
+		}
+		{
+			FGraph G(WBP, SetLook.G);
+			UK2Node_VariableGet* GetBox = G.Get(TEXT("Box"));
+			UEdGraphPin* Info = FontInfoOf(G, G.Pin(SetLook.Entry, TEXT("Font")), G.Pin(SetLook.Entry, TEXT("Size")));
+			UK2Node_CallFunction* SetF = G.Call(UEditableText::StaticClass(), GET_FUNCTION_NAME_CHECKED(UEditableText, SetFont));
+			G.Link(GetBox, TEXT("Box"), SetF, PN_Self);
+			G.Link(Info, G.Pin(SetF, TEXT("InFontInfo")));
+			G.Chain({SetLook.Entry, SetF});
+		}
+		{
+			// CopySliderStyle(Template): Bar.WidgetStyle = Template.WidgetStyle. Slate's slider draws from the property
+			// (it holds a pointer to it), so the next value change repaints it in the new style.
+			FGraph G(WBP, CopyStyle.G);
+			FGraphNodeCreator<UK2Node_VariableGet> GC(*G.G);
+			UK2Node_VariableGet* GetStyle = GC.CreateNode(false);
+			GetStyle->VariableReference.SetExternalMember(TEXT("WidgetStyle"), USlider::StaticClass());
+			G.Place(GetStyle);
+			GC.Finalize();
+			G.Link(CopyStyle.Entry, TEXT("Template"), GetStyle, PN_Self);
+			FGraphNodeCreator<UK2Node_VariableSet> SC(*G.G);
+			UK2Node_VariableSet* SetStyle = SC.CreateNode(false);
+			SetStyle->VariableReference.SetExternalMember(TEXT("WidgetStyle"), USlider::StaticClass());
+			G.Place(SetStyle);
+			SC.Finalize();
+			UK2Node_VariableGet* GetBar = G.Get(TEXT("Bar"));
+			G.Link(GetBar, TEXT("Bar"), SetStyle, PN_Self);
+			G.Link(GetStyle, TEXT("WidgetStyle"), SetStyle, TEXT("WidgetStyle"));
+			G.Chain({CopyStyle.Entry, SetStyle});
+		}
+		{
+			// Event graph: the drag writes the box (no Lua), its end and the box's commit call the hookable functions.
+			UEdGraph* EG = FBlueprintEditorUtils::FindEventGraph(WBP);
+			ClearGraph(WBP, EG);
+			FGraph G(WBP, EG);
+			UK2Node_ComponentBoundEvent* Changed = BindEvent(WBP, EG, G, TEXT("Bar"), USlider::StaticClass(), TEXT("OnValueChanged"));
+			G.Chain({Changed, BoxShows(G, G.Pin(Changed, TEXT("Value")))});
+			for (const TCHAR* D : {TEXT("OnMouseCaptureEnd"), TEXT("OnControllerCaptureEnd")})
+			{
+				UK2Node_ComponentBoundEvent* E = BindEvent(WBP, EG, G, TEXT("Bar"), USlider::StaticClass(), D);
+				G.Chain({E, G.CallSelf(FName(EndFn))});
+			}
+			UK2Node_ComponentBoundEvent* Commit = BindEvent(WBP, EG, G, TEXT("Box"), UEditableText::StaticClass(), TEXT("OnTextCommitted"));
+			G.Chain({Commit, G.CallSelf(FName(CommitFn))});
+		}
+		if (!Compile(WBP) || !Save(WBP)) return nullptr;
+		return WBP;
+	}
+
 	/** <Core>_Call(Request) -> ReturnValue: "bp-default:" + Request. Core's Lua RegisterHooks it and replaces the result. */
 	void AddChannel(UBlueprint* BP, const FString& Core)
 	{
@@ -1814,6 +2294,9 @@ int32 UCoreGenCommandlet::Main(const FString& Params)
 	if (!BuildRow(Dir, Core)) return 1;
 	if (!BuildScreen(Dir, Core)) return 1;
 	if (!BuildImage(Dir, Core)) return 1;
+	// Mod Manager story 4 (core 0.10.0): the choice and the slider (the checkbox is an icon-only button).
+	if (!BuildChoice(Dir, Core)) return 1;
+	if (!BuildSlider(Dir, Core)) return 1;
 	if (!BuildActor(Dir, Core)) return 1;
 	if (!BuildMarkers(Dir)) return 1;
 	if (!LayoutFile.IsEmpty() && !WriteLayout(Dir, LayoutFile)) return 1;

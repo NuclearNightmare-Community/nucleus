@@ -27,6 +27,10 @@
 -- the game thread inside pcall: a throwing callback is logged once per button and the hook stays. Clicks on a disabled
 -- or hidden button (or one in a hidden panel) are dropped, and so is a repeat within 250 ms (a double click is one).
 --
+-- Mod Manager story 4 (core 0.10.0): a checkbox (checkbox.lua) is this widget too, icon only. The same hook serves it:
+-- the dispatch routes by the element's kind (B._kindDispatch), with the same tag, live-widget, enabled, visibility and
+-- debounce rules; the class-to-kind lookups compare classes (text.lua, sameClass).
+--
 -- Where: only on hosts where the game shows a cursor ("journal", story 13), directly or in a panel there. On the HUD
 -- the game's input is game-only and clicks never reach a widget (docs/blueprint-mods.md Q3): host = "hud" raises until
 -- story 16 (input mode) lands.
@@ -53,6 +57,9 @@ local function firstLine(e) return (tostring(e):match("^[^\n]*")) end
 -- Story 21: core's own buttons (a window's Close) carry the tag <core>:<mod>:#<name>; ids of dependents' elements
 -- can't start with "#". id -> fn() run on a click, under pcall.
 B._internal = {}
+-- Mod Manager story 4: other kinds on this widget class: kind -> fn(el, widget), run for a click that passed the
+-- checks below (its own tag, its live widget, enabled and visible, not a repeat within 250 ms).
+B._kindDispatch = {}
 local lastInternal = {}
 
 -- Whether an element and every container above it are visible (story 21: a row in a list is two levels down).
@@ -83,13 +90,15 @@ local function dispatch(ctx)
         return
     end
     local el = C.els[id]
-    if not el or el.removed or el.kind ~= "button" then S.ignored = S.ignored + 1 return end
+    if not el or el.removed or (el.kind ~= "button" and not B._kindDispatch[el.kind]) then S.ignored = S.ignored + 1 return end
     local cur = el.ref and C.deref(el.ref)
     if not cur or cur:GetAddress() ~= w:GetAddress() then S.ignored = S.ignored + 1 return end -- not its live widget
     if not el.enabled or not chainVisible(el) then S.dropped = S.dropped + 1 return end
     local now = C.micros()
     if el.lastClick and now - el.lastClick < DEBOUNCE_US then S.debounced = S.debounced + 1 return end
     el.lastClick = now
+    local kd = B._kindDispatch[el.kind]
+    if kd then return kd(el, w) end -- story 4: a checkbox toggles (checkbox.lua)
     S.clicks = S.clicks + 1
     el.clicks = (el.clicks or 0) + 1
     if C.debugOn() then C.log.debug("ui button '%s' clicked (%d)", el.id, el.clicks) end
@@ -230,17 +239,21 @@ end
 
 local PLAIN_LABEL = { size = 18 }
 local style -- below
+-- The content of a button widget (story 4: shared with the checkbox, which registers no hook here: the poll does).
+local function content(el, w, fresh)
+    if not (fresh and el.label == "") then C.count(); w:SetLabel(el.label) end
+    if fresh then el.appliedEnabled = true end -- a new widget is enabled and opaque
+    applyEnabled(el, w)
+    -- Story 24: the icon and the tooltip; a fresh widget has neither, so a button without them makes no call.
+    if el.icon or (not fresh and el.layoutKey ~= nil and el.layoutKey ~= "label") then applyIcon(el, w, fresh)
+    elseif fresh then el.iconKey, el.layoutKey = false, "label" end
+    X._applyTooltip(el, w, fresh)
+end
 X.KIND.button = {
     pkg = C.BUTTON_PKG, short = C.BUTTON_SHORT, cls = C.BUTTON_CLASS,
     content = function(el, w, fresh)
         ensureHook()
-        if not (fresh and el.label == "") then C.count(); w:SetLabel(el.label) end
-        if fresh then el.appliedEnabled = true end -- a new widget is enabled and opaque
-        applyEnabled(el, w)
-        -- Story 24: the icon and the tooltip; a fresh widget has neither, so a button without them makes no call.
-        if el.icon or (not fresh and el.layoutKey ~= nil and el.layoutKey ~= "label") then applyIcon(el, w, fresh)
-        elseif fresh then el.iconKey, el.layoutKey = false, "label" end
-        X._applyTooltip(el, w, fresh)
+        content(el, w, fresh)
     end,
     style = function(el, w, fresh) style(el, w, fresh) end,
 }
@@ -292,7 +305,9 @@ local BUTTONS, ROWS_LISTS = { button = true }, { row = true, list = true }
 
 -- Buttons need a host with a cursor; so do lists and rows (story 21), and a panel holding buttons. Called by the
 -- engine for every create and place.
-local NEEDS_CURSOR = { button = "buttons", list = "lists", row = "rows" }
+local NEEDS_CURSOR = { button = "buttons", list = "lists", row = "rows",
+    checkbox = "checkboxes", choice = "choices", slider = "sliders" } -- Mod Manager story 4: the controls
+local CONTROLS = { checkbox = true, choice = true, slider = true }
 X.checkHost = function(kind, host, fn, el)
     if host ~= "hud" then return end
     if NEEDS_CURSOR[kind] then
@@ -304,6 +319,9 @@ X.checkHost = function(kind, host, fn, el)
         end
         if holds(el, ROWS_LISTS) then
             C.fail("%s.%s: panel '%s' holds rows or lists, which need a host with a cursor (%s); see input mode, story 16", C.UI, fn, el.id, C.CURSOR_HOSTS)
+        end
+        if holds(el, CONTROLS) then
+            C.fail("%s.%s: panel '%s' holds controls (checkboxes, choices or sliders), which need a host with a cursor (%s); see input mode, story 16", C.UI, fn, el.id, C.CURSOR_HOSTS)
         end
     end
 end
@@ -456,5 +474,7 @@ end
 function B._prepare() return X._classOf("button") ~= nil end
 -- Internal (screen.lua): the click hook for core's own buttons.
 function B._ensureHook() return ensureHook() end
+-- Internal (checkbox.lua, story 4): the button widget's content, style and icon apply, the visibility chain.
+B._content, B._style, B._applyIcon, B._chainVisible = content, function(el, w, fresh) style(el, w, fresh) end, applyIcon, chainVisible
 B._dispatch, B._S = onClicked, S -- for unit tests
 return B
