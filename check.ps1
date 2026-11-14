@@ -286,6 +286,45 @@ foreach ($id in 'pre-obj-set', 'pre-obj-desc', 'pre-obj-trait') { $badInput += "
 # Map service story 9: the map setup signal (<name>.map.setup) read from the test's own Lua state during main.lua, in
 # the menu and in the stock match (listen host): exactly "none" each time.
 foreach ($id in 'pre-map-signal', 'menu1.map-signal', 'match1.map-signal') { $badInput += "\[$T\] OK CASE $([regex]::Escape($id)) " }
+# Mod Manager story 5: the settings service. core.settings and the ops with bad values in both worlds and off the game
+# thread; the title-screen window (test.mode); the cross-state change (SkelPeer sets test.count, this test's watcher
+# sees it within 1 s, rev +1); the restart setting; SkelPeer's corrupt settings.json (one WARN), SkelTest's missing one
+# (one info line). After the run (with -Instance) the test dependent's settings.json is read back below.
+foreach ($p in 'menu1', 'match1') {
+    foreach ($id in 'set-get-ok', 'set-get-nil', 'set-get-num', 'set-get-table', 'set-get-empty', 'set-get-unknown', 'set-get-preset', 'set-getall-ok',
+                    'set-getall-arg', 'set-set-unknown', 'set-set-keynum', 'set-set-float', 'set-set-61', 'set-set-enum-x', 'set-set-nan', 'set-set-inf',
+                    'set-set-bool-str', 'set-set-nilval', 'set-set-table', 'set-set-three', 'set-set-readonly', 'set-set-lobby', 'set-set-flag-ok',
+                    'set-get-flag', 'set-set-flag-back', 'set-set-ratio-ok', 'set-set-ratio-back', 'set-set-menu', 'set-watch-nil', 'set-watch-str',
+                    'set-unwatch-str', 'set-unwatch-float', 'set-unwatch-unknown', 'set-watch-ok', 'set-describe-dots', 'set-describe-65',
+                    'set-describe-nil', 'set-describe-unknown', 'set-describe-core', 'set-describe-own', 'set-setfor-dots', 'set-setfor-65',
+                    'set-setfor-unknown', 'set-setfor-core', 'set-setfor-peer-99', 'set-setfor-num', 'ch-set-get-num', 'ch-set-get-table',
+                    'chd-set-get-none', 'chd-set-get-empty', 'chd-set-get-dots', 'chd-set-get-slash', 'chd-set-get-65', 'chd-set-get-unknown',
+                    'chd-set-get-core', 'chd-set-get-own', 'chd-set-set-none', 'chd-set-set-brace', 'chd-set-set-array', 'chd-set-set-deep',
+                    'chd-set-set-long', 'chd-set-set-dup', 'chd-set-set-nomod', 'chd-set-set-dots', 'chd-set-set-novalue', 'chd-set-set-unknownkey',
+                    'chd-set-set-badvalue', 'chd-set-set-nan', 'chd-set-set-readonly', 'chd-set-set-unknownmod', 'chd-set-set-garbage',
+                    'set-restart-get', 'set-restart-pending',
+                    'off-set-get', 'off-set-getall', 'off-set-set', 'off-set-setfor', 'off-set-describe', 'off-set-watch', 'off-set-unwatch') {
+        $badInput += "\[$T\] OK CASE $p\.$id "
+    }
+}
+$badInput += @(
+    "\[$T\] OK CASE menu1\.set-restart "
+    "\[$N\] READY .* features=(\S*,)?settings(,\S*)?\s*$"
+    "#1|\[$N\] settings: ${T}: no settings\.json; using the declared defaults\s*$"
+    "#1|\[$N\] WARN settings: ${Peer}: settings\.json is corrupt "
+    "!\[$N\] WARN settings: $T"
+    "!\[$N\] WARN settings: .*could not write"
+    "!\[$N\] settings: ${N}: "   # core's own folder declares no settings: no values-file line for it
+    "\[$Peer\] PEERGET peer\.level ok=true value=2\s*$"
+    "#1|\[$Peer\] PEERSET $T test\.count=42 ok=true result=true\s*$"
+    "#1|\[$T\] SETWATCH menu1 key=test\.count value=42 "
+    "\[$T\] OK SETX menu1 watcher saw test\.count=42"
+    "\[$T\] OK SETX menu1 within 1 s of the peer's set"
+    "\[$T\] OK SETX menu1 rev rose by one"
+    "\[$T\] OK SETX menu1 get\('test\.count'\) = 42"
+    "!\[$T\] WARN settings"
+    "!\[$Peer\] (FAIL|ERROR|WARN)"
+)
 $NT = [regex]::Escape("${name}SkelNative")
 $badInput += @(
     "\[$T\] OK CASES main\.lua objectives recorded=3"
@@ -702,6 +741,24 @@ if ($Scenario -eq 'bad-input') {
     $seen = @($lines | Where-Object { $_ -match "\[$T\] FEATURES (\S+)" } | ForEach-Object { $Matches[1] }) | Select-Object -Last 1
     if ($ready -and $ready -eq $seen) { Write-Host "ok:   core.features() equals the READY line's features ($ready)" }
     else { Write-Host "FAIL: core.features() ($seen) differs from the READY line's features ($ready)"; $failed++ }
+}
+if ($Scenario -eq 'bad-input') {
+    # Mod Manager story 5 AC 1: the test dependent's settings.json after the run holds the values set during it
+    # (SkelPeer's test.count, the title-screen test.mode, the restart test.boot) and nothing else, with no .tmp or .bak.
+    if ($Instance) {
+        $sdir = Join-Path (Resolve-Path $Instance) "NuclearNightmare\Binaries\Win64\ue4ss\Mods\$t"
+        $sfile = Join-Path $sdir 'settings.json'
+        $vals = $null
+        try { $vals = Get-Content $sfile -Raw -ErrorAction Stop | ConvertFrom-Json -AsHashtable } catch { }
+        $want = [ordered]@{ 'test.count' = 42; 'test.mode' = 'b'; 'test.boot' = 77 }
+        $okVals = $vals -and $vals.Count -eq $want.Count -and -not @($want.Keys | Where-Object { $vals[$_] -ne $want[$_] })
+        $raw = if (Test-Path $sfile) { (Get-Content $sfile -Raw) } else { '(missing)' }
+        if ($okVals) { Write-Host "ok:   $t's settings.json holds test.count=42, test.mode=b, test.boot=77 and nothing else ($raw)" }
+        else { Write-Host "FAIL: $t's settings.json should hold test.count=42, test.mode=b, test.boot=77 and nothing else; it holds $raw"; $failed++ }
+        $left = @('settings.json.tmp', 'settings.json.bak' | Where-Object { Test-Path (Join-Path $sdir $_) })
+        if (-not $left) { Write-Host "ok:   no settings.json.tmp or .bak left in Mods/$t" }
+        else { Write-Host "FAIL: left in Mods/$($t): $($left -join ', ')"; $failed++ }
+    } else { Write-Host "warn: no -Instance: $t's settings.json not read back"; $warned++ }
 }
 if ($Scenario -eq 'menu') {
     # Story 21: no menu hook before a MainMenu_C exists. The test logs STARTUP while none is in the viewport, just before

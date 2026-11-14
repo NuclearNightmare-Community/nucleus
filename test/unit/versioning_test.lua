@@ -101,10 +101,10 @@ ok(S.parse("1.2.3").major == 1 and S.parse(">=1.2.3") == nil and S.parse(5) == n
 -- ---------------------------------------------------------------- features
 local F = require("nucleus.features")
 local declared = F.declared()
-local want = { "call", "clock", "deref", "free", "map.setup", "ref", "ui", "ui.button", "ui.button.icon", "ui.button.setTooltip", "ui.debug", "ui.elements", "ui.hud",
+local want = { "call", "clock", "deref", "free", "map.setup", "ref", "settings", "ui", "ui.button", "ui.button.icon", "ui.button.setTooltip", "ui.debug", "ui.elements", "ui.hud",
     "ui.image", "ui.image.create", "ui.image.isShown", "ui.image.remove", "ui.image.set", "ui.image.setTooltip", "ui.image.setVisible",
     "ui.journal", "ui.journal.regions", "ui.list", "ui.look", "ui.menu", "ui.overflow", "ui.panel", "ui.place", "ui.row", "ui.screen", "ui.text", "ui.text.setTooltip" }
-eq(table.concat(declared, ","), table.concat(want, ","), "declared(): the 0.8.0 feature list (map.setup, ui.journal.regions, ui.look, story 24's names hand-named), sorted")
+eq(table.concat(declared, ","), table.concat(want, ","), "declared(): the 0.9.0 feature list (map.setup, ui.journal.regions, ui.look, story 24's names hand-named; settings), sorted")
 -- Story 24: what a dependent asks core.has for (AC 5).
 do
     local set = F.set(declared)

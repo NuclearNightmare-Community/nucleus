@@ -424,6 +424,7 @@ local uiOffThreadCases -- defined with the UI cases below
 local panelCases -- story 14, defined with the UI cases below
 local buttonCases -- story 15, defined with the UI cases below
 local objectivesOffThreadCases -- map service story 3, defined with the objectives cases below
+local SETS = {} -- Mod Manager story 5: the settings cases (one table: main.lua is at the 200-locals limit)
 local function case(id, desc, fn, expect)
     local r = table.pack(pcall(fn))
     local ok = table.remove(r, 1); r.n = r.n - 1
@@ -615,6 +616,7 @@ local function offThreadCases(phase)
                 case(P .. "off-free-bad", nFREE .. "(\"x\") [off thread]", function() return FREE("x") end, E.err(nFREE .. ": argument 1 (handle) must be an integer, got a string"))
                 if S.uiOffHandle then uiOffThreadCases(P, S.uiOffHandle) end
                 objectivesOffThreadCases(P)
+                SETS.offThread(P)
             end)
             if not ok then check(false, "CASE %s off-thread block threw: %s", P .. "off", firstLine(err)) end
             doneOff = true
@@ -1749,6 +1751,176 @@ local function versionCases(phase)
     end
 end
 
+-- ---------------------------------------------------------------- settings service (Mod Manager story 5)
+-- core.settings and the channel ops settings-get / settings-set with bad values (the story's matrix row "Bad calls"),
+-- in both worlds, plus the windows (test.mode is a "menu" setting: allowed at menu1, locked in match1; test.lobby is
+-- always locked in v1). This mod's folder is <Core>SkelTest; its mod.json declares the seven test.* settings. Every
+-- value a case changes is put back, except test.mode (b, set at menu1), test.boot (77, the restart case) and
+-- test.count (42, set by <Core>SkelPeer): check.ps1 reads them from settings.json after the run.
+SETS.REV = CORE:lower() .. ".settings.rev"
+SETS.WATCHING = CORE:lower() .. ".test.settings.watching" -- test-only cue for SkelPeer (1: watcher registered)
+SETS.PEER_AT = CORE:lower() .. ".test.settings.peerAt"   -- test-only: <Core>_ClockMicros() when SkelPeer set it
+SETS.PEER = CORE .. "SkelPeer"
+function SETS.cases(phase)
+    local P = phase .. "."
+    local ST = core.settings
+    if type(ST) ~= "table" then check(false, "CASE %s core.settings is missing", P .. "set") return end
+    local FN = CORE:lower() .. ".settings."
+    local f = intFn
+    local function isTrue(r) return r[1] == true end
+    case(P .. "set-get-ok", "settings.get('test.flag') [control]", f(ST.get)("test.flag"), E.ret("false (the default)", function(r) return r[1] == false end))
+    case(P .. "set-get-nil", "settings.get(nil)", f(ST.get)(nil), E.err(FN .. "get: key must be a string, got nil"))
+    case(P .. "set-get-num", "settings.get(42)", f(ST.get)(42), E.err(FN .. "get: key must be a string, got number"))
+    case(P .. "set-get-table", "settings.get({})", f(ST.get)({}), E.err(FN .. "get: key must be a string, got table"))
+    case(P .. "set-get-empty", "settings.get('')", f(ST.get)(""), E.err(FN .. "get: key '' must be 1 to 64 bytes"))
+    case(P .. "set-get-unknown", "settings.get('nope')", f(ST.get)("nope"), E.err(FN .. "get: unknown key 'nope'"))
+    case(P .. "set-get-preset", "settings.get('test.preset') [read-only]", f(ST.get)("test.preset"), E.nilret)
+    case(P .. "set-getall-ok", "settings.getAll()", f(ST.getAll)(), E.ret("a table with test.count", function(r) return type(r[1]) == "table" and math.type(r[1]["test.count"]) == "integer" end))
+    case(P .. "set-getall-arg", "settings.getAll(1)", f(ST.getAll)(1), E.err(FN .. "getAll: takes no arguments"))
+    case(P .. "set-set-unknown", "settings.set('nope', 1)", f(ST.set)("nope", 1), E.err(FN .. "set: unknown key 'nope'"))
+    case(P .. "set-set-keynum", "settings.set(5, 1)", f(ST.set)(5, 1), E.err(FN .. "set: key must be a string, got number"))
+    case(P .. "set-set-float", "settings.set('test.count', 2.5)", f(ST.set)("test.count", 2.5), E.err(FN .. "set: bad value: test.count must be an integer"))
+    case(P .. "set-set-61", "settings.set('test.count', 61)", f(ST.set)("test.count", 61), E.err(FN .. "set: bad value: test.count must be from 1 to 60"))
+    case(P .. "set-set-enum-x", "settings.set('test.mode', 'x')", f(ST.set)("test.mode", "x"), E.err(FN .. "set: bad value: test.mode must be one of a|b|c"))
+    case(P .. "set-set-nan", "settings.set('test.ratio', 0/0)", f(ST.set)("test.ratio", 0 / 0), E.err(FN .. "set: value must be finite"))
+    case(P .. "set-set-inf", "settings.set('test.ratio', math.huge)", f(ST.set)("test.ratio", math.huge), E.err(FN .. "set: value must be finite"))
+    case(P .. "set-set-bool-str", "settings.set('test.flag', 'yes')", f(ST.set)("test.flag", "yes"), E.err(FN .. "set: bad value: test.flag must be true or false"))
+    case(P .. "set-set-nilval", "settings.set('test.flag', nil)", f(ST.set)("test.flag", nil), E.err(FN .. "set: value must be a boolean, number or string, got nil"))
+    case(P .. "set-set-table", "settings.set('test.flag', {})", f(ST.set)("test.flag", {}), E.err(FN .. "set: value must be a boolean, number or string, got table"))
+    case(P .. "set-set-three", "settings.set('test.flag', true, 1)", f(ST.set)("test.flag", true, 1), E.err(FN .. "set: takes 2 arguments"))
+    case(P .. "set-set-readonly", "settings.set('test.preset', 3)", f(ST.set)("test.preset", 3), E.callErr("read-only "))
+    case(P .. "set-set-lobby", "settings.set('test.lobby', true)", f(ST.set)("test.lobby", true), E.callErr("locked "))
+    case(P .. "set-set-flag-ok", "settings.set('test.flag', true)", f(ST.set)("test.flag", true), E.ret("true", isTrue))
+    case(P .. "set-get-flag", "settings.get('test.flag') after the set", f(ST.get)("test.flag"), E.ret("true", isTrue))
+    case(P .. "set-set-flag-back", "settings.set('test.flag', false)", f(ST.set)("test.flag", false), E.ret("true", isTrue))
+    case(P .. "set-set-ratio-ok", "settings.set('test.ratio', 1.25)", f(ST.set)("test.ratio", 1.25), E.ret("true", isTrue))
+    case(P .. "set-set-ratio-back", "settings.set('test.ratio', 0.5)", f(ST.set)("test.ratio", 0.5), E.ret("true", isTrue))
+    if phase == "menu1" then
+        case(P .. "set-set-menu", "settings.set('test.mode', 'b') [title screen]", f(ST.set)("test.mode", "b"), E.ret("true", isTrue))
+    else
+        case(P .. "set-set-menu", "settings.set('test.mode', 'c') [match]", f(ST.set)("test.mode", "c"), E.callErr("locked "))
+    end
+    case(P .. "set-watch-nil", "settings.watch(nil)", f(ST.watch)(nil), E.err(FN .. "watch: expected a function, got nil"))
+    case(P .. "set-watch-str", "settings.watch('f')", f(ST.watch)("f"), E.err(FN .. "watch: expected a function, got string"))
+    case(P .. "set-unwatch-str", "settings.unwatch('1')", f(ST.unwatch)("1"), E.err(FN .. "unwatch: token must be an integer, got string"))
+    case(P .. "set-unwatch-float", "settings.unwatch(1.5)", f(ST.unwatch)(1.5), E.err(FN .. "unwatch: token must be an integer, got float"))
+    case(P .. "set-unwatch-unknown", "settings.unwatch(987654)", f(ST.unwatch)(987654), E.ret("false", function(r) return r[1] == false end))
+    case(P .. "set-watch-ok", "settings.watch(fn) then unwatch(token)", function()
+        local t = ST.watch(function() end)
+        return ST.unwatch(t)
+    end, E.ret("true", isTrue))
+    case(P .. "set-describe-dots", "settings.describe('..\\\\x')", f(ST.describe)("..\\x"), E.err(FN .. "describe: folder '..\\x' must match"))
+    case(P .. "set-describe-65", "settings.describe(<65 chars>)", f(ST.describe)(string.rep("a", 65)), E.err(FN .. "describe: folder '"))
+    case(P .. "set-describe-nil", "settings.describe(nil)", f(ST.describe)(nil), E.err(FN .. "describe: folder must be a string, got nil"))
+    case(P .. "set-describe-unknown", "settings.describe('NoSuchModXyz')", f(ST.describe)("NoSuchModXyz"),
+        E.ret("nil, 'unknown-mod ...'", function(r) return r[1] == nil and type(r[2]) == "string" and r[2]:find("^unknown%-mod ") ~= nil end))
+    case(P .. "set-describe-core", "settings.describe('" .. CORE .. "') [no settings]", f(ST.describe)(CORE),
+        E.ret("nil, 'no-settings ...'", function(r) return r[1] == nil and type(r[2]) == "string" and r[2]:find("^no%-settings ") ~= nil end))
+    case(P .. "set-describe-own", "settings.describe('" .. ME .. "')", f(ST.describe)(ME), E.ret("7 settings, test.preset read-only", function(r)
+        local d = r[1]
+        return type(d) == "table" and d.folder == ME and #d.settings == 7 and d.settings[7].key == "test.preset" and d.settings[7].readOnly == true
+            and d.settings[7].value == nil and d.settings[1].key == "test.flag"
+    end))
+    case(P .. "set-setfor-dots", "settings.setFor('..\\\\x', 'a', 1)", f(ST.setFor)("..\\x", "a", 1), E.err(FN .. "setFor: folder '..\\x' must match"))
+    case(P .. "set-setfor-65", "settings.setFor(<65 chars>, 'a', 1)", f(ST.setFor)(string.rep("a", 65), "a", 1), E.err(FN .. "setFor: folder '"))
+    case(P .. "set-setfor-unknown", "settings.setFor('NoSuchModXyz', 'a', 1)", f(ST.setFor)("NoSuchModXyz", "a", 1), E.err(FN .. "setFor: unknown-mod "))
+    case(P .. "set-setfor-core", "settings.setFor('" .. CORE .. "', 'a', 1)", f(ST.setFor)(CORE, "a", 1), E.err(FN .. "setFor: no-settings "))
+    case(P .. "set-setfor-peer-99", "settings.setFor('" .. SETS.PEER .. "', 'peer.level', 99)", f(ST.setFor)(SETS.PEER, "peer.level", 99),
+        E.err(FN .. "setFor: bad value: peer.level must be from 1 to 9"))
+    case(P .. "set-setfor-num", "settings.setFor(5, 'a', 1)", f(ST.setFor)(5, "a", 1), E.err(FN .. "setFor: folder must be a string, got number"))
+    -- The ops through core.call (dependents' path) and straight on the class default object.
+    case(P .. "ch-set-get-num", "call('settings-get', 42)", function() return core.call("settings-get", 42) end, E.callErr("err:unknown-mod 42"))
+    case(P .. "ch-set-get-table", "call('settings-get', {})", function() return core.call("settings-get", {}) end, E.callErr("err:bad-request payload must be"))
+    local cdo = found(ACTOR_CDO)
+    if not cdo then check(false, "CASE %s channel class default object not found", P .. "chd-set") return end
+    local CALL = CORE .. "_Call"
+    local function direct(req) return function() local v = cdo[CALL](cdo, req) if type(v) == "userdata" then return v:ToString() end return v end end
+    case(P .. "chd-set-get-none", CALL .. "(\"settings-get\") [direct]", direct("settings-get"), E.reply("err:bad-request "))
+    case(P .. "chd-set-get-empty", CALL .. "(\"settings-get:\") [direct]", direct("settings-get:"), E.reply("err:bad-request "))
+    case(P .. "chd-set-get-dots", CALL .. "(\"settings-get:..\\\\x\") [direct]", direct("settings-get:..\\x"), E.reply("err:bad-request folder must match"))
+    case(P .. "chd-set-get-slash", CALL .. "(\"settings-get:a/b\") [direct]", direct("settings-get:a/b"), E.reply("err:bad-request "))
+    case(P .. "chd-set-get-65", CALL .. "(\"settings-get:\"..<65 chars>) [direct]", direct("settings-get:" .. string.rep("a", 65)), E.reply("err:bad-request "))
+    case(P .. "chd-set-get-unknown", CALL .. "(\"settings-get:NoSuchModXyz\") [direct]", direct("settings-get:NoSuchModXyz"), E.reply("err:unknown-mod NoSuchModXyz"))
+    case(P .. "chd-set-get-core", CALL .. "(\"settings-get:" .. CORE .. "\") [direct]", direct("settings-get:" .. CORE), E.reply("err:no-settings "))
+    case(P .. "chd-set-get-own", CALL .. "(\"settings-get:" .. ME .. "\") [direct]", direct("settings-get:" .. ME), E.reply("ok:{\"id\":"))
+    case(P .. "chd-set-set-none", CALL .. "(\"settings-set\") [direct]", direct("settings-set"), E.reply("err:bad-request "))
+    case(P .. "chd-set-set-brace", CALL .. "(\"settings-set:{\") [direct]", direct("settings-set:{"), E.reply("err:bad-request payload: 1:1 unterminated object"))
+    case(P .. "chd-set-set-array", CALL .. "(\"settings-set:[]\") [direct]", direct("settings-set:[]"), E.reply("err:bad-request payload must be a JSON object"))
+    case(P .. "chd-set-set-deep", CALL .. "(\"settings-set:\"..<40 x '['>) [direct]", direct("settings-set:" .. string.rep("[", 40)), E.reply("err:bad-request payload: "))
+    case(P .. "chd-set-set-long", CALL .. "(\"settings-set:\"..<4100 bytes>) [direct]", direct("settings-set:" .. string.rep("{", 4100)), E.reply("err:too-long 4113 bytes, cap 4096"))
+    case(P .. "chd-set-set-dup", CALL .. "(<duplicate key>) [direct]", direct('settings-set:{"mod":"' .. ME .. '","key":"test.flag","key":"x","value":true}'), E.reply("err:bad-request payload: "))
+    case(P .. "chd-set-set-nomod", CALL .. "(<no mod>) [direct]", direct('settings-set:{"key":"test.flag","value":true}'), E.reply("err:bad-request mod must be a string"))
+    case(P .. "chd-set-set-dots", CALL .. "(<mod ..\\\\x>) [direct]", direct('settings-set:{"mod":"..\\\\x","key":"a","value":1}'), E.reply("err:bad-request mod must match"))
+    case(P .. "chd-set-set-novalue", CALL .. "(<value null>) [direct]", direct('settings-set:{"mod":"' .. ME .. '","key":"test.flag","value":null}'), E.reply("err:bad-request value must be"))
+    case(P .. "chd-set-set-unknownkey", CALL .. "(<unknown key>) [direct]", direct('settings-set:{"mod":"' .. ME .. '","key":"nope","value":1}'), E.reply("err:unknown-key 'nope' in " .. ME))
+    case(P .. "chd-set-set-badvalue", CALL .. "(<test.count 61>) [direct]", direct('settings-set:{"mod":"' .. ME .. '","key":"test.count","value":61}'), E.reply("err:bad-value test.count must be from 1 to 60"))
+    case(P .. "chd-set-set-nan", CALL .. "(<value NaN>) [direct]", direct('settings-set:{"mod":"' .. ME .. '","key":"test.ratio","value":NaN}'), E.reply("err:bad-request payload: "))
+    case(P .. "chd-set-set-readonly", CALL .. "(<test.preset>) [direct]", direct('settings-set:{"mod":"' .. ME .. '","key":"test.preset","value":1}'), E.reply("err:read-only test.preset"))
+    case(P .. "chd-set-set-unknownmod", CALL .. "(<mod NoSuchModXyz>) [direct]", direct('settings-set:{"mod":"NoSuchModXyz","key":"a","value":1}'), E.reply("err:unknown-mod "))
+    local garbage = {}
+    for i = 1, 200 do garbage[i] = string.char(math.random(1, 127)) end
+    case(P .. "chd-set-set-garbage", CALL .. "(\"settings-set:\"..<200 random ASCII bytes>) [direct]", direct("settings-set:" .. table.concat(garbage)), E.reply("err:"))
+end
+
+-- Mod Manager story 5 AC 1: SkelPeer (another Lua state) changes this mod's int setting at the menu; this mod's
+-- watcher must see the new value within 1 s, with the revision one higher. SkelPeer waits for the cue SETS.WATCHING.
+function SETS.crossState(phase)
+    step(phase .. ": settings cross-state", function()
+        local X = { rev0 = math.tointeger(ModRef:GetSharedVariable(SETS.REV)) }
+        S.setx = X
+        X.token = core.settings.watch(function(k, v)
+            if k ~= "test.count" or X.seen then return end
+            local at = math.tointeger(ModRef:GetSharedVariable(SETS.PEER_AT))
+            local now = native("_ClockMicros")()
+            X.seen = { v = v, dt = at and (now - at) or nil, rev = math.tointeger(ModRef:GetSharedVariable(SETS.REV)) }
+            say("SETWATCH %s key=%s value=%s dt_ms=%s rev=%s", phase, k, tostring(v), X.seen.dt and string.format("%.0f", X.seen.dt / 1000) or "?", tostring(X.seen.rev))
+        end)
+        ModRef:SetSharedVariable(SETS.WATCHING, 1)
+        say("SETX %s watching (rev %s); cue for %s set", phase, tostring(X.rev0), SETS.PEER)
+        return function() return X.seen ~= nil end, 20, "SkelPeer's setFor reaching this watcher"
+    end)
+    step(phase .. ": settings cross-state checks", function()
+        local X = S.setx
+        local s = X.seen or {}
+        check(s.v == 42, "SETX %s watcher saw test.count=42 (got %s)", phase, tostring(s.v))
+        check(s.dt ~= nil and s.dt <= 1000000, "SETX %s within 1 s of the peer's set (%s ms)", phase, s.dt and string.format("%.0f", s.dt / 1000) or "?")
+        check(X.rev0 ~= nil and s.rev == X.rev0 + 1, "SETX %s rev rose by one (%s -> %s)", phase, tostring(X.rev0), tostring(s.rev))
+        local okG, g = pcall(core.settings.get, "test.count")
+        check(okG and g == 42, "SETX %s get('test.count') = 42 (%s)", phase, tostring(g))
+        pcall(core.settings.unwatch, X.token)
+        ModRef:SetSharedVariable(SETS.WATCHING, 2)
+    end)
+end
+
+-- A restart setting: saved, but get keeps the session's value and describe shows pendingRestart (menu1); still so in
+-- match1.
+function SETS.restart(phase)
+    step(phase .. ": settings restart", function()
+        local P = phase .. "."
+        local ST = core.settings
+        local function bootEntry()
+            local d = ST.describe(ME)
+            for _, e in ipairs(d.settings) do if e.key == "test.boot" then return e end end
+        end
+        if phase == "menu1" then
+            case(P .. "set-restart", "settings.set('test.boot', 77) [restart]", function() return ST.set("test.boot", 77) end, E.ret("true", function(r) return r[1] == true end))
+        end
+        case(P .. "set-restart-get", "settings.get('test.boot') [restart, saved 77]", function() return ST.get("test.boot") end, E.ret("10 (the session's value)", function(r) return r[1] == 10 end))
+        case(P .. "set-restart-pending", "describe('" .. ME .. "') test.boot", function() local e = bootEntry() return e.value, e.pendingRestart, e.saved end,
+            E.ret("10, true, 77", function(r) return r[1] == 10 and r[2] == true and r[3] == 77 end))
+    end)
+end
+
+-- Off the game thread (called inside offThreadCases' LoopAsync block): every core.settings function refuses.
+function SETS.offThread(P)
+    local ST = core.settings
+    if type(ST) ~= "table" then return end
+    for _, fn in ipairs({ "get", "getAll", "set", "setFor", "describe", "watch", "unwatch" }) do
+        case(P .. "off-set-" .. fn:lower(), "settings." .. fn .. "(...) [off thread]", function() return ST[fn]("test.flag", true, 1) end,
+            E.err(CORE:lower() .. ".settings." .. fn .. ": called off the game thread"))
+    end
+end
+
 local function badInputCases(phase)
     step(phase .. ": versioning cases", function() versionCases(phase) end)
     step(phase .. ": native cases", function() nativeCases(phase) end)
@@ -1760,6 +1932,11 @@ local function badInputCases(phase)
         case(phase .. ".map-signal", "GetSharedVariable(\"" .. SETUP_KEY .. "\") [" .. phase .. "]", readSignal, E.signalNone)
     end)
     step(phase .. ": alive cases", function() aliveCases(phase) end)
+    -- Mod Manager story 5: the settings service. At menu1 first the cross-state change (SkelPeer -> this watcher),
+    -- before any own set moves the revision.
+    if phase == "menu1" then SETS.crossState(phase) end
+    step(phase .. ": settings cases", function() SETS.cases(phase) end)
+    SETS.restart(phase)
     offThreadCases(phase)
 end
 

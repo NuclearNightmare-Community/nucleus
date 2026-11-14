@@ -1,0 +1,30 @@
+{
+  "id": "difficulty",
+  "name": "Difficulty",
+  "version": "0.1.0",
+  "scope": "all",
+  "game": { "version": "V8.2.3", "build": "26601774" },
+  "ue4ss": "v3.0.1-1181-g83330635",
+  "dependsOn": [ { "id": "nucleus", "version": "^0.4.0" } ],
+  "settings": {
+    "enemyDamage": { "type": "number", "min": 0, "max": 200, "step": 1, "default": null, "label": "Enemy Damage", "scope": "all", "changeable": "menu", "source": "presets" },
+    "spread": { "type": "number", "min": 0, "max": 50, "step": 1, "default": null, "label": "Damage Spread", "scope": "host", "changeable": "menu", "source": "presets" },
+    "revives": { "type": "number", "min": 0, "max": 20, "step": 1, "default": null, "label": "Reinforcement Tokens", "scope": "host", "changeable": "menu", "source": "presets" },
+    "cold": { "type": "number", "min": 0, "max": 400, "step": 1, "default": null, "label": "Cold Exposure", "scope": "host", "changeable": "menu", "source": "presets" },
+    "frostbite": { "type": "number", "min": 0, "max": 20, "step": 0.5, "default": null, "label": "Frostbite Damage", "scope": "host", "changeable": "menu", "source": "presets" },
+    "dmg.meek": { "type": "number", "min": 0, "max": 500, "step": 5, "default": null, "label": "Damage: Meek", "scope": "all", "changeable": "menu", "source": "presets" },
+    "dmg.mimic": { "type": "number", "min": 0, "max": 500, "step": 5, "default": null, "label": "Damage: Mimic", "scope": "all", "changeable": "menu", "source": "presets" },
+    "dmg.psycho": { "type": "number", "min": 0, "max": 500, "step": 5, "default": null, "label": "Damage: Psycho", "scope": "all", "changeable": "menu", "source": "presets" },
+    "dmg.husk": { "type": "number", "min": 0, "max": 500, "step": 5, "default": null, "label": "Damage: Husk", "scope": "all", "changeable": "menu", "source": "presets" },
+    "dmg.watcher": { "type": "number", "min": 0, "max": 500, "step": 5, "default": null, "label": "Damage: Watcher", "scope": "all", "changeable": "menu", "source": "presets" },
+    "dmg.stalker": { "type": "number", "min": 0, "max": 500, "step": 5, "default": null, "label": "Damage: Stalker", "scope": "all", "changeable": "menu", "source": "presets" },
+    "dmg.slugQueen": { "type": "number", "min": 0, "max": 500, "step": 5, "default": null, "label": "Damage: Slug Queen", "scope": "host", "changeable": "menu", "source": "presets" },
+    "dmg.apex": { "type": "number", "min": 0, "max": 500, "step": 5, "default": null, "label": "Damage: Apex Predator", "scope": "host", "changeable": "menu", "source": "presets" },
+    "dmg.worm": { "type": "number", "min": 0, "max": 500, "step": 5, "default": null, "label": "Damage: Worm", "scope": "host", "changeable": "menu", "source": "presets" },
+    "dmg.leech": { "type": "number", "min": 0, "max": 500, "step": 5, "default": null, "label": "Damage: Leech", "scope": "host", "changeable": "menu", "source": "presets" },
+    "dmg.bat": { "type": "number", "min": 0, "max": 500, "step": 5, "default": null, "label": "Damage: Bat", "scope": "host", "changeable": "menu", "source": "presets" },
+    "dmg.infectedDog": { "type": "number", "min": 0, "max": 500, "step": 5, "default": null, "label": "Damage: Infected Dog", "scope": "host", "changeable": "menu", "source": "presets" },
+    "dmg.infectedPlayer": { "type": "number", "min": 0, "max": 500, "step": 5, "default": null, "label": "Damage: Infected Player", "scope": "host", "changeable": "menu", "source": "presets" },
+    "dmg.monster": { "type": "number", "min": 0, "max": 500, "step": 5, "default": null, "label": "Damage: Playable Monster", "scope": "host", "changeable": "menu", "source": "presets" }
+  }
+}

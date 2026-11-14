@@ -15,6 +15,9 @@ local okMap, MAP = pcall(require, LOWER .. ".map.setup")
 -- The map service's Journal map and area flags (lua/pkg/map/journalmap.lua, map service story 7, every machine);
 -- driven from the same LoadMap post-hook.
 local okJMap, JMAP = pcall(require, LOWER .. ".map.journalmap")
+-- The settings service (lua/pkg/settings/store.lua, Mod Manager story 5): every mod's declared settings and their
+-- values, reached through the channel ops settings-get and settings-set. Loaded here, started in start().
+local okSet, SETTINGS = pcall(require, LOWER .. ".settings.store")
 
 local CLASS_PKG = "/Game/Mods/" .. NAME .. "/ModActor"
 local CLASS = CLASS_PKG .. ".ModActor_C"
@@ -38,6 +41,23 @@ ModRef:SetSharedVariable(SETUP_KEY, "none")
 local boot = (tonumber(ModRef:GetSharedVariable(LOWER .. ".boot")) or 0) + 1
 ModRef:SetSharedVariable(LOWER .. ".boot", boot)
 ModRef:SetSharedVariable(LOWER .. ".version", V.version)
+-- <core>.settings.rev (Mod Manager story 5, add-only): +1 after every successful settings write; dependents poll it.
+-- Starts at its previous value (a hot reload keeps it rising) or 0.
+local REV_KEY = LOWER .. ".settings.rev"
+local settingsRev = math.tointeger(ModRef:GetSharedVariable(REV_KEY)) or 0
+ModRef:SetSharedVariable(REV_KEY, settingsRev)
+local settingsReady = false
+-- The current world's full name (a string, never the UObject), from the LoadMap post-hook: the settings service
+-- refuses "menu" settings outside the title screen.
+local currentWorld
+local function worldName()
+    if currentWorld then return currentWorld end
+    local ok, name = pcall(function()
+        local pc = FindFirstOf("PlayerController")
+        if pc and pc:IsValid() then return pc:GetWorld():GetFullName() end
+    end)
+    return ok and name or nil
+end
 
 -- The request as a Lua string, or the raw value when it is not one (handle() then replies err:bad-request).
 local function str(v)
@@ -70,6 +90,12 @@ local function handle(request)
     -- Test-only, deprecated in favour of "version" (story 18 AC 8; deprecate.lua): answered like it, and the client logs
     -- one DEPRECATED line per dependent. Not public API.
     if op == "deprecated-test" then return "ok:" .. V.version end
+    -- Mod Manager story 5: the settings service. The payload is everything after "<op>:".
+    if op == "settings-get" or op == "settings-set" then
+        if not settingsReady then return "err:internal settings service not running" end
+        local payload = #request > #op and request:sub(#op + 2) or nil
+        return SETTINGS.op(op, payload)
+    end
     return "err:unknown-op " .. quote(op)
 end
 
@@ -163,6 +189,18 @@ local function start()
         else log.error("Journal map service could not start: %s", tostring(errJ):match("^[^\n]*")) end
     end
 
+    -- The settings service: core's own folder is the parent of Scripts/; Mods/ is the one above it.
+    if not okSet then
+        log.error("settings service did not load (%s); settings-get and settings-set are unavailable", tostring(SETTINGS):match("^[^\n]*"))
+    else
+        local okI, errI = pcall(SETTINGS.init, {
+            modsDir = scriptDir:match("^(.*)[/\\][^/\\]+[/\\][Ss]cripts$"), core = NAME, log = log, rev = settingsRev, world = worldName,
+            publishRev = function(n) settingsRev = n; ModRef:SetSharedVariable(REV_KEY, n) end,
+        })
+        if okI then settingsReady = true
+        else log.error("settings service could not start: %s", tostring(errI):match("^[^\n]*")) end
+    end
+
     NotifyOnNewObject(CLASS, function()
         local okN, errN = pcall(hookChannel, "NotifyOnNewObject")
         if not okN then log.error("channel hook from NotifyOnNewObject failed: %s", tostring(errN)) end
@@ -175,6 +213,8 @@ local function start()
     -- ExecuteWithDelay + ExecuteInGameThread: an ExecuteInGameThread from the async thread can lose its callback while
     -- this state's Lua runs on the game thread (the channel hook, for one); lua/pkg/ui/hud.lua explains the race.
     RegisterLoadMapPostHook(function(_, world)
+        local okW, name = pcall(function() return world:get():GetFullName() end)
+        currentWorld = okW and type(name) == "string" and name or nil
         if mapReady then
             local okM, errM = pcall(function() MAP.onLoadMap(world and world:get()) end)
             if not okM then log.error("map service LoadMap part failed: %s", tostring(errM):match("^[^\n]*")) end

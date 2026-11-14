@@ -10,6 +10,8 @@ local refm = require(BASE .. ".ref")
 local clockm = require(BASE .. ".clock")
 local featm = require(BASE .. ".features")
 local deprecate = require(BASE .. ".deprecate")
+-- core.settings (Mod Manager story 5). A failure here must not stop connect: core.settings is then missing.
+local setOk, settingsm = pcall(require, BASE .. ".settings.client")
 -- UI helpers (ui-helpers-contract.md). Loading them registers the HUD creation callback (ui/hud.lua) in this Lua state.
 -- A failure here must not stop connect for mods that use no UI: core.ui is then missing and onReady is told why.
 local uiOk, uiErr = pcall(function()
@@ -144,6 +146,12 @@ function C.connect(opts)
     end
 
     boundLog = boundLog or log -- the first mod in this state that got past its arguments (normally the only one)
+    -- core.settings addresses the mod by its folder under Mods/: found now, while the caller's main.lua is on the stack.
+    local ownFolder
+    if setOk then
+        local okF, f = pcall(settingsm.findFolder, NAME)
+        if okF then ownFolder = f end
+    end
     if type(_G[NAME .. "_NativeVersion"]) ~= "function" then
         local msg = NAME .. "'s native part is not loaded (Mods/" .. NAME .. "/dlls/main.dll missing or failed to load)."
         fail(msg)
@@ -212,6 +220,15 @@ function C.connect(opts)
             if not okP then log.warn("%s's button class could not be loaded before onReady: %s", NAME, tostring(errP)) end
         else
             log.error("%s's UI helpers failed to load (%s); core.ui is not available.", NAME, tostring(uiErr))
+        end
+        -- Mod Manager story 5: core.settings, bound to this mod's folder (nil: the get/set/watch calls raise "own mod
+        -- folder unknown"; describe and setFor still work).
+        if setOk then
+            local okB, errB = pcall(settingsm.bind, { call = C.call, log = log, folder = ownFolder, mod = mod })
+            if okB then api.settings = settingsm.API
+            else log.error("%s's settings client could not start (%s); core.settings is not available.", NAME, tostring(errB)) end
+        else
+            log.error("%s's settings client failed to load (%s); core.settings is not available.", NAME, tostring(settingsm))
         end
         -- Story 18: feature checks, generated from this api table (features.lua). Optional for dependents: the
         -- minimum version is the normal way to depend on a feature.
