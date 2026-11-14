@@ -682,6 +682,9 @@ ok(hw.tex and hw.tex.__asset == "T_Warning" and hw.tint[4] == 1 and hb.icon and 
 ok(F.getAssets > g0, "the next UI tick: loaded outside the hook")
 -- preload: a texture in use is loaded by the dependent's LoadMap post-hook
 A._reset()
+ok(next(A._used) == nil, "A._reset clears the textures in use too")
+-- the textures this test's elements use (set here, so the check doesn't depend on earlier cases)
+for _, k in ipairs({ "tex:warning", "tex:gear", "gtex:/Game/HexTree/Widgets/reset-icon.reset-icon" }) do A._used[k] = true end
 do
     local helpers = F.objects["/Script/AssetRegistry.Default__AssetRegistryHelpers"]
     local base, seen = helpers.GetAsset, {}
@@ -724,6 +727,23 @@ IM.create{ id = "fi", place = { row = T.row, fill = 2 }, image = { icon = "lock"
 local fw = T.tagged("fi")
 ok(fw.Slot.Size.SizeRule == 1 and fw.Slot.HorizontalAlignment == 2 and fw.Slot.VerticalAlignment == 2, "image with fill in a row: centred in its column, not stretched")
 IM.remove(C.els.fi.handle)
+-- same id: a button with neither label nor icon becomes icon-only (restyled without padding, then keeps its size)
+do
+    local noop = function() end
+    B.create{ id = "pz", place = { list = T.list }, onClick = noop }
+    local pw = T.tagged("pz")
+    ok(pw.Slot.HorizontalAlignment == 0, "pz: no label, no icon: the 0.7.0 slot")
+    B.create{ id = "pz", place = { list = T.list }, icon = { icon = "gear" }, onClick = noop }
+    ok(T.tagged("pz") == pw and pw.colors and pw.colors[13] == 0, "same id, icon added: icon-only, no face or content padding")
+    ok(pw.Slot.HorizontalAlignment == 1, "same id, icon added: keeps its size in the list (at the start)")
+    B.remove(C.els.pz.handle)
+    B.create{ id = "pr", place = { row = T.row }, onClick = noop }
+    local rw = T.tagged("pr")
+    B.create{ id = "pr", place = { row = T.row }, icon = { icon = "gear" }, onClick = noop }
+    ok(T.tagged("pr") == rw and rw.colors and rw.colors[13] == 0, "same id in a row, icon added: no face or content padding")
+    ok(rw.Slot.VerticalAlignment == 2, "same id in a row, icon added: keeps its size (centred across the row)")
+    B.remove(C.els.pr.handle)
+end
 
 -- ---------------------------------------------------------------- off the game thread and before connect
 do

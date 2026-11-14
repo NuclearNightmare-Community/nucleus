@@ -107,6 +107,6 @@ function A.ensureLoadMapHook()
     end
 end
 
-function A._reset() for k in pairs(refs) do refs[k] = nil end loadMapHooked = false end -- unit tests
+function A._reset() for k in pairs(refs) do refs[k] = nil end for k in pairs(used) do used[k] = nil end loadMapHooked = false end -- unit tests
 A._used = used -- unit tests
 return A

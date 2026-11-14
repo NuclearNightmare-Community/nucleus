@@ -122,7 +122,12 @@ end
 -- Per kind: the widget class, where its tag lives, and how its content and style reach a widget. A fresh widget shows
 -- the generator's defaults, so a call that would only restate them is skipped (attach cost per Journal open, story 13).
 local function sameStyle(a, b) return a.r == b.r and a.g == b.g and a.b == b.b and a.a == b.a and a.pad == b.pad end
-local function warnFirst(key, fmt, err, ...) C.warnOnce(key, fmt, ..., tostring(err):match("^[^\n]*")) end
+local function warnFirst(key, fmt, err, ...)
+    -- every caller's argument, then the first line of err (a "..." mid-list would keep only its first value)
+    local args = table.pack(...)
+    args[args.n + 1] = tostring(err):match("^[^\n]*")
+    C.warnOnce(key, fmt, table.unpack(args, 1, args.n + 1))
+end
 
 -- Story 21: the look an element is drawn in: its style's look, else the game's on the menu and screen hosts and the
 -- plain one elsewhere.
