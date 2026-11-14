@@ -467,6 +467,7 @@ function T.newSliderW()
     end
     function w:SetSliderEmpty(v) self.barValue = v; self.text = ""; self.sets = self.sets + 1 end
     function w:SetHint(h) self.hint = h end
+    function w:SetBoxWidth(v) self.boxW = v end
     function w:SetEnabledState(e) self.enabled = e end
     function w:SetBoxLook(f, size) self.look = { f, size } end
     function w:CopySliderStyle(t) self.copied = t; self.copies = (self.copies or 0) + 1 end
@@ -585,7 +586,15 @@ ok(CH.get(ch) == 6 and T.ncalls("ch") == 3, "choice at the end: next does nothin
 -- a repeat within 250 ms is one click
 CH.set(ch, 3)
 T.fire(T.NEXT, chw); fireHook(T.NEXT, chw)
-ok(CH.get(ch) == 4 and T.ncalls("ch") == 4, "choice: two clicks within 250 ms step once")
+ok(CH.get(ch) == 4 and T.ncalls("ch") == 4, "choice: two clicks within 250 ms on one arrow step once")
+fireHook(T.PREV, chw)
+ok(CH.get(ch) == 3 and T.ncalls("ch") == 5, "choice: a click on the other arrow within 250 ms still steps (debounce per arrow)")
+CH.set(ch, 1)
+T.fire(T.PREV, chw); fireHook(T.NEXT, chw)
+ok(CH.get(ch) == 2 and T.ncalls("ch") == 6, "choice: a click on the inert end arrow doesn't delay the other one")
+fireHook(T.PREV, chw)
+ok(CH.get(ch) == 1 and T.ncalls("ch") == 7, "choice: the inert click set no time for its arrow")
+CH.set(ch, 4)
 -- disabled
 local chd = CH.create{ id = "chd", place = { row = T.row }, options = T.OPTS, selected = 3, enabled = false, onChange = T.rec("chd") }
 local chdw = T.tagged("chd")
@@ -630,6 +639,7 @@ local sl = SL.create{ id = "sl", place = { row = T.row, fill = 3 }, min = 0, max
 local slw = T.tagged("sl")
 ok(slw and slw.range[1] == 0 and slw.range[2] == 200 and slw.range[3] == 1 and slw.range[4] == 0, "slider: range 0..200 step 1, no decimals")
 ok(slw.barValue == 100 and slw.text == "100" and slw.hint == "DEFAULT (50)", "slider: value 100 shown, hint set")
+ok(slw.boxW == SL._BOX_HINT_W, "slider: the box is wide enough for its hint", slw.boxW)
 ok(slw.copied == T.TEMPLATE, "slider: the game's Settings slider style copied from its template")
 ok(slw.mat and slw.look and slw.look[2] == theme.game.controlFont.size, "slider: the number box in the game look")
 tick()
@@ -670,7 +680,9 @@ ok(slw.barValue == 80 and slw.hint == "DEFAULT (80)" and T.ncalls("sl") == 5, "s
 SL.set(sl, 33)
 ok(SL.get(sl) == 33 and slw.text == "33" and T.ncalls("sl") == 5, "set(33): shown, no callback")
 SL.setDefault(sl, 90)
-ok(slw.barValue == 33 and slw.hint == "" and T.ncalls("sl") == 5, "setDefault on a custom value: left alone (hint cleared)")
+ok(slw.barValue == 33 and slw.hint == "DEFAULT (80)" and T.ncalls("sl") == 5, "setDefault on a custom value: left alone; no hint argument keeps the hint")
+SL.setDefault(sl, 90, nil)
+ok(slw.hint == "" and slw.boxW == SL._BOX_W, "setDefault with an explicit nil hint: cleared, the box narrow again")
 SL.set(sl, nil)
 ok(SL.get(sl) == nil and slw.barValue == 90 and slw.text == "" and T.ncalls("sl") == 5, "set(nil): Default at 90, no callback")
 -- step 0.5 and the comma
@@ -683,6 +695,24 @@ shw.text = "7,7"; T.fire(T.COMMIT, shw)
 ok(SL.get(sh) == 7.5 and T.ncalls("sh") == 2, "slider: ',' as the decimal mark (7,7 -> 7.5)")
 shw.barValue = 4.26; T.fire(T.END, shw)
 ok(SL.get(sh) == 4.5 and T.ncalls("sh") == 3, "slider drag end at 4.26: snapped to 4.5")
+-- off-grid values are snapped to min + k * step (create, set, setDefault): an unedited commit or a still click is no change
+do
+    local so = SL.create{ id = "so", place = { row = T.row }, min = 0, max = 10, step = 0.5, value = 2.3, defaultValue = 7.3, onChange = T.rec("so") }
+    local sow = T.tagged("so")
+    ok(SL.get(so) == 2.5 and sow.text == "2.5", "snap: value 2.3 on create is 2.5")
+    sow.text = "2.5"; T.fire(T.COMMIT, sow)
+    sow.barValue = 2.5; T.fire(T.END, sow)
+    ok(T.ncalls("so") == 0, "snap: an unedited commit and a still click are no change")
+    SL.set(so, 4.2)
+    ok(SL.get(so) == 4 and T.ncalls("so") == 0, "snap: set(4.2) is 4.0, no callback")
+    SL.set(so, nil)
+    ok(sow.barValue == 7.5, "snap: defaultValue 7.3 on create is 7.5")
+    sow.barValue = 7.5; T.fire(T.END, sow)
+    ok(SL.get(so) == nil and T.ncalls("so") == 0, "snap: a still click on the snapped default keeps Default")
+    SL.setDefault(so, 1.1)
+    ok(sow.barValue == 1 and T.ncalls("so") == 0, "snap: setDefault(1.1) is 1.0")
+    SL.remove(so)
+end
 -- pure helpers
 ok(SL._snap(10.3, 0.3, 10, 1) == 9.3 and SL._snap(0.1, 0.3, 10, 1) == 0.3 and SL._snap(5.2, 0, 10, 0.1) == 5.2, "snap: min + k*step, never past max")
 local st, v = SL._parse("12,5")

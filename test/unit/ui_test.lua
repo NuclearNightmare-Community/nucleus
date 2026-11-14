@@ -764,6 +764,32 @@ local sk = put(gw("Image", R(0, 500, 40, 540)))
 local skHits = D._check(hudN, sk)
 ok(type(skHits) == "table" and #skHits == 0, "overlaps: _check of a widget clear of everything", skHits and #skHits)
 cv.children[#cv.children] = nil; sk.parent = nil
+-- Mod Manager story 4: a choice's and a slider's widget (CoreTag) over the checked widget are one tagged element each;
+-- their inner Prev/Next buttons, Bar and Box are never walked.
+do
+    local n0 = #cv.children
+    local function control(cls, tag, parts)
+        local c = put(gw(cls, R(0, 500, 40, 540), { "UserWidget" }))
+        c.CoreTag = { ToString = function() return tag end }
+        local root = gw("Overlay", R(0, 500, 40, 540), { "PanelWidget" })
+        for _, p in ipairs(parts) do root.children[#root.children + 1] = gw(p, R(0, 500, 40, 540)) end
+        c.WidgetTree = obj({ RootWidget = root }, "/Game/Test/" .. cls .. ".WidgetTree")
+        return c, root
+    end
+    local ch, chRoot = control("WBP_NucleusChoice_C", "nucleus:OtherMod:pick", { "Button", "TextBlock", "Button" })
+    local sl, slRoot = control("WBP_NucleusSlider_C", "nucleus:OtherMod:knob", { "Image", "TextBlock" })
+    local target = put(gw("Image", R(0, 500, 40, 540)))
+    local cHits = D._check(hudN, target) or {}
+    local tagged, inner = {}, 0
+    for _, hh in ipairs(cHits) do
+        if hh.element then tagged[hh.element] = (tagged[hh.element] or 0) + 1 end
+        for _, part in ipairs(chRoot.children) do if hh.path == C.pathOf(part) then inner = inner + 1 end end
+        for _, part in ipairs(slRoot.children) do if hh.path == C.pathOf(part) then inner = inner + 1 end end
+    end
+    ok(tagged["nucleus:OtherMod:pick"] == 1 and tagged["nucleus:OtherMod:knob"] == 1 and inner == 0 and #cHits == 2,
+        "overlaps: a choice and a slider are one tagged element each, their Prev/Next/Bar/Box not walked", #cHits)
+    while #cv.children > n0 do cv.children[#cv.children].parent = nil; cv.children[#cv.children] = nil end
+end
 
 -- nil plus a reason when it can't check
 X.setVisible(ov, false)

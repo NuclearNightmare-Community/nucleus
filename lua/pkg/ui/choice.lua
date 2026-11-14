@@ -20,7 +20,7 @@
 --
 -- Dispatch: each dependent's Lua state registers one post-hook on <class>:<Core>_OnPrev and one on <Core>_OnNext, by
 -- full path, from the UI poll once a choice exists (never inside a hook). The hook ignores other mods' widgets in silence
--- (their tag), a widget that isn't the element's current one, and repeats within 250 ms.
+-- (their tag), a widget that isn't the element's current one, and repeats within 250 ms on the same arrow.
 --
 -- range builds the options of a bounded number range: extra first (e.g. { "Default" }), then min, min + step, ... up to
 -- max, each formatted with as many decimals as step and min have; at most 64 strings in all.
@@ -151,11 +151,15 @@ local function step(ctx, delta)
     local cur = el.ref and C.deref(el.ref)
     if not cur or cur:GetAddress() ~= w:GetAddress() then S.ignored = S.ignored + 1 return end -- not its live widget
     if not el.enabled or not chainVisible(el) then S.dropped = S.dropped + 1 return end
+    -- A repeat within 250 ms on the same arrow is one click; each arrow has its own time, set only by a click that
+    -- changed the option (an inert end arrow's click never delays the other arrow).
     local now = C.micros()
-    if el.lastClick and now - el.lastClick < DEBOUNCE_US then S.debounced = S.debounced + 1 return end
-    el.lastClick = now
+    el.lastStep = el.lastStep or {}
+    local last = el.lastStep[delta]
+    if last and now - last < DEBOUNCE_US then S.debounced = S.debounced + 1 return end
     local new = el.index + delta
     if new < 1 or new > #el.options then S.dropped = S.dropped + 1 return end -- no wrap: the arrow at its end is inert
+    el.lastStep[delta] = now
     el.index = new
     S.clicks = S.clicks + 1
     C.inDispatch = C.inDispatch + 1
@@ -275,7 +279,10 @@ function CH.create(opts, ...)
         el.options, el.index, el.onChange, el.enabled, el.tooltip = options, index, opts.onChange, enabled, tooltip
         refresh(el)
         local w = X._liveWidget(el)
-        if w then pcall(X._applyTooltip, el, w, false) end
+        if w then
+            local okT, errT = pcall(X._applyTooltip, el, w, false)
+            if not okT then C.warnOnce("choice:" .. el.id, "choice '%s': tooltip not applied (is %s's pak current?): %s", el.id, C.NAME, firstLine(errT)) end
+        end
         P.place(el.handle, intent)
         return el.handle
     end

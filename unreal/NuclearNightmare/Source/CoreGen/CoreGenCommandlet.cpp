@@ -1572,6 +1572,7 @@ namespace
 	 *   SetSliderValue(Value: Float)        Bar.SetValue(Value), the box shows it (as a drag frame would)
 	 *   SetSliderEmpty(Value: Float)        Bar.SetValue(Value), the box empty (its hint shows): the Default state
 	 *   SetHint(Hint: String)               Box's hint text
+	 *   SetBoxWidth(W: Float)               BoxSize width override (Lua widens the box while it shows a hint)
 	 *   SetEnabledState(Enabled: Bool)      Bar and Box SetIsEnabled
 	 *   SetBoxLook(Font: Object, Size: Float)   Box's font (the colour is the game's text colour, generated)
 	 *   CopySliderStyle(Template: Slider)   Bar.WidgetStyle = Template.WidgetStyle (the game's Settings slider, read live)
@@ -1586,7 +1587,7 @@ namespace
 		UWidgetBlueprint* WBP = CastChecked<UWidgetBlueprint>(NewBlueprint(Dir / FString::Printf(TEXT("WBP_%sSlider"), *Core),
 			UUserWidget::StaticClass(), UWidgetBlueprint::StaticClass(), UWidgetBlueprintGeneratedClass::StaticClass()));
 		const FString EndFn = Core + TEXT("_OnSliderEnd"), CommitFn = Core + TEXT("_OnSliderCommit");
-		CheckNames({TEXT("SetRange"), TEXT("SetSliderValue"), TEXT("SetSliderEmpty"), TEXT("SetHint"), TEXT("SetEnabledState"), TEXT("SetBoxLook"),
+		CheckNames({TEXT("SetRange"), TEXT("SetSliderValue"), TEXT("SetSliderEmpty"), TEXT("SetHint"), TEXT("SetBoxWidth"), TEXT("SetEnabledState"), TEXT("SetBoxLook"),
 			TEXT("CopySliderStyle"), TEXT("SetBackground"), TEXT("SetBackgroundPadding"), TEXT("SetBackgroundMaterial"), TEXT("SetBackgroundSolid"),
 			TEXT("SetTag"), *EndFn, *CommitFn});
 
@@ -1666,6 +1667,7 @@ namespace
 		FFunc SetValue = AddFunction(WBP, TEXT("SetSliderValue"), {{TEXT("Value"), RealT()}}, {});
 		FFunc SetEmpty = AddFunction(WBP, TEXT("SetSliderEmpty"), {{TEXT("Value"), RealT()}}, {});
 		FFunc SetHint = AddFunction(WBP, TEXT("SetHint"), {{TEXT("Hint"), StrT()}}, {});
+		FFunc SetBoxWidth = AddFunction(WBP, TEXT("SetBoxWidth"), {{TEXT("W"), RealT()}}, {});
 		FFunc SetEnabled = AddFunction(WBP, TEXT("SetEnabledState"), {{TEXT("Enabled"), BoolT()}}, {});
 		FFunc SetLook = AddFunction(WBP, TEXT("SetBoxLook"), {{TEXT("Font"), ObjT(UObject::StaticClass())}, {TEXT("Size"), RealT()}}, {});
 		FFunc CopyStyle = AddFunction(WBP, TEXT("CopySliderStyle"), {{TEXT("Template"), ObjT(USlider::StaticClass())}}, {});
@@ -1744,6 +1746,14 @@ namespace
 			G.Link(GetBox, TEXT("Box"), Set, PN_Self);
 			G.Link(ToText, PN_Ret, Set, TEXT("InHintText"));
 			G.Chain({SetHint.Entry, Set});
+		}
+		{
+			FGraph G(WBP, SetBoxWidth.G);
+			UK2Node_VariableGet* GetSize = G.Get(TEXT("BoxSize"));
+			UK2Node_CallFunction* SetW = G.Call(USizeBox::StaticClass(), GET_FUNCTION_NAME_CHECKED(USizeBox, SetWidthOverride));
+			G.Link(GetSize, TEXT("BoxSize"), SetW, PN_Self);
+			G.Link(SetBoxWidth.Entry, TEXT("W"), SetW, TEXT("InWidthOverride"));
+			G.Chain({SetBoxWidth.Entry, SetW});
 		}
 		{
 			FGraph G(WBP, SetEnabled.G);
