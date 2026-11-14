@@ -694,6 +694,29 @@ do -- connect binds core.settings to the folder of the main.lua that called it
     eq(got and got.settings.get("updateEvery"), 35, "connect: core.settings.get reads the caller's own folder (Clock)")
 end
 
+do -- a value too long for the channel is a bad value (raises), not a refusal by state
+    local S = newState("Clock", "Clock")
+    raises(function() S.set("updateEvery", string.rep("x", 5000)) end, "nucleus.settings.set: bad value: the request is too long", "too-long value: set raises")
+    raises(function() S.setFor("Waypoints", "onRevive", string.rep("x", 5000)) end, "nucleus.settings.setFor: bad value: the request is too long", "too-long value: setFor raises")
+end
+
+do -- a poll registered with an unusable handle is retired: it never calls the watchers
+    local S = newState("Clock", "Clock")
+    local realLoop, stray = LoopInGameThreadWithDelay, nil
+    LoopInGameThreadWithDelay = function(ms, fn) stray = fn return "not-a-handle" end
+    local seen = 0
+    S.watch(function() seen = seen + 1 end)
+    LoopInGameThreadWithDelay = realLoop
+    eq(linesMatching("^%[Clock%] WARN settings poll could not start: LoopInGameThreadWithDelay returned not%-a%-handle$"), 1, "bad poll handle: one WARN")
+    local cur = S.get("updateEvery")
+    local other = newState("NucleusSkelPeer", "Manager")
+    eq(select(1, other.setFor("Clock", "updateEvery", cur == 7 and 8 or 7)), true, "bad poll handle: a change from another state")
+    ok(type(stray) == "function", "bad poll handle: the loop body was registered")
+    stray()
+    eq(seen, 0, "bad poll handle: the stray loop does nothing")
+    eq(S.get("updateEvery"), cur == 7 and 8 or 7, "bad poll handle: get still sees the change")
+end
+
 print = realPrint
 print(string.format("settings_test: %d passed, %d failed", pass, fail))
 os.exit(fail == 0 and 0 or 1)
