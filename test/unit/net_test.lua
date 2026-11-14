@@ -482,6 +482,21 @@ do
     eq(#spawned, 4, "and another actor")
 end
 
+-- The weak handle can't be taken on the spawned actor (no native part): one actor, one ERROR, no more tries
+do
+    local refOk = HOST.REF.ref
+    HOST.REF.ref = function() error("Nucleus's native part is not loaded") end
+    local match3 = newWorld("/Game/Maps/Tower3/Tower3.Tower3")
+    WORLDS[match3.path] = match3
+    clearLines()
+    local before = #spawned
+    HOST.onLoadMap(match3)
+    for _ = 1, 8 do clockT = clockT + 2000000; runLoops() end
+    eq(#spawned, before + 1, "no weak handle: one actor spawned, no more tries")
+    eq(linesMatching("ERROR NET spawned NucleusNet but could not take a weak handle"), 1, "no weak handle: one ERROR line")
+    HOST.REF.ref = refOk
+end
+
 -- ---------------------------------------------------------------- the client side of host.lua
 NET.server, NET.standalone = false, false
 local cworld = newWorld("/Game/Maps/SmallLoweIsland/SmallMap.SmallMap")
@@ -540,6 +555,10 @@ do
     ok(v == nil and why == "absent", "client: an oversized FString reads as no values")
     eq(linesMatching("dropped from the host's State %(actor:.*9001 bytes"), 1, "client: one line for it, not one per tick")
     ok(#tostring(HOST._world().raw) < 32, "client: only a small marker is kept", HOST._world().raw)
+    -- a replicated FString within the cap: Len(), then ToString(), then decode
+    remote.State = { Len = function() return 24 end, ToString = function() return "#1=skeltest,1.revivesN=8" end }
+    runLoops()
+    eq(net.read("skeltest.revivesN", 0, 20), 8, "client: an FString within the cap is read through Len() and ToString()")
 end
 -- version mismatch: ignored with one line per world
 clearLines()
@@ -550,6 +569,18 @@ eq(linesMatching("its core version is '0.10.0'"), 1, "client: one version line p
 remote.CoreVersion = "0.11.0"
 runLoops()
 eq(net.read("skeltest.revivesN", 0, 20), 8, "client: same version again: read")
+-- a hostile long CoreVersion is refused by its Len(), never converted
+do
+    local conv = 0
+    remote.CoreVersion = { Len = function() return 9000 end, ToString = function() conv = conv + 1 return string.rep("v", 9000) end }
+    runLoops(); runLoops()
+    eq(conv, 0, "client: a CoreVersion with Len 9000 is never converted")
+    local v, why = net.read("skeltest.revivesN", 0, 20)
+    ok(v == nil and why == "version", "client: a too-long CoreVersion reads as version")
+    remote.CoreVersion = "0.11.0"
+    runLoops()
+    eq(net.read("skeltest.revivesN", 0, 20), 8, "client: a valid CoreVersion again: read")
+end
 -- the actor goes away: no state; the fallback finds a new one (filtered by class, world, authority)
 remote.dead = true
 runLoops()
