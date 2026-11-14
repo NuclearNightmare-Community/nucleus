@@ -101,10 +101,26 @@ ok(S.parse("1.2.3").major == 1 and S.parse(">=1.2.3") == nil and S.parse(5) == n
 -- ---------------------------------------------------------------- features
 local F = require("nucleus.features")
 local declared = F.declared()
-local want = { "call", "clock", "deref", "free", "map.setup", "ref", "settings", "ui", "ui.button", "ui.button.icon", "ui.button.setTooltip", "ui.debug", "ui.elements", "ui.hud",
+local want = { "call", "clock", "deref", "free", "map.setup", "ref", "settings", "ui", "ui.button", "ui.button.icon", "ui.button.setTooltip",
+    -- Mod Manager story 4 (0.10.0): the controls, every function hand-named
+    "ui.checkbox", "ui.checkbox.create", "ui.checkbox.get", "ui.checkbox.isShown", "ui.checkbox.remove", "ui.checkbox.set", "ui.checkbox.setEnabled",
+    "ui.checkbox.setTooltip", "ui.checkbox.setVisible",
+    "ui.choice", "ui.choice.create", "ui.choice.get", "ui.choice.isShown", "ui.choice.range", "ui.choice.remove", "ui.choice.set", "ui.choice.setEnabled",
+    "ui.choice.setTooltip", "ui.choice.setVisible",
+    "ui.debug", "ui.elements", "ui.hud",
     "ui.image", "ui.image.create", "ui.image.isShown", "ui.image.remove", "ui.image.set", "ui.image.setTooltip", "ui.image.setVisible",
-    "ui.journal", "ui.journal.regions", "ui.list", "ui.look", "ui.menu", "ui.overflow", "ui.panel", "ui.place", "ui.row", "ui.screen", "ui.text", "ui.text.setTooltip" }
-eq(table.concat(declared, ","), table.concat(want, ","), "declared(): the 0.9.0 feature list (map.setup, ui.journal.regions, ui.look, story 24's names hand-named; settings), sorted")
+    "ui.journal", "ui.journal.regions", "ui.list", "ui.look", "ui.menu", "ui.overflow", "ui.panel", "ui.place", "ui.row", "ui.screen",
+    "ui.slider", "ui.slider.create", "ui.slider.get", "ui.slider.isShown", "ui.slider.remove", "ui.slider.set", "ui.slider.setDefault", "ui.slider.setEnabled",
+    "ui.slider.setTooltip", "ui.slider.setVisible",
+    "ui.text", "ui.text.setTooltip" }
+eq(table.concat(declared, ","), table.concat(want, ","), "declared(): the 0.10.0 feature list (map.setup, ui.journal.regions, ui.look, story 24's and story 4's names hand-named; settings), sorted")
+-- Mod Manager story 4 (AC 4): a 0.9.0 core's list answers false for ui.slider.create; this one true.
+do
+    local old = {}
+    for _, n in ipairs(want) do if not n:match("^ui%.checkbox") and not n:match("^ui%.choice") and not n:match("^ui%.slider") then old[#old + 1] = n end end
+    ok(F.set(old)["ui.slider.create"] == nil, "a 0.9.0 core: core.has('ui.slider.create') is false")
+    ok(F.set(declared)["ui.slider.create"] and F.set(declared)["ui.choice.range"] and F.set(declared)["ui.checkbox.create"], "this core: core.has('ui.slider.create'), 'ui.choice.range', 'ui.checkbox.create' are true")
+end
 -- Story 24: what a dependent asks core.has for (AC 5).
 do
     local set = F.set(declared)

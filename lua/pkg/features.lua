@@ -25,6 +25,13 @@ M.HAND = {
     "ui.overflow", "ui.button.icon",
     "ui.image.create", "ui.image.set", "ui.image.setVisible", "ui.image.remove", "ui.image.isShown", "ui.image.setTooltip",
     "ui.text.setTooltip", "ui.button.setTooltip",
+    -- Mod Manager story 4 (core story 26, UI-11): the controls, each a module, so every function's path by hand
+    "ui.checkbox.create", "ui.checkbox.get", "ui.checkbox.set", "ui.checkbox.setEnabled", "ui.checkbox.setVisible",
+    "ui.checkbox.remove", "ui.checkbox.isShown", "ui.checkbox.setTooltip",
+    "ui.choice.create", "ui.choice.get", "ui.choice.set", "ui.choice.range", "ui.choice.setEnabled", "ui.choice.setVisible",
+    "ui.choice.remove", "ui.choice.isShown", "ui.choice.setTooltip",
+    "ui.slider.create", "ui.slider.get", "ui.slider.set", "ui.slider.setDefault", "ui.slider.setEnabled", "ui.slider.setVisible",
+    "ui.slider.remove", "ui.slider.isShown", "ui.slider.setTooltip",
 }
 
 -- The UI part of the api table: path -> { module, function } (client.lua builds api.ui from this).
@@ -59,6 +66,16 @@ M.UI = {
     -- story 24 (core 0.8.0, Mod Manager CAP-2): images and icons
     { "image.create", "image", "create" }, { "image.set", "image", "set" }, { "image.setVisible", "image", "setVisible" },
     { "image.remove", "image", "remove" }, { "image.isShown", "image", "isShown" }, { "image.setTooltip", "image", "setTooltip" },
+    -- Mod Manager story 4 (core story 26, UI-11): checkbox, choice and slider-with-number controls
+    { "checkbox.create", "checkbox", "create" }, { "checkbox.get", "checkbox", "get" }, { "checkbox.set", "checkbox", "set" },
+    { "checkbox.setEnabled", "checkbox", "setEnabled" }, { "checkbox.setVisible", "checkbox", "setVisible" },
+    { "checkbox.remove", "checkbox", "remove" }, { "checkbox.isShown", "checkbox", "isShown" }, { "checkbox.setTooltip", "checkbox", "setTooltip" },
+    { "choice.create", "choice", "create" }, { "choice.get", "choice", "get" }, { "choice.set", "choice", "set" },
+    { "choice.range", "choice", "range" }, { "choice.setEnabled", "choice", "setEnabled" }, { "choice.setVisible", "choice", "setVisible" },
+    { "choice.remove", "choice", "remove" }, { "choice.isShown", "choice", "isShown" }, { "choice.setTooltip", "choice", "setTooltip" },
+    { "slider.create", "slider", "create" }, { "slider.get", "slider", "get" }, { "slider.set", "slider", "set" },
+    { "slider.setDefault", "slider", "setDefault" }, { "slider.setEnabled", "slider", "setEnabled" }, { "slider.setVisible", "slider", "setVisible" },
+    { "slider.remove", "slider", "remove" }, { "slider.isShown", "slider", "isShown" }, { "slider.setTooltip", "slider", "setTooltip" },
     { "place", "place", "place" },
     { "elements", "place", "elements" },
     { "debug.overlaps", "debug", "overlaps" }, -- story 12: a diagnostic for testing a mod's UI

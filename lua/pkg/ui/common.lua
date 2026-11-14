@@ -49,6 +49,20 @@ C.IMAGE_PKG = "/Game/Mods/" .. C.NAME .. "/WBP_" .. C.NAME .. "Image"
 C.IMAGE_SHORT = "WBP_" .. C.NAME .. "Image_C"
 C.IMAGE_CLASS = C.IMAGE_PKG .. "." .. C.IMAGE_SHORT
 C.ICON_DIR = "/Game/Mods/" .. C.NAME .. "/Icons"
+-- Mod Manager story 4 (core 0.10.0): the controls. A checkbox is an icon-only WBP_<Core>Button (its click hook routes by
+-- element kind); WBP_<Core>Choice (prev/next arrows calling <Core>_OnPrev / <Core>_OnNext) and WBP_<Core>Slider (Slider
+-- "Bar" synced to EditableText "Box" inside the Blueprint; <Core>_OnSliderEnd at the end of a drag, <Core>_OnSliderCommit
+-- when the box commits).
+C.CHOICE_PKG = "/Game/Mods/" .. C.NAME .. "/WBP_" .. C.NAME .. "Choice"
+C.CHOICE_SHORT = "WBP_" .. C.NAME .. "Choice_C"
+C.CHOICE_CLASS = C.CHOICE_PKG .. "." .. C.CHOICE_SHORT
+C.PREV_FN = C.CHOICE_CLASS .. ":" .. C.NAME .. "_OnPrev"
+C.NEXT_FN = C.CHOICE_CLASS .. ":" .. C.NAME .. "_OnNext"
+C.SLIDER_PKG = "/Game/Mods/" .. C.NAME .. "/WBP_" .. C.NAME .. "Slider"
+C.SLIDER_SHORT = "WBP_" .. C.NAME .. "Slider_C"
+C.SLIDER_CLASS = C.SLIDER_PKG .. "." .. C.SLIDER_SHORT
+C.SLIDER_END_FN = C.SLIDER_CLASS .. ":" .. C.NAME .. "_OnSliderEnd"
+C.SLIDER_COMMIT_FN = C.SLIDER_CLASS .. ":" .. C.NAME .. "_OnSliderCommit"
 C.HOST_NAMES = "hud, journal, menu, screen" -- the hosts an intent can name (place.lua)
 C.CURSOR_HOSTS = "journal, menu, screen"    -- hosts with a cursor: buttons, lists and rows go there
 
@@ -172,6 +186,10 @@ function C.pa(key, t0)
     end
 end
 
+-- Mod Manager story 4: > 0 while core's own click and control dispatch runs (inside a UE4SS script hook). Hooks are not
+-- registered then (the poll does it) and core's own asset reads there use the cache only.
+C.inDispatch = 0
+
 -- One log line per key for the life of this Lua state.
 local warned = {}
 function C.warnOnce(key, fmt, ...)
@@ -201,7 +219,8 @@ function C.hostOf(el)
 end
 function C.isContainer(el) return el.children ~= nil end
 
-local ARTICLE = { text = "a text element", panel = "a panel", button = "a button", list = "a list", row = "a row", image = "an image" }
+local ARTICLE = { text = "a text element", panel = "a panel", button = "a button", list = "a list", row = "a row", image = "an image",
+    checkbox = "a checkbox", choice = "a choice", slider = "a slider" } -- Mod Manager story 4: the controls
 C.ARTICLE = ARTICLE
 -- Story 21: functions that take a panel also take a list or a row (setStyle, setVisible, remove, isShown).
 local CONTAINER = { panel = true, list = true, row = true }

@@ -39,6 +39,13 @@ for path, fallback in pairs(theme.gameTextures) do
         after = fallback and ("images and icons that use it show " .. C.NAME .. "'s " .. fallback .. " icon instead")
             or "images and icons that use it show nothing" }
 end
+-- Mod Manager story 4: the game's Settings menu class, whose widget-tree template slider ("WidgetTree.Slider") core's
+-- slider copies its style from (theme.game.sliderTemplate). Loaded only once a slider is used.
+do
+    local t = theme.game.sliderTemplate
+    SPEC["cls:settings"] = { pkg = t.pkg, name = t.name, lazy = true, what = "the game's Settings menu class " .. t.name,
+        after = "sliders keep " .. C.NAME .. "'s copy of the game's slider style" }
+end
 A.SPEC = SPEC
 
 local refs = {}                  -- key -> weak handle
@@ -66,7 +73,8 @@ function A.get(key, cachedOnly)
     local o = cached(key)
     if o then A.stats.hits = A.stats.hits + 1 return o end
     if not s then return nil, "unknown" end
-    if cachedOnly or inHook() then A.stats.misses = A.stats.misses + 1 return nil, "uncached" end
+    -- Mod Manager story 4: inside core's own click and control dispatch (a script hook) the cache only, too.
+    if cachedOnly or inHook() or C.inDispatch > 0 then A.stats.misses = A.stats.misses + 1 return nil, "uncached" end
     A.stats.loads = A.stats.loads + 1
     local helpers = C.found("/Script/AssetRegistry.Default__AssetRegistryHelpers")
     local ok, got = pcall(function()
@@ -81,6 +89,37 @@ function A.get(key, cachedOnly)
         if okR then refs[key] = h end
     end
     return got
+end
+
+-- Mod Manager story 4: the game's Settings slider template (a Slider in SettingsMenu_C's widget tree), or nil and why:
+-- "uncached" (inside a hook and not cached yet: try on the next tick) or "missing" (the class or its template is not
+-- there: one WARN per Lua state; sliders keep the generated style). The class is loaded with GetAsset (never a
+-- StaticFindObject miss); only once it is loaded is its template looked up, and a template that isn't there is not
+-- looked up again in this Lua state (a miss scans every object).
+local tmplRef, tmplMissing = nil, false
+function A.sliderTemplate()
+    if tmplRef then
+        local ok, o = pcall(C.deref, tmplRef)
+        if ok and o then return o end
+        pcall(C.free, tmplRef)
+        tmplRef = nil
+    end
+    if tmplMissing then return nil, "missing" end
+    local cls, why = A.get("cls:settings")
+    if not cls then return nil, why end
+    local t = theme.game.sliderTemplate
+    local path = t.pkg .. "." .. t.name .. ":" .. t.sub
+    local o = C.found(path)
+    if not o then
+        tmplMissing = true
+        C.warnOnce("asset:slider template", "the game's Settings slider (%s) is not there; sliders keep %s's copy of the game's slider style", path, C.NAME)
+        return nil, "missing"
+    end
+    if C.ref then
+        local okR, h = pcall(C.ref, o)
+        if okR then tmplRef = h end
+    end
+    return o
 end
 
 -- Loads every game-look asset (fonts and materials), the engine font and the textures in use; extra(), when set,
@@ -107,6 +146,6 @@ function A.ensureLoadMapHook()
     end
 end
 
-function A._reset() for k in pairs(refs) do refs[k] = nil end for k in pairs(used) do used[k] = nil end loadMapHooked = false end -- unit tests
+function A._reset() for k in pairs(refs) do refs[k] = nil end for k in pairs(used) do used[k] = nil end loadMapHooked = false; tmplRef, tmplMissing = nil, false end -- unit tests
 A._used = used -- unit tests
 return A
