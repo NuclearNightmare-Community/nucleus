@@ -43,7 +43,9 @@
 #include "GameFramework/PlayerStart.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_ComponentBoundEvent.h"
+#include "K2Node_CustomEvent.h"
 #include "K2Node_Event.h"
+#include "K2Node_IfThenElse.h"
 #include "K2Node_FunctionEntry.h"
 #include "K2Node_FunctionResult.h"
 #include "K2Node_MakeStruct.h"
@@ -135,6 +137,32 @@ namespace
 			FGraphNodeCreator<UK2Node_VariableSet> C(*G);
 			UK2Node_VariableSet* N = C.CreateNode(false);
 			N->VariableReference.SetSelfMember(Var);
+			Place(N);
+			C.Finalize();
+			return N;
+		}
+
+		/**
+		 * A custom event; NetFlags (FUNC_Net | ...) make it an RPC. One string input named Param. Ported from the network
+		 * spike's FGraph::Custom (mods/net-spike, NetSpikeGenCommandlet.cpp), with the pin name as a parameter.
+		 */
+		UK2Node_CustomEvent* Custom(FName Name, uint32 NetFlags, FName Param)
+		{
+			FGraphNodeCreator<UK2Node_CustomEvent> C(*G);
+			UK2Node_CustomEvent* N = C.CreateNode(false);
+			N->CustomFunctionName = Name;
+			N->FunctionFlags |= NetFlags;
+			Place(N);
+			C.Finalize();
+			N->CreateUserDefinedPin(Param, StrT(), EGPD_Output, false);
+			return N;
+		}
+
+		/** A Branch node: Condition in, then / else out. */
+		UK2Node_IfThenElse* Branch()
+		{
+			FGraphNodeCreator<UK2Node_IfThenElse> C(*G);
+			UK2Node_IfThenElse* N = C.CreateNode(false);
 			Place(N);
 			C.Finalize();
 			return N;
@@ -1991,6 +2019,94 @@ namespace
 		return BP;
 	}
 
+	// ---------------------------------------------------------------- core story 23 (Net-2): player presence
+
+	/**
+	 * /Game/Mods/<Core>/<Core>Presence (core story 23): one per client player controller, spawned by core's Lua on the
+	 * host and owned by that controller, so the owning client can call its server RPC (docs/networking.md B4: the owned
+	 * instance's server RPC arrives, an unowned one's is dropped). Replicated, always relevant; one replicated string
+	 * with no RepNotify:
+	 *   CoreVersion  the host's core version; a client with another version ignores the actor
+	 * set only through <Core>_PresenceSetVersion(CoreVersion). One reliable server event:
+	 *   <Core>_SV_Report(Report)  its body checks Len(Report) before any Lua copies it: over 8192 characters it calls
+	 *                             <Core>_PresenceIn("", Len), otherwise <Core>_PresenceIn(Report, Len)
+	 * <Core>_PresenceIn(Report, Len) has an empty body: core's Lua post-hooks it on the host. The shape proven in B3/B4.
+	 * Public under story 18's add-only rule: names and the property list never change once released.
+	 */
+	UBlueprint* BuildPresence(const FString& Dir, const FString& Core)
+	{
+		UBlueprint* BP = NewBlueprint(Dir / (Core + TEXT("Presence")), AActor::StaticClass(), UBlueprint::StaticClass(), UBlueprintGeneratedClass::StaticClass());
+		const FName Version = TEXT("CoreVersion");
+		const FName Report = TEXT("Report");
+		const FName LenPin = TEXT("Len");
+		const FName InFn = FName(Core + TEXT("_PresenceIn"));
+		const FName EventName = FName(Core + TEXT("_SV_Report"));
+		const int32 MaxReport = 8192;
+		checkf(!AActor::StaticClass()->FindPropertyByName(Version), TEXT("AActor already has a property %s"), *Version.ToString());
+		FBlueprintEditorUtils::AddMemberVariable(BP, Version, StrT(), TEXT(""));
+		SetVarNet(BP, Version);
+		FFunc SetVersion = AddStringSetter(BP, Core, TEXT("PresenceSetVersion"), Version);
+		AddFunction(BP, InFn, {{Report, StrT()}, {LenPin, IntT()}}, {}); // empty body: Lua post-hooks it
+		if (!Compile(BP)) return nullptr;
+		FillStringSetter(BP, SetVersion, Version);
+
+		UEdGraph* EG = FBlueprintEditorUtils::FindEventGraph(BP);
+		ClearGraph(BP, EG);
+		{
+			FGraph G(BP, EG);
+			UK2Node_CustomEvent* E = G.Custom(EventName, FUNC_Net | FUNC_NetReliable | FUNC_NetServer, Report);
+			UK2Node_CallFunction* Len = G.Call(UKismetStringLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetStringLibrary, Len));
+			G.Link(E, Report, Len, TEXT("S"));
+			UK2Node_CallFunction* Over = G.Call(UKismetMathLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, Greater_IntInt));
+			G.Link(Len, PN_Ret, Over, TEXT("A"));
+			G.Default(Over, TEXT("B"), FString::FromInt(MaxReport));
+			UK2Node_IfThenElse* If = G.Branch();
+			G.Link(Over, PN_Ret, If, UEdGraphSchema_K2::PN_Condition);
+			// over the cap: the length only, never the text
+			UK2Node_CallFunction* InEmpty = G.CallSelf(InFn);
+			G.Default(InEmpty, Report, TEXT(""));
+			G.Link(Len, PN_Ret, InEmpty, LenPin);
+			// within the cap: the text and its length
+			UK2Node_CallFunction* InFull = G.CallSelf(InFn);
+			G.Link(E, Report, InFull, Report);
+			G.Link(Len, PN_Ret, InFull, LenPin);
+			G.Link(E, PN_Then, If, PN_Exec);
+			G.Link(If, UEdGraphSchema_K2::PN_Then, InEmpty, PN_Exec);
+			G.Link(If, UEdGraphSchema_K2::PN_Else, InFull, PN_Exec);
+		}
+		if (!Compile(BP)) return nullptr;
+
+		AActor* CDO = CastChecked<AActor>(BP->GeneratedClass->GetDefaultObject());
+		// The CDO isn't initialized, so set bReplicates through its property (SetReplicates warns on pre-init actors).
+		FBoolProperty* RepProp = FindFProperty<FBoolProperty>(AActor::StaticClass(), TEXT("bReplicates"));
+		check(RepProp);
+		RepProp->SetPropertyValue_InContainer(CDO, true);
+		CDO->bAlwaysRelevant = true;
+		UE_LOG(LogCoreGen, Display, TEXT("NET %sPresence CDO: bReplicates=%d bAlwaysRelevant=%d"), *Core, CDO->GetIsReplicated() ? 1 : 0, CDO->bAlwaysRelevant ? 1 : 0);
+		int32 NetProps = 0;
+		for (TFieldIterator<FProperty> It(BP->GeneratedClass, EFieldIteratorFlags::ExcludeSuper); It; ++It)
+		{
+			const bool bNet = It->HasAnyPropertyFlags(CPF_Net);
+			NetProps += bNet ? 1 : 0;
+			UE_LOG(LogCoreGen, Display, TEXT("NET %sPresence property %s net=%d repnotify=%s"), *Core, *It->GetName(), bNet ? 1 : 0, *It->RepNotifyFunc.ToString());
+		}
+		const EFunctionFlags Want = FUNC_Net | FUNC_NetReliable | FUNC_NetServer;
+		UFunction* Ev = BP->GeneratedClass->FindFunctionByName(EventName);
+		UFunction* In = BP->GeneratedClass->FindFunctionByName(InFn);
+		const uint32 EvFlags = Ev ? static_cast<uint32>(Ev->FunctionFlags) : 0;
+		UE_LOG(LogCoreGen, Display, TEXT("NET %sPresence event %s flags=0x%08X (want Net|NetReliable|NetServer 0x%08X); %s %s"),
+			*Core, *EventName.ToString(), EvFlags, static_cast<uint32>(Want), *InFn.ToString(), In ? TEXT("present") : TEXT("MISSING"));
+		if (!CDO->GetIsReplicated() || !CDO->bAlwaysRelevant || NetProps != 1 || !Ev || (Ev->FunctionFlags & Want) != Want
+			|| Ev->HasAnyFunctionFlags(FUNC_NetMulticast | FUNC_NetClient) || !In || In->HasAnyFunctionFlags(FUNC_Net))
+		{
+			UE_LOG(LogCoreGen, Error, TEXT("NET %sPresence is not set up as intended (replicated=%d alwaysRelevant=%d net properties=%d event flags=0x%08X %s=%s; want 1 1 1, a reliable server event, a local function)"),
+				*Core, CDO->GetIsReplicated() ? 1 : 0, CDO->bAlwaysRelevant ? 1 : 0, NetProps, EvFlags, *InFn.ToString(), In ? TEXT("present") : TEXT("missing"));
+			return nullptr;
+		}
+		if (!Save(BP)) return nullptr;
+		return BP;
+	}
+
 	// ---------------------------------------------------------------- the map markers (map service story 4)
 	//
 	// Public API under story 18's add-only rule: the class names, the settings (names, types) and the component layout
@@ -2386,6 +2502,8 @@ int32 UCoreGenCommandlet::Main(const FString& Params)
 	if (!BuildActor(Dir, Core)) return 1;
 	// Core story 22 (core 0.11.0): the replicated host state, a class of its own (ModActor stays non-replicated).
 	if (!BuildNet(Dir, Core)) return 1;
+	// Core story 23 (core 0.12.0): the per-player presence actor with its reliable server RPC.
+	if (!BuildPresence(Dir, Core)) return 1;
 	if (!BuildMarkers(Dir)) return 1;
 	if (!LayoutFile.IsEmpty() && !WriteLayout(Dir, LayoutFile)) return 1;
 	UE_LOG(LogCoreGen, Display, TEXT("CoreGen: all assets for %s generated."), *Core);

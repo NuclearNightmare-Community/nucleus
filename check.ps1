@@ -22,7 +22,8 @@
 param(
     [string] $Instance,
     [string] $Log,
-    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'soak', 'manual', 'net-host', 'net-client', 'net-vanilla-host')]
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'soak', 'manual', 'net-host', 'net-client', 'net-vanilla-host',
+                 'presence-host', 'presence-client', 'presence-vanilla-host')]
     [string] $Scenario = 'skeleton',
     [ValidateSet('host', 'vm')] [string] $Target = 'host'
 )
@@ -344,8 +345,30 @@ foreach ($id in 'net-pub-ok', 'net-read-ok', 'net-pub-dmg', 'net-read-oob', 'net
                 'net-actor-version', 'net-actor-state', 'net-pub-17', 'net-ch-65', 'net-pub-65') {
     $badInput += "\[$T\] OK CASE match1\.$([regex]::Escape($id)) "
 }
+# Core story 23: player presence. Every bad-args row of presence, watchPresence, compatible and versionsCompatible in
+# both worlds and off the game thread; the local player's record (the local list) in the menu and the host match;
+# absent for PlayerId 999999; the direct net-mod / net-mod-off cases (oversized, no '=', bad id, version and netCompat,
+# core's own id, the 33rd entry, an unknown id, the namespaced fixture with netCompat); no <name>Presence in either
+# world; the watch's "joined" for the local player; no-world (menu1, through the client's test hook).
+foreach ($p in 'menu1', 'match1') {
+    foreach ($id in 'pid', 'local-pid', 'local-ps', 'local-core', 'absent-pid', 'absent-mod', 'mod-33', 'compat-local', 'compat-absent', 'compat-nomod',
+                    'player-str', 'player-nil', 'player-float', 'player-bool', 'player-table', 'player-2^40', 'player-notps', 'player-dead',
+                    'mod-num', 'mod-empty', 'mod-badid', 'mod-65', 'mod-201', 'three', 'watch-fn', 'watch-mod', 'watch-badid', 'watch-three', 'watch-65',
+                    'compat-player', 'compat-mod', 'compat-three', 'vc-1', 'vc-2', 'vc-3', 'vc-4', 'vc-short', 'vc-1000', 'vc-num', 'vc-ncnum', 'vc-above',
+                    'vc-five', 'ch-big', 'ch-noeq', 'ch-badid', 'ch-badver', 'ch-ncabove', 'ch-core', 'ch-none', 'ch-long', 'ch-33', 'ch-off-unknown',
+                    'ch-off-badid', 'ch-off-none', 'ch-ns', 'ns-read', 'ch-ns-off', 'ns-gone', 'count', 'watch-ok', 'watch-joined', 'unwatch', 'unwatch-again') {
+        $badInput += "\[$T\] OK CASE $p\.net-presence-$([regex]::Escape($id)) "
+    }
+    foreach ($id in 'off-net-presence', 'off-net-watchPresence', 'off-net-compatible', 'off-net-versionsCompatible') { $badInput += "\[$T\] OK CASE $p\.$([regex]::Escape($id)) " }
+}
+foreach ($id in 'noworld', 'compat-noworld') { $badInput += "\[$T\] OK CASE menu1\.net-presence-$([regex]::Escape($id)) " }
 $badInput += @(
-    "\[$N\] READY .* features=(\S*,)?net,net\.publish,net\.read,net\.role,net\.unwatch,net\.watch(,\S*)?\s*$"
+    "\[$N\] READY .* features=(\S*,)?net,net\.compatible,net\.presence,net\.publish,net\.read,net\.role,net\.unwatch,net\.versionsCompatible,net\.watch,net\.watchPresence(,\S*)?\s*$"
+    "\[$T\] $N\.net presence: registered skeltest=0\.1\.0\s*$"
+    "\[$N\] PRESENCE local player -?\d+ \(standalone\): $([regex]::Escape($name.ToLower()))=$Ver,"
+    "\[$N\] PRESENCE local player -?\d+ \(host\): $([regex]::Escape($name.ToLower()))=$Ver,"
+    "!\[$N\] PRESENCE spawned"
+    "!\[$N\] (WARN|ERROR) PRESENCE"
     "\[$N\] NET world .*NewMainMenu.* role=standalone"
     "\[$N\] NET world .*SmallMap.* role=host"
     "#1|\[$N\] NET spawned ${N}Net_C_\d+ in .* replicates=true alwaysRelevant=true owner=none "
@@ -823,7 +846,75 @@ $netClient = $started + @(
     "!\[$N\] WARN NET (ignoring|dropped)"
     "!\[$N\] ERROR"
 )
+# Core story 23: the presence pair-run roles (test/pair/nucleus-scenarios.ps1). presence-host judges the host's log of
+# the presence run (join, the forge sequence, B's leave), presence-client B's, presence-vanilla-host the host's log with
+# an unmodded B. The cross-machine timings (join within 2 s of the controller, leave within 2 s) are computed by the
+# scenario's Check from both logs.
+$Lo = [regex]::Escape($name.ToLower())
+$presenceCommon = $started + @(
+    "\[$N\] NET world .* role=host"
+    "\[$N\] PRESENCE hooked .*${N}Presence_C:${N}_PresenceIn"
+    "\[$N\] PRESENCE saw controller \S+ \(player \S+\) server=[\d.]+ "
+    "#1|\[$N\] PRESENCE spawned ${N}Presence_C_\d+ for \S+ \(player \S+, try 1\) replicates=true alwaysRelevant=true owner=\S+ server="
+    "!\[$N\] PRESENCE spawned ${N}Presence_C_\d+ .* owner=none "
+    "\[$T\] OK PRESENCE host record pid=-?\d+ $Lo=$Ver,skeltest=0\.1\.0 "
+    "\[$T\] END result=PASS"
+    "!\[$N\] ERROR"
+)
+$presenceHost = $presenceCommon + @(
+    "\[$T\] SCENARIO presence-host "
+    "\[$T\] PRESENCEROLE presence-host "
+    "\[$T\] PRESENCEEV joined pid=-?\d+ mod=skeltest version=0\.1\.0 previous=nil local=false server=[\d.]+"
+    "\[$T\] OK PRESENCE joined b=-?\d+ $Lo=$Ver,skeltest=0\.1\.0 "
+    "\[$T\] OK PRESENCE step=0 host=$Lo=$Ver,skeltest=0\.1\.0 b=$Lo=$Ver,skeltest=0\.1\.0 "
+    "\[$T\] OK PRESENCE step=1 host=$Lo=$Ver,skeltest=0\.1\.0 b=$Lo=$Ver,skeltest=0\.1\.0 "
+    "\[$T\] OK PRESENCE step=2 host=$Lo=$Ver,skeltest=0\.1\.0 b=$Lo=$Ver,skeltest=0\.1\.0 "
+    "\[$T\] OK PRESENCE step=3 host=$Lo=$Ver,skeltest=0\.1\.0 b=$Lo=$Ver,skeltest-forge=1\.0\.0 "
+    "\[$T\] OK PRESENCE step=4 host=$Lo=$Ver,skeltest=0\.1\.0 b=$Lo=$Ver,skeltest=7\.7\.7 "
+    "\[$T\] OK COMPAT b=true\s*$"
+    "\[$T\] OK COMPAT b=false incompatible\s*$"
+    "\[$T\] PRESENCE forge-done "
+    "#1|\[$N\] WARN PRESENCE (rejected|dropped) "
+    "\[$T\] PRESENCEEV left pid=-?\d+ mod=$Lo version=nil previous=$Ver local=false "
+    "\[$T\] PRESENCEEV left pid=-?\d+ mod=skeltest version=nil previous=7\.7\.7 local=false "
+    "\[$T\] OK PRESENCE b-left mods=$Lo,skeltest presence=nil,absent "
+    "\[$N\] PRESENCE player -?\d+ left \(\S+\): 2 mod\(s\) removed \($Lo=$Ver,skeltest=7\.7\.7\); destroyed ${N}Presence_C_\d+ "
+    "\[$T\] OK PRESENCE ${N}Presence count=0 after B left "
+)
+$presenceVanillaHost = $presenceCommon + @(
+    "\[$T\] SCENARIO presence-vanilla-host "
+    "\[$T\] PRESENCEROLE presence-vanilla-host "
+    "\[$T\] OK PRESENCE vanilla: ${N}Presence count=1 owned by another player's controller=true"
+    "\[$T\] OK PRESENCE vanilla: no event for another player \(0\)"
+    "!\[$N\] PRESENCE record player "
+    "!\[$T\] PRESENCEEV joined .* local=false "
+)
+$presenceClient = $started + @(
+    "\[$T\] SCENARIO presence-client "
+    "\[$T\] PRESENCEROLE presence-client "
+    "\[$N\] NET world .* role=client"
+    "\[$N\] PRESENCE holding ${N}Presence_C_\d+ \((NotifyOnNewObject|FindAllOf)\) "
+    "#1|\[$N\] PRESENCE report sent \(first\) on ${N}Presence_C_\d+: $Lo=$Ver,skeltest=0\.1\.0 server="
+    "!\[$N\] PRESENCE spawned"
+    "!\[$N\] WARN PRESENCE ignoring"
+    "\[$T\] OK PRESENCECL presence raised: $Lo\.net\.presence: only the host knows presence \(this machine is a client\)"
+    "\[$T\] OK PRESENCECL watchPresence raised: $Lo\.net\.watchPresence: only the host knows presence \(this machine is a client\)"
+    "\[$T\] OK PRESENCECL compatible raised: $Lo\.net\.compatible: only the host knows presence \(this machine is a client\)"
+    "\[$T\] PRESENCECL holding ${N}Presence_C_\d+ "
+    "\[$T\] OK PRESENCECL forge step=0 sent=1 "
+    "\[$T\] OK PRESENCECL forge step=1 sent=1 "
+    "\[$T\] OK PRESENCECL forge step=2 sent=1 bytes=9000 "
+    "\[$T\] OK PRESENCECL forge step=3 sent=1 "
+    "\[$T\] OK PRESENCECL forge step=4 sent=50 "
+    "\[$T\] PRESENCECL leaving server=[\d.]+"
+    "\[$T\] OK PRESENCECL back in the menu"
+    "\[$T\] END result=PASS"
+    "!\[$N\] ERROR"
+)
 $expect = @{
+    'presence-host' = $presenceHost
+    'presence-vanilla-host' = $presenceVanillaHost
+    'presence-client' = $presenceClient
     'net-host'  = $netHost
     'net-vanilla-host' = $netHost
     'net-client' = $netClient

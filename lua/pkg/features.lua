@@ -34,6 +34,8 @@ M.HAND = {
     "ui.slider.remove", "ui.slider.isShown", "ui.slider.setTooltip",
     -- core story 22 (0.11.0, Net-1): core.net is a module, so every function's path by hand
     "net.publish", "net.read", "net.watch", "net.unwatch", "net.role",
+    -- core story 23 (Net-2): player presence and the netCompat rule, new functions of the core.net module
+    "net.presence", "net.watchPresence", "net.compatible", "net.versionsCompatible",
 }
 
 -- The UI part of the api table: path -> { module, function } (client.lua builds api.ui from this).
@@ -85,7 +87,8 @@ M.UI = {
 
 -- The rest of the api table (client.lua sets these by hand): name -> "function" | "module".
 -- settings: Mod Manager story 5 (core.settings, a module: get, getAll, set, setFor, describe, watch, unwatch).
--- net: core story 22 (core.net, a module: publish, read, watch, unwatch, role).
+-- net: core story 22 (core.net, a module: publish, read, watch, unwatch, role; story 23 adds presence, watchPresence,
+-- compatible, versionsCompatible).
 M.BASE = { call = "function", ref = "function", deref = "function", free = "function", clock = "module", settings = "module", net = "module" }
 
 -- buildUi(U) -> ui table, missing: U maps module names to loaded modules. A function missing from its module is left

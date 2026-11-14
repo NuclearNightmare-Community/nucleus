@@ -242,11 +242,35 @@ function C.connect(opts)
         end
         -- Core story 22: core.net, bound to this mod's own id (nil: publish raises; read, watch and role still work).
         if netOk then
-            local okI, id, why = pcall(netm.ownId, netDir, netFolder)
-            if not okI then id, why = nil, tostring(id) end
+            local okI, man, why = pcall(netm.ownManifest, netDir, netFolder)
+            if not okI then man, why = nil, tostring(man) end
+            local id = man and man.id or nil
             local okB, errB = pcall(netm.bind, { call = C.call, log = log, id = id, idWhy = why, micros = clockm.micros })
             if okB then api.net = netm.API
             else log.error("%s's net client could not start (%s); core.net is not available.", NAME, tostring(errB)) end
+            -- Core story 23: this mod's (id, version[, netCompat]) goes into this machine's presence list, and leaves it
+            -- when the mod unloads.
+            if man then
+                for _, note in ipairs(man.notes or {}) do log.warn("%s.net presence: %s", NAME, note) end
+                if man.version then
+                    local payload = man.id .. "=" .. man.version .. (man.netCompat and ("/" .. man.netCompat) or "")
+                    local okM, reply = C.call("net-mod", payload)
+                    if okM then
+                        log.info("%s.net presence: registered %s", NAME, payload)
+                        pcall(function()
+                            local prev = ModRef.OnUnload
+                            ModRef.OnUnload = function(...)
+                                pcall(C.call, "net-mod-off", man.id)
+                                if type(prev) == "function" then return prev(...) end
+                            end
+                        end)
+                    else
+                        log.warn("%s.net presence: %s did not register %s: %s", NAME, NAME, payload, tostring(reply))
+                    end
+                end
+            else
+                log.info("%s.net presence: this mod is not reported to the host (%s)", NAME, tostring(why))
+            end
         else
             log.error("%s's net client failed to load (%s); core.net is not available.", NAME, tostring(netm))
         end

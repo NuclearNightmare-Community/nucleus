@@ -618,6 +618,7 @@ local function offThreadCases(phase)
                 objectivesOffThreadCases(P)
                 SETS.offThread(P)
                 SETS.NET.offThread(P) -- core story 22
+                SETS.PRES.offThread(P) -- core story 23
             end)
             if not ok then check(false, "CASE %s off-thread block threw: %s", P .. "off", firstLine(err)) end
             doneOff = true
@@ -1766,6 +1767,10 @@ SETS.PEER = CORE .. "SkelPeer"
 -- kept in a field: main.lua is at the 200-locals limit).
 SETS.NET = dofile(scriptDir .. "\\net.lua")({ case = case, E = E, step = step, check = check, say = say, CORE = CORE,
     core = function() return core end, intFn = intFn, pc = pc, valid = valid })
+-- Core story 23: player presence's bad-input cases and the pair-run roles presence-host / presence-client /
+-- presence-vanilla-host (presence.lua next to this file).
+SETS.PRES = dofile(scriptDir .. "\\presence.lua")({ case = case, E = E, step = step, check = check, say = say, CORE = CORE,
+    core = function() return core end, intFn = intFn, pc = pc, valid = valid })
 function SETS.cases(phase)
     local P = phase .. "."
     local ST = core.settings
@@ -1943,6 +1948,7 @@ local function badInputCases(phase)
     step(phase .. ": settings cases", function() SETS.cases(phase) end)
     SETS.restart(phase)
     SETS.NET.badInput(phase) -- core story 22
+    SETS.PRES.badInput(phase) -- core story 23
     offThreadCases(phase)
 end
 
@@ -5075,6 +5081,7 @@ client.connect{
         if SCENARIO == "manual" then profile(true) startManual() return end
         -- Core story 22: the pair-run roles run on their own loop (no steps, no travel: PairDriver drives the session).
         if SCENARIO == "net-host" or SCENARIO == "net-client" then SETS.NET.run(SCENARIO) return end
+        if SCENARIO:match("^presence%-") then SETS.PRES.run(SCENARIO) return end -- core story 23
         if SCENARIO == "bad-input" then buildBadInput()
         elseif SCENARIO == "menu" then
             buildMenu() -- story 21 (Mod Manager story 2): the menu entry, the menu host and the window stack
