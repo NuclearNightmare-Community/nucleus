@@ -7,7 +7,9 @@
   core (and of the test dependent) is removed first.
   Refuses unless the installed UE4SS.dll is byte-identical to the pinned zip's, and BPModLoaderMod is present.
   -Test also installs the walking-skeleton test dependent (test/SkelTest, installed as Mods/<name>SkelTest) above Keybinds,
-  and for scenario ui the second test dependent (test/SkelPeer, as Mods/<name>SkelPeer; story 15: a button of another mod).
+  and for scenarios ui and bad-input the second test dependent (test/SkelPeer, as Mods/<name>SkelPeer; story 15: a button of
+  another mod; Mod Manager story 5: a settings change from another Lua state, with a corrupt settings.json of its own).
+  Each test dependent's mod.json (settings declarations) is installed with it.
   For scenario bad-input it also installs core's test-only C++ part (test/SkelNative, built by build.ps1 as
   build/native-out/test/main.dll, never packaged) as Mods/<name>SkelNative: the forced missing struct member case.
   -Scenario breaks one part on purpose: skeleton (all parts), no-native (no dlls/main.dll), no-pak (no LogicMods pak);
@@ -98,8 +100,12 @@ if ($Test) {
     Set-Content (Join-Path $modsDir "$testName\Scripts\scenario.txt") $Scenario -NoNewline
     $i = [Array]::FindIndex([string[]]$lines, [Predicate[string]]{ param($l) $l -match '^\s*Keybinds\s*:' })
     $lines = if ($i -ge 0) { @($lines[0..($i-1)]) + "$testName : 1" + @($lines[$i..($lines.Count-1)]) } else { @($lines) + "$testName : 1" }
-    if ($Scenario -eq 'ui') {
+    if ($Scenario -in 'ui', 'bad-input') {
         Copy-Item (Join-Path $here 'test\SkelPeer') (Join-Path $modsDir $peerName) -Recurse -Force
+        Set-Content (Join-Path $modsDir "$peerName\Scripts\scenario.txt") $Scenario -NoNewline
+        # Mod Manager story 5: bad-input starts the peer with a corrupt settings.json (core must use the defaults and log
+        # exactly one WARN for it). The test dependent starts with none (its folder was just replaced).
+        if ($Scenario -eq 'bad-input') { [IO.File]::WriteAllText((Join-Path $modsDir "$peerName\settings.json"), '{"peer.level": ') }
         $i = [Array]::FindIndex([string[]]$lines, [Predicate[string]]{ param($l) $l -match '^\s*Keybinds\s*:' })
         $lines = if ($i -ge 0) { @($lines[0..($i-1)]) + "$peerName : 1" + @($lines[$i..($lines.Count-1)]) } else { @($lines) + "$peerName : 1" }
     }
@@ -117,5 +123,5 @@ Set-Content $modsTxt $lines
 Write-Host "$name deployed (scenario $Scenario) on the shipped UE4SS.dll (sha256 $($installedHash.Substring(0,12))...):"
 Get-ChildItem (Join-Path $modsDir $name) -Recurse -File | ForEach-Object { Write-Host "  Mods/$name/$($_.FullName.Substring((Join-Path $modsDir $name).Length + 1)) ($($_.Length) bytes)" }
 Get-ChildItem $logicMods -Filter "$name.pak" | ForEach-Object { Write-Host "  LogicMods/$($_.Name) ($($_.Length) bytes)" }
-if ($Test) { Write-Host "  Mods/$testName (test dependent)$(if ($Scenario -eq 'ui') { " and Mods/$peerName (second test dependent)" })$(if ($Scenario -eq 'bad-input') { " and Mods/$nativeTestName (core's test-only DLL)" })" }
+if ($Test) { Write-Host "  Mods/$testName (test dependent)$(if ($Scenario -in 'ui', 'bad-input') { " and Mods/$peerName (second test dependent)" })$(if ($Scenario -eq 'bad-input') { " and Mods/$nativeTestName (core's test-only DLL)" })" }
 Write-Host "mods.txt: $(($lines | Where-Object { $_ -match '^\s*\w+\s*:\s*1' }) -join ', ')"

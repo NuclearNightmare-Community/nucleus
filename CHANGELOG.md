@@ -2,6 +2,23 @@
 
 All notable changes to Nucleus are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). From 0.5.0 a dependent's `need` and `dependsOn` are minimum versions (`>=0.5.0`), so a newer Nucleus never asks dependents to raise them. Up to 0.3.0, below 1.0.0 a dependent connected only to the same minor version (`need = "0.3.0"` accepted 0.3.x).
 
+## [Unreleased] - 0.9.0
+
+Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
+
+For players: mods' settings are kept by Nucleus in each mod's own folder (`Mods/<Mod>/settings.json`), checked every time they're read, and a change reaches the mod while the game runs (the Mod Manager will edit them). A missing settings file means the mod's defaults; a damaged one is ignored with one warning in `UE4SS.log`.
+
+### Added
+
+- The settings service: Nucleus reads each mod's declared settings from its `mod.json` (`settings`: `bool`, `int`, `number`, `enum`, with `default`, `min`, `max`, `step`, `values`, `label`, `help`, `changeable`, `scope`, `source`), keeps their values in `Mods/<Folder>/settings.json` (only values that differ from the defaults; written through `.tmp` and `.bak` so a crash never leaves a half-written file), checks every value against its declaration, and refuses changes outside their window (`menu` outside the title screen; `lobby` always, for now; `restart` saved for the next start; `source` read-only).
+- `core.settings`: `get`, `getAll`, `set`, `setFor`, `describe`, `watch`, `unwatch` (README, "Settings service"). `core.has("settings")` is true; `settings` is a listed feature.
+- Channel ops `settings-get:<Folder>` and `settings-set:{"mod","key","value"}`, and the shared integer `nucleus.settings.rev` (+1 after every successful write).
+- `nucleus.json`, a strict, bounded JSON reader and writer (input 65,536 bytes, depth 16, 4,096 values, strings 1,024 bytes; never runs data as code).
+
+### Notes
+
+- Nothing changes for 0.8.0 callers: every existing call, op, shared variable and test case is as before.
+
 ## [Unreleased] - 0.8.0
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.

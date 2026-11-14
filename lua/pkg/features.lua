@@ -65,7 +65,8 @@ M.UI = {
 }
 
 -- The rest of the api table (client.lua sets these by hand): name -> "function" | "module".
-M.BASE = { call = "function", ref = "function", deref = "function", free = "function", clock = "module" }
+-- settings: Mod Manager story 5 (core.settings, a module: get, getAll, set, setFor, describe, watch, unwatch).
+M.BASE = { call = "function", ref = "function", deref = "function", free = "function", clock = "module", settings = "module" }
 
 -- buildUi(U) -> ui table, missing: U maps module names to loaded modules. A function missing from its module is left
 -- out (and named in missing), so the generated feature list never claims it.

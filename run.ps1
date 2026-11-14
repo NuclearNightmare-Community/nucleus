@@ -229,5 +229,6 @@ try {
 
 $kept = Join-Path $outDir "$Scenario.log"
 if (Test-Path $log) { Copy-Item $log $kept -Force } else { Write-Host "No UE4SS.log at $log" }
-& (Join-Path $here 'check.ps1') -Log $kept -Scenario $Scenario
+# -Instance too: bad-input reads the test dependent's settings.json back from the copy (Mod Manager story 5).
+& (Join-Path $here 'check.ps1') -Log $kept -Scenario $Scenario -Instance $inst
 exit $LASTEXITCODE
