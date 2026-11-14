@@ -240,7 +240,7 @@ local function writeValues(st, values)
     return true
 end
 
--- set(folder, key, value, opts) -> entry, orders | nil, code, detail. opts.world: the current world's name (menu window).
+-- set(folder, key, value) -> entry, orders | nil, code, detail. The menu window reads the current world from init's world().
 function M.set(folder, key, value)
     local st, code, detail = state(folder)
     if not st then return nil, code, detail end

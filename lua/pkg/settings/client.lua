@@ -183,7 +183,9 @@ local function startPoll()
         handle = res
         poll.handle = res
     else
+        -- A loop registered with an unusable handle can't be cancelled: retire its generation so it stops working.
         poll.running = false
+        poll.gen = poll.gen + 1
         if B.log then pcall(B.log.warn, "settings poll could not start: %s", ok and ("LoopInGameThreadWithDelay returned " .. tostring(res)) or tostring(res)) end
     end
 end
@@ -217,6 +219,7 @@ local function doSet(fn, folder, key, value)
     if code == "unknown-key" then fail(fn, "unknown key %s", detail) end
     if code == "bad-value" then fail(fn, "bad value: %s", detail) end
     if code == "unknown-mod" or code == "no-settings" or code == "bad-request" then fail(fn, "%s %s", code, detail) end
+    if code == "too-long" then fail(fn, "bad value: the request is too long (%s)", detail) end
     -- core not answering, or an unexpected reply: a refusal by state
     return false, (code or "call-failed") .. " " .. q(code and detail or reply)
 end
