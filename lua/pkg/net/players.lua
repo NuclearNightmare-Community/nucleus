@@ -6,7 +6,8 @@
 --   host        (isHost, story 22's role) one <Core>Presence per client connection's player controller, spawned here
 --               and owned by that controller (SetOwner), CoreVersion set through its Blueprint setter. A modded client
 --               calls the actor's reliable server RPC <Core>_SV_Report(Report); its Blueprint body checks Len(Report)
---               and calls <Core>_PresenceIn(Report or "", Len), which this state post-hooks. The reporting player is
+--               and calls <Core>_PresenceIn("", Len) when Len > 8192, else <Core>_PresenceIn(Report, Len), which this
+--               state post-hooks. The reporting player is
 --               the actor's owner's PlayerState (GetPlayerId), and only for an actor in this world's own table; never
 --               anything in the report. Reports are rate-limited (1 per second, 10 per minute per player), validated
 --               (net/presence.lua) and recorded against that PlayerId. A controller gone from
@@ -517,7 +518,11 @@ local function send(a, world, why)
         return
     end
     local ok, err = pcall(function() a[M.REPORT](a, report) end)
-    if not ok then limited("send", "PRESENCE could not send the report on %s: %s", tostring(W.actorName), firstLine(err)) return end
+    if not ok then
+        W.sendAt = now() + M.RESEND_US -- try again in this world
+        limited("send", "PRESENCE could not send the report on %s: %s; retrying in 2 s", tostring(W.actorName), firstLine(err))
+        return
+    end
     log.info("PRESENCE report sent (%s) on %s: %s server=%s us=%d", why, tostring(W.actorName), report, serverTime(world), now())
 end
 

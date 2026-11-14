@@ -98,6 +98,32 @@ function C._compatMessage(have, need, mod, floor)
         type(need) == "string" and ("'" .. quote(need) .. "' " .. tostring(why)) or tostring(why), mod, NAME, V.version)
 end
 
+-- Core story 23: registers this mod's (id, version[, netCompat]) from its mod.json (man: net/client.lua ownManifest's
+-- result, or nil with why) in this machine's presence list (channel op net-mod), and chains net-mod-off in front of any
+-- OnUnload already set, so the entry leaves with the mod. Internal; a seam for the unit tests.
+function C._registerPresence(man, why, log)
+    if not man then
+        log.info("%s.net presence: this mod is not reported to the host (%s)", NAME, tostring(why))
+        return
+    end
+    for _, note in ipairs(man.notes or {}) do log.warn("%s.net presence: %s", NAME, note) end
+    if not man.version then return end
+    local payload = man.id .. "=" .. man.version .. (man.netCompat and ("/" .. man.netCompat) or "")
+    local okM, reply = C.call("net-mod", payload)
+    if not okM then
+        log.warn("%s.net presence: %s did not register %s: %s", NAME, NAME, payload, tostring(reply))
+        return
+    end
+    log.info("%s.net presence: registered %s", NAME, payload)
+    pcall(function()
+        local prev = ModRef.OnUnload
+        ModRef.OnUnload = function(...)
+            pcall(C.call, "net-mod-off", man.id)
+            if type(prev) == "function" then return prev(...) end
+        end
+    end)
+end
+
 -- core.has(name) -> boolean and core.features() -> sorted list (story 18), over the list features.fromApi made from
 -- this mod's api table. has never raises: anything but a known name (non-string, empty, too long, nil) is false.
 local function featureCalls(list)
@@ -250,27 +276,8 @@ function C.connect(opts)
             else log.error("%s's net client could not start (%s); core.net is not available.", NAME, tostring(errB)) end
             -- Core story 23: this mod's (id, version[, netCompat]) goes into this machine's presence list, and leaves it
             -- when the mod unloads.
-            if man then
-                for _, note in ipairs(man.notes or {}) do log.warn("%s.net presence: %s", NAME, note) end
-                if man.version then
-                    local payload = man.id .. "=" .. man.version .. (man.netCompat and ("/" .. man.netCompat) or "")
-                    local okM, reply = C.call("net-mod", payload)
-                    if okM then
-                        log.info("%s.net presence: registered %s", NAME, payload)
-                        pcall(function()
-                            local prev = ModRef.OnUnload
-                            ModRef.OnUnload = function(...)
-                                pcall(C.call, "net-mod-off", man.id)
-                                if type(prev) == "function" then return prev(...) end
-                            end
-                        end)
-                    else
-                        log.warn("%s.net presence: %s did not register %s: %s", NAME, NAME, payload, tostring(reply))
-                    end
-                end
-            else
-                log.info("%s.net presence: this mod is not reported to the host (%s)", NAME, tostring(why))
-            end
+            local okP, errP = pcall(C._registerPresence, man, why, log)
+            if not okP then log.warn("%s.net presence: registration failed: %s", NAME, tostring(errP)) end
         else
             log.error("%s's net client failed to load (%s); core.net is not available.", NAME, tostring(netm))
         end
