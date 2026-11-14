@@ -44,7 +44,12 @@ C.ROW_CLASS = C.ROW_PKG .. "." .. C.ROW_SHORT
 C.SCREEN_PKG = "/Game/Mods/" .. C.NAME .. "/WBP_" .. C.NAME .. "Screen"
 C.SCREEN_SHORT = "WBP_" .. C.NAME .. "Screen_C"
 C.SCREEN_CLASS = C.SCREEN_PKG .. "." .. C.SCREEN_SHORT
-C.HOST_NAMES = "hud, journal, menu, screen" -- the hosts an intent can name (place.lua)
+-- Story 24 (core 0.8.0): WBP_<Core>Image (SizeBox "Box" -> Image "Img") and core's icon textures (Icons/T_<Key>).
+C.IMAGE_PKG = "/Game/Mods/" .. C.NAME .. "/WBP_" .. C.NAME .. "Image"
+C.IMAGE_SHORT = "WBP_" .. C.NAME .. "Image_C"
+C.IMAGE_CLASS = C.IMAGE_PKG .. "." .. C.IMAGE_SHORT
+C.ICON_DIR = "/Game/Mods/" .. C.NAME .. "/Icons"
+C.HOST_NAMES = "hud, journal, menu, screen" --the hosts an intent can name (place.lua)
 C.CURSOR_HOSTS = "journal, menu, screen"    -- hosts with a cursor: buttons, lists and rows go there
 
 -- An element's host key is "hud", "journal", "menu", or "screen#<window id>" for a window of the screen host: each
@@ -196,13 +201,13 @@ function C.hostOf(el)
 end
 function C.isContainer(el) return el.children ~= nil end
 
-local ARTICLE = { text = "a text element", panel = "a panel", button = "a button", list = "a list", row = "a row" }
+local ARTICLE = { text = "a text element", panel = "a panel", button = "a button", list = "a list", row = "a row", image = "an image" }
 C.ARTICLE = ARTICLE
 -- Story 21: functions that take a panel also take a list or a row (setStyle, setVisible, remove, isShown).
 local CONTAINER = { panel = true, list = true, row = true }
 
 -- The element behind a handle, or a clean error. fn is e.g. "text.set"; kind, when given, is the kind the function
--- takes ("text", "panel", "button", "list", "row"); nil takes any element. "panel" also takes a list or a row.
+-- takes ("text", "panel", "button", "list", "row", "image"); nil takes any element. "panel" also takes a list or a row.
 function C.element(h, fn, kind)
     if type(h) ~= "table" then
         C.fail("%s.%s: expected %s handle, got %s", C.UI, fn, (kind == nil or kind == "text") and "an element" or ARTICLE[kind], C.describe(h))

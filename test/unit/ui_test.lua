@@ -6,7 +6,7 @@
 local ROOT = (arg and arg[0] or ""):match("^(.*)[/\\]test[/\\]unit[/\\][^/\\]+$") or "."
 
 -- ---------------------------------------------------------------- module loading as Mods/Nucleus/Scripts/nucleus/*
-package.preload["nucleus.version"] = function() return { name = "Nucleus", version = "0.7.0", floor = "0.1.0" } end
+package.preload["nucleus.version"] = function() return { name = "Nucleus", version = "0.8.0", floor = "0.1.0" } end
 table.insert(package.searchers, 2, function(name)
     local rest = name:match("^nucleus%.(.+)$")
     if not rest then return nil end
@@ -382,7 +382,7 @@ raises(function() X.resolveStyle({ background = { r = -1, g = 0, b = 0 } }) end,
 raises(function() X.resolveStyle({ background = { r = 2, g = 0, b = 0 } }) end, "background.r must be a number from 0 to 1, got 2", "style: 2")
 raises(function() X.resolveStyle({ background = { r = "x", g = 0, b = 0 } }) end, "got 'x'", "style: 'x'")
 raises(function() X.resolveStyle({ padding = 5 }) end, "unknown padding 5 (valid: none, tight, normal, loose)", "style: padding 5")
-raises(function() X.resolveStyle({ bg = "dim" }) end, "unknown style key 'bg' (valid: background, font, look, padding)", "style: bg")
+raises(function() X.resolveStyle({ bg = "dim" }) end, "unknown style key 'bg' (valid: background, font, look, overflow, padding)", "style: bg")
 
 raises(function() X._validId("", "text.create") end, "id must not be empty", "id: empty")
 raises(function() X._validId(string.rep("a", 65), "text.create") end, "id is 65 characters, at most 64", "id: 65")
@@ -1430,7 +1430,7 @@ local jplace = { host = "journal", corner = "top-left" }
 
 -- bad input (AC 7)
 raises(function() BN.create() end, BC .. "expected a table", "button: create()")
-raises(function() BN.create{ id = "bb", onClick = counter("x"), place = jplace, colour = 1 } end, BC .. "unknown key 'colour' (valid: enabled, id, label, onClick, place, style)", "button: unknown key")
+raises(function() BN.create{ id = "bb", onClick = counter("x"), place = jplace, colour = 1 } end, BC .. "unknown key 'colour' (valid: dimmed, enabled, icon, iconSize, id, label, onClick, place, style, tooltip)", "button: unknown key")
 raises(function() BN.create{ id = "bb", label = "x", place = jplace } end, BC .. "onClick must be a function, got nil", "button: onClick missing")
 raises(function() BN.create{ id = "bb", label = "x", place = jplace, onClick = "f" } end, BC .. "onClick must be a function, got 'f'", "button: onClick a string")
 raises(function() BN.create{ id = "bb", label = {}, place = jplace, onClick = counter("x") } end, BC .. "label must be a string, a number or nil, got table", "button: label a table")

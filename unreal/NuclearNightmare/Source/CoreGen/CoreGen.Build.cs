@@ -10,6 +10,8 @@ public class CoreGen : ModuleRules
 			"Core", "CoreUObject", "Engine", "UnrealEd", "AssetRegistry",
 			"BlueprintGraph", "Kismet", "KismetCompiler",
 			"UMG", "UMGEditor", "Slate", "SlateCore",
+			// Core story 24: the icons (PNG -> texture source).
+			"ImageCore",
 		});
 	}
 }
