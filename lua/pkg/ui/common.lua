@@ -49,7 +49,7 @@ C.IMAGE_PKG = "/Game/Mods/" .. C.NAME .. "/WBP_" .. C.NAME .. "Image"
 C.IMAGE_SHORT = "WBP_" .. C.NAME .. "Image_C"
 C.IMAGE_CLASS = C.IMAGE_PKG .. "." .. C.IMAGE_SHORT
 C.ICON_DIR = "/Game/Mods/" .. C.NAME .. "/Icons"
-C.HOST_NAMES = "hud, journal, menu, screen" --the hosts an intent can name (place.lua)
+C.HOST_NAMES = "hud, journal, menu, screen" -- the hosts an intent can name (place.lua)
 C.CURSOR_HOSTS = "journal, menu, screen"    -- hosts with a cursor: buttons, lists and rows go there
 
 -- An element's host key is "hud", "journal", "menu", or "screen#<window id>" for a window of the screen host: each

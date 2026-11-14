@@ -682,10 +682,16 @@ ok(hw.tex and hw.tex.__asset == "T_Warning" and hw.tint[4] == 1 and hb.icon and 
 ok(F.getAssets > g0, "the next UI tick: loaded outside the hook")
 -- preload: a texture in use is loaded by the dependent's LoadMap post-hook
 A._reset()
-local g1 = F.getAssets
-for _, f in ipairs(F.loadMap) do f() end
-ok(F.getAssets > g1 and A._used["tex:warning"] and A._used["gtex:" .. T.GAME.reset], "LoadMap preload: the textures in use")
-ok(not A._used["tex:" .. "nothere"], "LoadMap preload: only what is used")
+do
+    local helpers = F.objects["/Script/AssetRegistry.Default__AssetRegistryHelpers"]
+    local base, seen = helpers.GetAsset, {}
+    helpers.GetAsset = function(self, a) seen[a.PackageName] = true return base(self, a) end
+    for _, f in ipairs(F.loadMap) do f() end
+    helpers.GetAsset = base
+    ok(seen["/Game/Mods/Nucleus/Icons/T_Warning"] and seen["/Game/Mods/Nucleus/Icons/T_Gear"] and seen["/Game/HexTree/Widgets/reset-icon"],
+        "LoadMap preload: the textures in use are loaded")
+    ok(not seen["/Game/Mods/Nucleus/Icons/T_CheckboxOff"], "LoadMap preload: an icon no element uses is not loaded")
+end
 
 -- ---------------------------------------------------------------- a new window open: everything re-attaches with the same look
 SC.close(T.W)
@@ -693,6 +699,31 @@ T.W = SC.open{ id = "W" }
 T.boxW, T.nameW, T.gearW = T.tagged("r.on"), T.tagged("r.name"), T.tagged("r.cfg")
 ok(T.boxW.tex.__asset == "T_CheckboxOn" and T.boxW.Img.tip == "ON" and T.nameW.Text.policy == 1 and T.gearW.Btn.tip == "CONFIGURE"
     and T.gearW.Box.wo == 28 and T.gearW.content and T.near(T.gearW.content[1], T.DIM.r), "re-open: icons, ellipsis, tooltips, dimmed again")
+
+-- ---------------------------------------------------------------- re-create with the same id; dimmed faces; fill in a row
+function T.gearAgain(dim)
+    return B.create{ id = "r.cfg", place = { row = T.row }, icon = { icon = "gear" }, iconSize = 28, dimmed = dim,
+        tooltip = { en = "CONFIGURE", de = "KONFIGURIEREN" }, onClick = function() T.hits = T.hits + 1 end }
+end
+T.gearAgain(false)
+ok(T.tagged("r.cfg") == T.gearW and T.near(T.gearW.content[1], theme.game.text.r) and T.near(T.gearW.content[5], theme.game.textHover.r)
+    and T.gearW.Btn.tip == "CONFIGURE", "same id, dimmed = false: the game's colours again, tooltip kept")
+T.gearAgain(true)
+ok(T.near(T.gearW.content[1], T.DIM.r) and T.near(T.gearW.content[5], T.DIM.r), "same id, dimmed = true: dimmed again")
+B.create{ id = "dg", label = "GO", place = { list = T.list }, dimmed = true, onClick = function() end }
+local dgw = T.tagged("dg")
+ok(dgw.mats and dgw.mats[2] == dgw.mats[1], "dimmed, game look: the hover material is the normal one")
+B.create{ id = "dp", label = "GO", place = { list = T.list }, dimmed = true, style = { look = "plain" }, onClick = function() end }
+local dpw = T.tagged("dp")
+ok(dpw.colors and dpw.colors[5] == dpw.colors[1] and dpw.colors[6] == dpw.colors[2] and dpw.colors[7] == dpw.colors[3] and dpw.colors[8] == dpw.colors[4],
+    "dimmed, plain look: the hover colour is the normal one")
+IM.create{ id = "r.on", place = { row = T.row }, image = { icon = "lock" }, size = 30, style = { tint = { r = 1, g = 0, b = 0 } }, tooltip = "ON" }
+ok(T.tagged("r.on") == T.boxW and T.boxW.tex.__asset == "T_Lock" and T.boxW.size[1] == 30 and T.tintIs(T.boxW.tint, { r = 1, g = 0, b = 0, a = 1 }),
+    "same id: the same image widget gets the new source, size and tint")
+IM.create{ id = "fi", place = { row = T.row, fill = 2 }, image = { icon = "lock" } }
+local fw = T.tagged("fi")
+ok(fw.Slot.Size.SizeRule == 1 and fw.Slot.HorizontalAlignment == 2 and fw.Slot.VerticalAlignment == 2, "image with fill in a row: centred in its column, not stretched")
+IM.remove(C.els.fi.handle)
 
 -- ---------------------------------------------------------------- off the game thread and before connect
 do

@@ -526,8 +526,9 @@ X._boxOf = boxOf
 -- Auto).
 local SIZE_AUTO, SIZE_FILL = 0, 1
 -- Story 24: an image, or a button that is only an icon, keeps its own size in a box (a box slot fills across by
--- default, which would stretch it): centred across a horizontal box (a row), at the start of a vertical one. Other
--- children keep the 0.7.0 slots. EVerticalAlignment Center 2, EHorizontalAlignment Left 1; Fill 0 for both.
+-- default, which would stretch it): centred in a horizontal box (a row; in its column when it has a fill), at the
+-- start of a vertical one. Other children keep the 0.7.0 slots. EVerticalAlignment Center 2, EHorizontalAlignment
+-- Center 2 / Left 1; Fill 0 for both.
 local function keepsSize(ch) return ch.kind == "image" or (ch.kind == "button" and ch.icon ~= nil and ch.label == "") end
 local function applyGaps(p)
     local first = true
@@ -551,7 +552,12 @@ local function applyGaps(p)
                         end
                         if fixed or ch.alignKept then
                             C.count()
-                            if horiz then w.Slot:SetVerticalAlignment(fixed and 2 or 0) else w.Slot:SetHorizontalAlignment(fixed and 1 or 0) end
+                            if horiz then
+                                w.Slot:SetVerticalAlignment(fixed and 2 or 0)
+                                C.count(); w.Slot:SetHorizontalAlignment(fixed and 2 or 0) -- a Fill slot (fill = n) centres it in its column
+                            else
+                                w.Slot:SetHorizontalAlignment(fixed and 1 or 0)
+                            end
                             ch.alignKept = fixed
                         end
                     end)

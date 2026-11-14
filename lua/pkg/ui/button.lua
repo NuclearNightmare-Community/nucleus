@@ -183,12 +183,13 @@ local function iconOnly(el) return el.icon ~= nil and el.label == "" end
 -- Story 24: the icon and the layout. Label only (no icon): the 0.7.0 widget. Icon and label: the icon (iconSize) left
 -- of the label, the gap between them. Icon only: the label and gap collapsed, the box exactly iconSize. el.iconKey:
 -- the texture and size the widget's icon has now (false: none); el.layoutKey: the layout it has now.
+local applyIconLater -- below
 local function applyIcon(el, w, fresh)
     if fresh then el.iconKey, el.layoutKey = false, "label" end
     local tex, key = nil, nil
     if el.icon then
         tex, key = I._resolve(el.icon)
-        if key == "pending" then I._later(el, applyIcon) return end -- inside a hook, not cached: the next UI tick
+        if key == "pending" then I._later(el, applyIconLater) return end -- inside a hook, not cached: the next UI tick
     end
     local sz = el.iconSize
     local want = tex and string.format("%s@%gx%g", key, sz.w, sz.h) or false
@@ -217,6 +218,14 @@ local function applyIcon(el, w, fresh)
         C.count(); w.IconGap:SetVisibility(layout == "both" and V.HitTestInvisible or V.Collapsed)
     end
     el.layoutKey = layout
+end
+
+-- The next tick's apply of an icon missed inside a hook: the button may grow, so its container's slots and what
+-- follows it in its corner are refreshed too.
+applyIconLater = function(el, w)
+    applyIcon(el, w, false)
+    if el.panel then X._applyGaps(el.panel) end
+    X._resized(el)
 end
 
 local PLAIN_LABEL = { size = 18 }
@@ -344,7 +353,7 @@ function B.create(opts)
     local place = P.validate(intent)
     if not place.panelEl then X.checkHost("button", place.host, "button.create") end
     X._checkTipHost("button", place.panelEl and C.hostOf(place.panelEl) or place.host, tooltip ~= nil)
-    local style = X.resolveStyle(opts.style, "button")
+    local resolved = X.resolveStyle(opts.style, "button")
     local el = X._existing(id, "button", "button.create")
     if el then
         -- Same id: the new label, callback, enabled state, icon, dimmed, tooltip, style and intent.
@@ -364,7 +373,7 @@ function B.create(opts)
         end
         B.setLabel(el.handle, label)
         B.setEnabled(el.handle, enabled)
-        X._setStyle(el, style)
+        X._setStyle(el, resolved)
         if w and iconChanged then
             if el.panel then X._applyGaps(el.panel) end -- an icon-only button keeps its size in a box
             X._resized(el)
@@ -375,7 +384,7 @@ function B.create(opts)
     if place.panelEl then X._checkJoin(place.panelEl, "button", "button.create", nil, tooltip ~= nil) end
     ensureHook()
     if icon then A.ensureLoadMapHook() end -- story 24: textures in use are preloaded after every map load
-    el = X._new("button", id, { label = label, style = style, onClick = opts.onClick, enabled = enabled,
+    el = X._new("button", id, { label = label, style = resolved, onClick = opts.onClick, enabled = enabled,
         icon = icon, iconSize = iconSize, dimmed = dimmed, tooltip = tooltip }, place)
     return el.handle
 end
