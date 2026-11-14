@@ -108,17 +108,18 @@ function Get-NucleusPresenceJoin([string] $HostLog) {
     [ordered]@{ Verdict = $(if ($d -ge 0 -and $d -le 2.0) { 'PASS' } else { 'FAIL' }); SawControllerSec = $a; JoinedSec = $b; DeltaSec = [math]::Round($d, 3); Limit = 2.0 }
 }
 
-# Story 23 AC (leave): the host's PRESENCEEV left for B (skeltest) against B's server clock as it called OpenLevel; at
-# most 2.0 s (B's server clock may run behind the host's; no lower bound, as for story 22's latency).
+# Story 23 AC (leave): the host's PRESENCEEV left for B's skeltest 7.7.7 (B's real leave, after forge step 4; step 3's
+# left of skeltest 0.1.0 doesn't count) against B's server clock as it called OpenLevel; at most 2.0 s, and never earlier
+# than B's leaving line.
 function Get-NucleusPresenceLeave([string] $HostLog, [string] $VMLog) {
     $T = [regex]::Escape("${NucleusName}SkelTest")
     $c = Select-String -Path $VMLog -Pattern "\[$T\] PRESENCECL leaving server=([\d.]+)" -ErrorAction SilentlyContinue | Select-Object -First 1
-    $h = Select-String -Path $HostLog -Pattern "\[$T\] PRESENCEEV left pid=-?\d+ mod=skeltest version=nil .* local=false server=([\d.]+)" -ErrorAction SilentlyContinue | Select-Object -Last 1
+    $h = Select-String -Path $HostLog -Pattern "\[$T\] PRESENCEEV left pid=-?\d+ mod=skeltest version=nil previous=7\.7\.7 local=false server=([\d.]+)" -ErrorAction SilentlyContinue | Select-Object -Last 1
     if (-not $c -or -not $h) { return [ordered]@{ Verdict = 'FAIL'; Note = "missing: client leaving $([bool]$c), host left $([bool]$h)" } }
     $cs = [double]::Parse($c.Matches[0].Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture)
     $hs = [double]::Parse($h.Matches[0].Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture)
     $d = $hs - $cs
-    [ordered]@{ Verdict = $(if ($d -le 2.0) { 'PASS' } else { 'FAIL' }); ClientLeavingSec = $cs; HostLeftSec = $hs; DeltaSec = [math]::Round($d, 3); Limit = 2.0 }
+    [ordered]@{ Verdict = $(if ($d -ge 0 -and $d -le 2.0) { 'PASS' } else { 'FAIL' }); ClientLeavingSec = $cs; HostLeftSec = $hs; DeltaSec = [math]::Round($d, 3); Limit = 2.0 }
 }
 
 function Get-NucleusNetNotJoined {

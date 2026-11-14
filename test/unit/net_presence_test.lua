@@ -574,6 +574,30 @@ do
     eq(own.reports[2], "nucleus=" .. V0 .. ",skeltest=0.1.0,late-mod=1.0.0", "client: the changed list")
     PL.op("net-mod-off", "late-mod")
 end
+-- a failed send is retried 2 s later in the same world
+do
+    local cwr = newWorld("/Game/Maps/Retry.Retry")
+    cwr.localPC = newPC("PC_retry", cwr, 303)
+    PL.onLoadMap(cwr)
+    clearLines()
+    local own = newPresence(cwr, false)
+    own.owner = cwr.localPC
+    own.CoreVersion = V0
+    local fails = 1
+    own.Nucleus_SV_Report = function(self, r) if fails > 0 then fails = fails - 1 error("rpc failed") end self.reports[#self.reports + 1] = r end
+    PL.onNewObject(own)
+    PL.tick()
+    eq(#own.reports, 0, "send failure: nothing sent")
+    eq(lines("^WARN PRESENCE could not send the report .*rpc failed; retrying in 2 s"), 1, "send failure: one line")
+    clockT = clockT + 1000000; PL.tick()
+    eq(#own.reports, 0, "send failure: no retry within 2 s")
+    clockT = clockT + 1000001; PL.tick()
+    eq(#own.reports, 1, "send failure: retried 2 s later")
+    eq(own.reports[1], "nucleus=" .. V0 .. ",skeltest=0.1.0", "send failure: the retry carries the local list")
+    clockT = clockT + 3000000; PL.tick()
+    eq(#own.reports, 1, "send failure: no further sends after the retry worked")
+end
+
 -- the FindAllOf fallback, and a version mismatch: never reports, one line per world
 do
     local cw2 = newWorld("/Game/Maps/Other.Other")
@@ -645,6 +669,30 @@ do
     m = CL.ownManifest(DIR, "E")
     ok(m and m.netCompat == nil and #m.notes == 1, "ownManifest: a non-string netCompat left out, with a note")
     eq(CL.ownId(DIR, "A"), "skeltest", "ownId still answers")
+end
+
+-- ---------------------------------------------------------------- connect's registration and its OnUnload chain
+do
+    local C = require("nucleus.client")
+    local realCall = C.call
+    C.call = function(op, payload)
+        local r = PL.op(op, payload)
+        if r:sub(1, 3) == "ok:" then return true, r:sub(4) end
+        return false, r
+    end
+    local clog = { info = function() end, warn = function(f, ...) DLINES[#DLINES + 1] = "WARN " .. string.format(f, ...) end, error = function() end }
+    local prevRan = 0
+    ModRef.OnUnload = function() prevRan = prevRan + 1 end
+    C._registerPresence({ id = "unload-mod", version = "1.2.3", netCompat = "1.0.0", notes = {} }, nil, clog)
+    ok(P.encodeList(PL.localList()):find("unload-mod=1.2.3/1.0.0", 1, true) ~= nil, "connect: the mod is registered with its netCompat")
+    ModRef.OnUnload()
+    ok(P.encodeList(PL.localList()):find("unload-mod", 1, true) == nil, "unload: net-mod-off removed the mod from the local list")
+    eq(prevRan, 1, "unload: the previous OnUnload still ran")
+    -- a mod without a strict version is not registered and chains nothing
+    local before = ModRef.OnUnload
+    C._registerPresence({ id = "noversion-mod", notes = { "mod.json version: x" } }, nil, clog)
+    ok(P.encodeList(PL.localList()):find("noversion-mod", 1, true) == nil and ModRef.OnUnload == before, "connect: no strict version: not registered, no unload chain")
+    C.call = realCall
 end
 
 -- ---------------------------------------------------------------- features
