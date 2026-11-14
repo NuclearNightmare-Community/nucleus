@@ -16,10 +16,15 @@ For players: in a hosted match, the host's mods can tell which other players run
 - What a machine reports: Nucleus itself plus every connected dependent, each with its `mod.json` `id`, `version` and `netCompat`, registered at `connect` and removed when the mod unloads. A modded client sends the list once it holds its own `NucleusPresence` and again 2 s after the list changes.
 - The channel ops `net-mod:<id>=<version>[/<netCompat>]` and `net-mod-off:<id>`, and the shared variables `nucleus.net.presence` (the snapshot) and `nucleus.net.presence.gen`.
 - Features: `net.presence`, `net.watchPresence`, `net.compatible`, `net.versionsCompatible`.
+- `nucleus.modid` (distribution story 13; README, "Versioning"): `normalize(id) -> id | nil, message`, the mod id normalizer of `mod-ids.md` (lowercase, `github.com/<owner>.<mod>` -> `<owner>.<mod>`, `[a-z0-9-]` parts, at most 200 bytes; URLs, other hosts and bare ids refused; never raises; messages don't echo the input). It runs the shared cases `test/unit/fixtures/modid-cases.json`, a byte-identical copy of the workspace's `tools/release/tests/modid-cases.json`, with the same results and messages as the release tools' PowerShell normalizer (`test/unit/modid_test.lua`). Pure, so a dependent can `require` it. Its refusal messages changed from the 0.11.0 module's; `netId` and `isNetId` are unchanged. Bad-input cases `modid-*` in the `bad-input` scenario (written; not yet run in the game).
+
+### Changed
+
+- Nucleus's id is now `nuclearnightmare-community.nucleus` (was `nucleus`), the namespaced form every released mod takes before the first public release (distribution story 13, `mod-ids.md`). Dependents name it in `dependsOn`; the test dependents `SkelTest` and `SkelPeer` do. The folder, `mods.txt` line, `name` and core's own presence entry (its lowercase name) are unchanged.
 
 ### Notes
 
-- Add-only: no existing function, channel op or class changed; `compat.floor` is unchanged.
+- Presence (core story 23) is add-only: no existing function, channel op or class changed; `compat.floor` is unchanged. Distribution story 13 changes only `nucleus.modid`'s refusal messages and the id (above).
 - Everything a client sends is checked on the host: the player is the actor's owner's `PlayerState` (never anything in the report); at most 32 pairs and 8192 bytes (more rejects the whole report); ids normalized (namespaced, or a legacy bare id), versions strict `x.y.z` with each part 0..999 (a bad pair is dropped, the rest kept; on a duplicate id the first wins); at most 1 report per player per second and 10 per minute. Rejects log at most one line per player per minute. A client whose Nucleus version differs from the host's never reports (one line per world). The host keeps at most 64 client records per world.
 - A `mod.json` `version` that isn't strict `x.y.z` keeps that mod out of presence (one line at `connect`); an invalid `netCompat`, or one above `version`, is left out (one line at `connect`).
 - Test dependent: `test/SkelTest/mod.json`'s `version` is now `0.1.0`.
