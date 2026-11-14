@@ -137,8 +137,10 @@ function K.create(opts, ...)
     X._checkTipHost("checkbox", place.panelEl and C.hostOf(place.panelEl) or place.host, tooltip ~= nil)
     -- Both textures are loaded now (outside any hook) and preloaded after every map load, so a click finds them cached.
     A.ensureLoadMapHook()
-    pcall(I._resolve, theme.checkboxOn)
-    pcall(I._resolve, theme.checkboxOff)
+    for _, src in ipairs({ theme.checkboxOn, theme.checkboxOff }) do
+        local okR, errR = pcall(I._resolve, src)
+        if not okR then C.warnOnce("checkbox textures", "checkbox: loading %s failed: %s; a click shows it on the next tick", src.game, firstLine(errR)) end
+    end
     local el = X._existing(id, "checkbox", "checkbox.create")
     if el then
         -- Same id: the new state, callback, size, tooltip, enabled state and intent; visibility unchanged.

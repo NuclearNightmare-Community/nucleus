@@ -661,7 +661,7 @@ $menuChecks = $started + @(
     # Mod Manager story 4 (core 0.10.0, UI-11): checkbox, choice and slider-with-number controls on window CT over the
     # third menu, driven by real clicks, a drag and typing (the I/O matrix rows), then SkelPeer's checkbox on the menu.
     "\[$T\] OK CTWIN window CT open with the controls"
-    "\[$T\] OK CTCASES ran 64 cases"
+    "\[$T\] OK CTCASES ran 85 cases"
     "\[$T\] OK CTHAS core\.has: ui\.slider\.create, ui\.choice\.range, ui\.checkbox\.create"
     "\[$T\] OK CTROW every control is in its row"
     "\[$T\] OK CTCLASS checkbox WBP_${N}Button_C, choice WBP_${N}Choice_C, slider WBP_${N}Slider_C"
@@ -735,15 +735,19 @@ foreach ($id in 'style-key', 'overflow-bad', 'overflow-num', 'overflow-button', 
 }
 # Mod Manager story 4: the ct-* group, on window CT (menu3), and every new function off the game thread.
 foreach ($id in 'cb-none', 'cb-args', 'cb-unknown', 'cb-onchange', 'cb-size-8', 'cb-size-65', 'cb-checked', 'cb-enabled', 'cb-hud', 'cb-kindid',
-                'cb-set-num', 'cb-get-choice', 'cb-get-forged', 'cb-setenabled', 'cb-setvis', 'cb-isshown-slider', 'cb-tip', 'cb-label-button', 'cb-ok',
+                'cb-set-num', 'cb-get-choice', 'cb-get-forged', 'cb-setenabled', 'cb-setvis', 'cb-isshown-slider', 'cb-tip', 'cb-tip-create', 'cb-place', 'cb-remove-forged', 'cb-remove-slider', 'cb-label-button', 'cb-ok',
                 'ch-none', 'ch-unknown', 'ch-empty', 'ch-65', 'ch-nonstring', 'ch-long', 'ch-sel-7', 'ch-sel-0', 'ch-onchange', 'ch-game', 'ch-widget',
-                'ch-hud', 'ch-set-7', 'ch-get-slider', 'ch-get-forged', 'ch-setenabled', 'ch-ok',
+                'ch-hud', 'ch-enabled', 'ch-tip-create', 'ch-place', 'ch-hole', 'ch-key', 'ch-setvis', 'ch-remove-forged', 'ch-isshown-checkbox',
+                'ch-tip', 'ch-set-7', 'ch-get-slider', 'ch-get-forged', 'ch-setenabled', 'ch-ok',
                 'rg-65', 'rg-extra-65', 'rg-step-0', 'rg-minmax', 'rg-inf', 'rg-extra', 'rg-unknown', 'rg-ok',
                 'sl-none', 'sl-unknown', 'sl-minmax', 'sl-step-0', 'sl-steps', 'sl-value-out', 'sl-value-nan', 'sl-default-out', 'sl-default-inf',
-                'sl-hint-65', 'sl-onchange', 'sl-hud', 'sl-set-out', 'sl-set-noarg', 'sl-setdefault-nil', 'sl-setdefault-hint', 'sl-get-checkbox',
+                'sl-hint-65', 'sl-onchange', 'sl-hud', 'sl-enabled', 'sl-tip-create', 'sl-place', 'sl-setenabled', 'sl-setvis',
+                'sl-remove-choice', 'sl-isshown-forged', 'sl-tip', 'sl-set-out', 'sl-set-noarg', 'sl-setdefault-nil', 'sl-setdefault-hint', 'sl-get-checkbox',
                 'sl-get-forged', 'sl-ok', 'removed',
-                'off-cb-create', 'off-cb-get', 'off-cb-set', 'off-cb-setenabled', 'off-ch-create', 'off-ch-get', 'off-ch-set', 'off-ch-range',
-                'off-sl-create', 'off-sl-get', 'off-sl-set', 'off-sl-setdefault') {
+                'off-cb-create', 'off-cb-get', 'off-cb-set', 'off-cb-setenabled', 'off-cb-setvis', 'off-cb-remove', 'off-cb-isshown', 'off-cb-settip',
+                'off-ch-create', 'off-ch-get', 'off-ch-set', 'off-ch-range', 'off-ch-setenabled', 'off-ch-setvis', 'off-ch-remove', 'off-ch-isshown',
+                'off-ch-settip', 'off-sl-create', 'off-sl-get', 'off-sl-set', 'off-sl-setdefault', 'off-sl-setenabled', 'off-sl-setvis', 'off-sl-remove',
+                'off-sl-isshown', 'off-sl-settip') {
     $menuChecks += "\[$T\] OK CASE menu3\.ct-$id "
 }
 $manual = @(

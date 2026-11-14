@@ -17,7 +17,10 @@
 -- last value; an empty box means Default (nil). onChange(handle, value) runs on the game thread inside pcall, exactly
 -- once per real change (the end of a drag or a commit that changes the value), never for set, setDefault or a commit
 -- that leaves the value as it was. A throwing onChange is logged once per slider and the slider keeps working.
--- setDefault moves a slider that is at Default and leaves a custom value alone. enabled = false keeps it visible,
+-- setDefault moves a slider that is at Default and leaves a custom value alone; its hint argument left out keeps the
+-- current hint, an explicit nil clears it. value and defaultValue (on create, set and setDefault) are snapped to
+-- min + k * step, so the slider never holds a value a drag or a commit would change. The number box widens while it
+-- shows a hint (room for 16 characters). enabled = false keeps it visible,
 -- dimmed (the disabled opacity) and ignores input: read-only settings use it.
 --
 -- Look: the bar and handle are copied from the game's Settings menu slider (the SettingsMenu_C widget-tree template,
@@ -117,12 +120,17 @@ local function applyEnabled(el, w)
     el.appliedEnabled = el.enabled
 end
 
+-- The number box is BOX_W wide, BOX_HINT_W while it has a hint (room for a hint of 16 characters).
+local BOX_W, BOX_HINT_W = 112, 200
 local function applyHint(el, w)
     local hint = el.hint or ""
     if hint == el.appliedHint then return end
+    local width = hint ~= "" and BOX_HINT_W or BOX_W
+    if width ~= el.boxWidth then C.count(); w:SetBoxWidth(width); el.boxWidth = width end
     C.count(); w:SetHint(hint)
     el.appliedHint = hint
 end
+SL._BOX_W, SL._BOX_HINT_W = BOX_W, BOX_HINT_W
 
 local function applyRange(el, w)
     local key = string.format("%.17g/%.17g/%.17g/%d", el.min, el.max, el.step, el.decimals)
@@ -157,7 +165,7 @@ end
 X.KIND.slider = {
     pkg = C.SLIDER_PKG, short = C.SLIDER_SHORT, cls = C.SLIDER_CLASS,
     content = function(el, w, fresh)
-        if fresh then el.rangeKey, el.appliedHint, el.appliedEnabled, el.styleCopied, el.lookKey = nil, nil, true, nil, nil end
+        if fresh then el.rangeKey, el.appliedHint, el.appliedEnabled, el.styleCopied, el.lookKey, el.boxWidth = nil, nil, true, nil, nil, BOX_W end
         applyRange(el, w)  -- before the value: the bar clamps to its range
         showValue(el, w)
         applyHint(el, w)
@@ -330,8 +338,10 @@ function SL.create(opts, ...)
     end
     local id = X._validId(opts.id, "slider.create")
     local min, max, step = validRange(opts, pre)
+    -- Values are snapped to min + k * step, so a commit or a click that doesn't move the slider is never a change.
     local value = validValue(opts.value, min, max, pre, "value", true)
-    local default = opts.defaultValue == nil and min or validValue(opts.defaultValue, min, max, pre, "defaultValue", false)
+    if value ~= nil then value = snap(value, min, max, step) end
+    local default = opts.defaultValue == nil and min or snap(validValue(opts.defaultValue, min, max, pre, "defaultValue", false), min, max, step)
     local hint = validHint(opts.hint, pre)
     if type(opts.onChange) ~= "function" then C.fail("%s: onChange must be a function, got %s", pre, C.describe(opts.onChange)) end
     local enabled = validBool(opts.enabled, pre, "enabled", true)
@@ -371,6 +381,7 @@ function SL.set(h, ...)
     local n = select("#", ...)
     if n ~= 1 then C.fail("%s.slider.set: expected 2 arguments (handle, value or nil), got %d", C.UI, 1 + n) end
     local v = validValue((...), el.min, el.max, C.UI .. ".slider.set", "value", true)
+    if v ~= nil then v = snap(v, el.min, el.max, el.step) end -- min + k * step, as a drag or a commit would give
     if v == el.value then return end -- no UObject call
     el.value = v
     refresh(el, { value = true })
@@ -381,8 +392,10 @@ function SL.setDefault(h, defaultValue, ...)
     local el = C.element(h, "slider.setDefault", "slider")
     local pre = C.UI .. ".slider.setDefault"
     if select("#", ...) > 1 then C.fail("%s: expected 2 or 3 arguments (handle, defaultValue, hint), got %d", pre, 2 + select("#", ...)) end
-    local d = validValue(defaultValue, el.min, el.max, pre, "defaultValue", false)
-    local hint = validHint((...), pre)
+    local d = snap(validValue(defaultValue, el.min, el.max, pre, "defaultValue", false), el.min, el.max, el.step)
+    -- An omitted hint keeps the current one; an explicit nil clears it.
+    local hint = el.hint
+    if select("#", ...) == 1 then hint = validHint((...), pre) end
     local moved = d ~= el.default and el.value == nil
     el.default, el.hint = d, hint
     refresh(el, { value = moved, hint = true }) -- a custom value stays where it is

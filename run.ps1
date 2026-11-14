@@ -171,7 +171,8 @@ function Invoke-Drag([int] $x, [int] $y, [int] $x2, [int] $y2) {
 
 function Invoke-Request([string] $cmd) {
     # 'key ENTER' (touchdown), 'key <A-Z>' (the journal scenario's map key), 'key UP' / 'key DOWN', 'click <x> <y>'
-    # (story 15), 'move <x> <y>' and 'wheel <x> <y> <notches>' (story 21), 'shot <label>' (VM only); anything else is ignored.
+    # (story 15), 'move <x> <y>' and 'wheel <x> <y> <notches>' (story 21), 'drag <x1> <y1> <x2> <y2>', 'type <text>' and
+    # 'key BACK' / 'key TAB' / 'key ESCAPE' (Mod Manager story 4), 'shot <label>' (VM only); anything else is ignored.
     if ($cmd -cmatch '^click (\d{1,5}) (\d{1,5})$') {
         $x = [int]$Matches[1]; $y = [int]$Matches[2]
         if ($x -le 16383 -and $y -le 16383) { Invoke-Click $x $y } else { Write-Host "  click skipped: ($x, $y) out of range" }
