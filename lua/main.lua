@@ -18,6 +18,9 @@ local okJMap, JMAP = pcall(require, LOWER .. ".map.journalmap")
 -- The settings service (lua/pkg/settings/store.lua, Mod Manager story 5): every mod's declared settings and their
 -- values, reached through the channel ops settings-get and settings-set. Loaded here, started in start().
 local okSet, SETTINGS = pcall(require, LOWER .. ".settings.store")
+-- core.net's owner (lua/pkg/net/host.lua, core story 22): this machine's net state; spawns <Core>Net on the host, reads
+-- it on a client, answers the channel op net-publish. Loaded here, started in start(), driven from the LoadMap hook.
+local okNet, NET = pcall(require, LOWER .. ".net.host")
 
 local CLASS_PKG = "/Game/Mods/" .. NAME .. "/ModActor"
 local CLASS = CLASS_PKG .. ".ModActor_C"
@@ -47,6 +50,7 @@ local REV_KEY = LOWER .. ".settings.rev"
 local settingsRev = math.tointeger(ModRef:GetSharedVariable(REV_KEY)) or 0
 ModRef:SetSharedVariable(REV_KEY, settingsRev)
 local settingsReady = false
+local netReady = false
 -- The current world's full name (a string, never the UObject), from the LoadMap post-hook: the settings service
 -- refuses "menu" settings outside the title screen.
 local currentWorld
@@ -95,6 +99,12 @@ local function handle(request)
         if not settingsReady then return "err:internal settings service not running" end
         local payload = #request > #op and request:sub(#op + 2) or nil
         return SETTINGS.op(op, payload)
+    end
+    -- Core story 22: core.net's publish (net/host.lua re-checks the payload, the role and the caps).
+    if op == "net-publish" then
+        if not netReady then return "err:internal net service not running" end
+        local payload = #request > #op and request:sub(#op + 2) or nil
+        return NET.op(payload)
     end
     return "err:unknown-op " .. quote(op)
 end
@@ -201,6 +211,29 @@ local function start()
         else log.error("settings service could not start: %s", tostring(errI):match("^[^\n]*")) end
     end
 
+    -- core.net (story 22): role none until the first world; its loop starts from the LoadMap post-hook.
+    if not okNet then
+        log.error("net service did not load (%s); core.net has no state on this machine", tostring(NET):match("^[^\n]*"))
+    else
+        local okI, errI = pcall(NET.init, {
+            log = log, setShared = function(k, v) ModRef:SetSharedVariable(k, v) end,
+            getShared = function(k) return ModRef:GetSharedVariable(k) end,
+            isHost = mapReady and function(w) return MAP.isHost(w) end or nil,
+        })
+        if okI then
+            netReady = true
+            -- A client learns the host's <Core>Net from its creation (the callback only takes a weak handle).
+            local okN, errN = pcall(NotifyOnNewObject, NET.CLASS, function(obj)
+                local okC, errC = pcall(NET.onNewObject, obj)
+                if not okC then log.warn("NET creation callback failed: %s", tostring(errC):match("^[^\n]*")) end
+                return false
+            end)
+            if not okN then log.warn("NET NotifyOnNewObject(%s) failed (%s); clients find the actor by the 2 s fallback only", NET.CLASS, tostring(errN):match("^[^\n]*")) end
+        else
+            log.error("net service could not start: %s", tostring(errI):match("^[^\n]*"))
+        end
+    end
+
     NotifyOnNewObject(CLASS, function()
         local okN, errN = pcall(hookChannel, "NotifyOnNewObject")
         if not okN then log.error("channel hook from NotifyOnNewObject failed: %s", tostring(errN)) end
@@ -227,6 +260,14 @@ local function start()
             local okJ, errJ = pcall(function() JMAP.onLoadMap(world and world:get()) end)
             if not okJ then log.error("Journal map LoadMap part failed: %s", tostring(errJ):match("^[^\n]*")) end
         end
+        -- Story 22: core.net's values belong to this world (cleared), the role is decided here (after the map service
+        -- refreshed its isHost cache), the host spawns <Core>Net; the 250 ms loop starts once, here, on the game thread.
+        if netReady then
+            local okN, errN = pcall(function() NET.onLoadMap(world and world:get()) end)
+            if not okN then log.error("net LoadMap part failed: %s", tostring(errN):match("^[^\n]*")) end
+            local okS, errS = pcall(NET.start)
+            if not okS then log.error("net loop could not start: %s", tostring(errS):match("^[^\n]*")) end
+        end
         local okL, errL = pcall(ExecuteInGameThreadWithDelay, 3000, function()
             local ok, err = pcall(ensureClass)
             if not ok then log.error("class check failed: %s", tostring(err)) end
@@ -239,6 +280,7 @@ local function start()
         pcall(function() ModRef:SetSharedVariable(LOWER .. ".map", "stopped") end)
         pcall(function() ModRef:SetSharedVariable(SETUP_KEY, "none") end)
         if jmapReady then pcall(JMAP.stop) end
+        if netReady then pcall(NET.stop); pcall(NET.unload) end
         local okU, errU = pcall(setState, "stopped")
         log.info("STOPPED%s", okU and "" or (" (state not published: " .. tostring(errU) .. ")"))
     end

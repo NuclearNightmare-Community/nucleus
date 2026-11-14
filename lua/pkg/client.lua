@@ -12,6 +12,8 @@ local featm = require(BASE .. ".features")
 local deprecate = require(BASE .. ".deprecate")
 -- core.settings (Mod Manager story 5). A failure here must not stop connect: core.settings is then missing.
 local setOk, settingsm = pcall(require, BASE .. ".settings.client")
+-- core.net (core story 22). The same: a failure here costs core.net, not connect.
+local netOk, netm = pcall(require, BASE .. ".net.client")
 -- UI helpers (ui-helpers-contract.md). Loading them registers the HUD creation callback (ui/hud.lua) in this Lua state.
 -- A failure here must not stop connect for mods that use no UI: core.ui is then missing and onReady is told why.
 local uiOk, uiErr = pcall(function()
@@ -154,6 +156,12 @@ function C.connect(opts)
         local okF, f = pcall(settingsm.findFolder, NAME)
         if okF then ownFolder = f end
     end
+    -- core.net publishes under the mod's own mod.json id: the install folder, found the same way, now.
+    local netDir, netFolder
+    if netOk then
+        local okF, d, f = pcall(netm.findOwn, NAME)
+        if okF then netDir, netFolder = d, f end
+    end
     if type(_G[NAME .. "_NativeVersion"]) ~= "function" then
         local msg = NAME .. "'s native part is not loaded (Mods/" .. NAME .. "/dlls/main.dll missing or failed to load)."
         fail(msg)
@@ -231,6 +239,16 @@ function C.connect(opts)
             else log.error("%s's settings client could not start (%s); core.settings is not available.", NAME, tostring(errB)) end
         else
             log.error("%s's settings client failed to load (%s); core.settings is not available.", NAME, tostring(settingsm))
+        end
+        -- Core story 22: core.net, bound to this mod's own id (nil: publish raises; read, watch and role still work).
+        if netOk then
+            local okI, id, why = pcall(netm.ownId, netDir, netFolder)
+            if not okI then id, why = nil, tostring(id) end
+            local okB, errB = pcall(netm.bind, { call = C.call, log = log, id = id, idWhy = why, micros = clockm.micros })
+            if okB then api.net = netm.API
+            else log.error("%s's net client could not start (%s); core.net is not available.", NAME, tostring(errB)) end
+        else
+            log.error("%s's net client failed to load (%s); core.net is not available.", NAME, tostring(netm))
         end
         -- Story 18: feature checks, generated from this api table (features.lua). Optional for dependents: the
         -- minimum version is the normal way to depend on a feature.
