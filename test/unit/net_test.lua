@@ -630,6 +630,26 @@ do
     eq(net.role(), "none", "after the reload the client (cached at gen 41) sees the new role")
 end
 
+-- init's tick (core story 23: players.lua's tick) runs on this loop after host.lua's own, under its own pcall
+do
+    HOST.stop()
+    local order, throw = {}, false
+    local realTick = HOST.tick
+    HOST.tick = function() order[#order + 1] = "net" end
+    HOST.init({ log = hlog(), setShared = function(k, v) SHARED[k] = v end, getShared = function(k) return SHARED[k] end, now = function() return clockT end,
+        tick = function() order[#order + 1] = "presence"; if throw then error("boom") end end })
+    HOST.start()
+    clearLines()
+    runLoops(); runLoops()
+    eq(table.concat(order, ","), "net,presence,net,presence", "the init tick runs once per loop iteration, after host.lua's own")
+    throw = true
+    order = {}
+    runLoops(); runLoops()
+    eq(table.concat(order, ","), "net,presence,net,presence", "a throwing init tick doesn't stop the next iterations")
+    eq(linesMatching("NET presence tick failed"), 1, "a throwing init tick: one line per minute")
+    HOST.tick = realTick
+end
+
 -- core unloads
 HOST.stop(); HOST.unload()
 eq(SHARED["nucleus.net.role"], "none", "unload: role none")
