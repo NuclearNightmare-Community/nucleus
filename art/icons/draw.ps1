@@ -61,7 +61,7 @@ $g.DrawPath((New-Pen 10), (RoundRect 14 14 100 100 16))
 $g.DrawLines((New-Pen 13), [System.Drawing.PointF[]]@([System.Drawing.PointF]::new(36, 66), [System.Drawing.PointF]::new(56, 86), [System.Drawing.PointF]::new(93, 43)))
 Save $bmp $g 'checkbox-on'
 
-# gear: a ring of eight teeth around a disc with a hole (even-odd fill).
+# gear: a ring of eight teeth around a disc with a hole (the polygon filled with the winding rule; the hole cut out with SourceCopy).
 $bmp, $g = New-Canvas
 $path = [System.Drawing.Drawing2D.GraphicsPath]::new([System.Drawing.Drawing2D.FillMode]::Winding)
 $cx, $cy = 64.0, 64.0
