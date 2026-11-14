@@ -41,6 +41,7 @@ M.POLL_MS = 250
 M.FIND_EVERY_US = 2000000 -- the FindAllOf fallback, at most this often while no actor is held
 M.SPAWN_TRIES = 5
 M.SPAWN_EVERY_US = 1000000
+M.MAX_VERSION = 64 -- a longer replicated CoreVersion is never copied into Lua
 
 local KSL_CDO = "/Script/Engine.Default__KismetSystemLibrary"
 local KSL_ISVALID = "/Script/Engine.KismetSystemLibrary:IsValid"
@@ -202,7 +203,8 @@ local function spawn(world)
     end
     local okR, h = pcall(M.REF.ref, a)
     if not okR then
-        log.error("NET spawned %sNet but could not take a weak handle (%s)", NAME, firstLine(h))
+        W.spawnTries = M.SPAWN_TRIES -- no more tries in this world: each would leave another actor nothing holds
+        log.error("NET spawned %sNet but could not take a weak handle (%s); no more tries in this world", NAME, firstLine(h))
         return false
     end
     W.actor, W.actorName = h, try(function() return a:GetFName():ToString() end) or "?"
@@ -308,7 +310,11 @@ local function clientTick()
         findFallback()
         return
     end
-    local ver = str(try(function() return a.CoreVersion end))
+    -- CoreVersion's length first too: a long one is never copied, only a short marker is compared.
+    local rawVer = try(function() return a.CoreVersion end)
+    local vn = lenOf(rawVer)
+    local ver
+    if vn ~= nil and vn > M.MAX_VERSION then ver = "<" .. vn .. " characters>" elseif vn ~= nil then ver = str(rawVer) end
     if ver == nil or ver == "" then
         -- not replicated yet
         if W.status ~= "no-state" then W.status, W.raw, W.T = "no-state", nil, S.new(); share() end
