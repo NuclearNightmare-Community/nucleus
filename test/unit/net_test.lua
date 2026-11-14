@@ -152,6 +152,8 @@ do
         T, r = dec(table.concat(parts, ","))
         ok(T.count == 16 and S.get(T, "a.k16") == 16 and S.get(T, "a.k17") == nil and #r == 1, "hostile: 17 entries for one mod: the 17th dropped")
     end
+    T, r = dec("#1=a,01.x=5,1.y=2")
+    ok(S.get(T, "a.x") == nil and S.get(T, "a.y") == 2 and #r == 1, "hostile: an entry number with a leading zero (01.x) is dropped, like a header's")
     T, r = dec("#1=a,3.x=1,1.y=2")
     ok(S.get(T, "a.y") == 2 and T.count == 1 and #r == 1 and r[1].why:find("no header", 1, true), "hostile: 3.x=1 with no #3 dropped")
     T, r = dec("#1=a,#1=b,1.x=1")
@@ -463,6 +465,21 @@ do
     ok(v == nil and why == "absent", "a new host world starts empty")
     eq(#spawned, 2, "one actor spawned in the new host world")
     eq(spawned[2].State, "", "the new actor's State is empty")
+    -- the host's actor dies: a new one is spawned with the current State and CoreVersion
+    HOST.op("skeltest.revivesN=7")
+    clearLines()
+    spawned[2].dead = true
+    HOST.start()
+    clockT = clockT + 2000000; runLoops()
+    clockT = clockT + 2000000; runLoops()
+    eq(#spawned, 3, "the host's actor died: a new one is spawned")
+    eq(spawned[3].State, "#1=skeltest,1.revivesN=7", "the new actor has the current State")
+    eq(spawned[3].CoreVersion, "0.11.0", "the new actor has CoreVersion")
+    eq(linesMatching("went away; spawning another"), 1, "one line for the respawn")
+    spawned[3].dead = true
+    clockT = clockT + 2000000; runLoops()
+    eq(linesMatching("went away; spawning another"), 1, "a second death within the minute: no second line")
+    eq(#spawned, 4, "and another actor")
 end
 
 -- ---------------------------------------------------------------- the client side of host.lua
@@ -506,6 +523,24 @@ eq(linesMatching("dropped from the host's State %(actor:"), 1, "client: one line
 remote.State = string.rep("y", 9000)
 runLoops()
 eq(linesMatching("dropped from the host's State %(actor:"), 1, "client: still one line within the minute")
+-- a replicated FString over the cap is refused by its Len(), never converted
+do
+    local converted = 0
+    local conv9000 = 0
+    remote.State = { Len = function() return 9000 end, ToString = function() conv9000 = conv9000 + 1 return string.rep("z", 9000) end }
+    runLoops(); runLoops()
+    eq(conv9000, 0, "client: an FString with Len 9000 is never converted (and, like the 9 kB string before it, not logged again)")
+    -- a new oversized length after the minute: one line, still never converted
+    remote.State = { Len = function() return 9001 end, ToString = function() converted = converted + 1 return string.rep("z", 9001) end }
+    clockT = clockT + 61000000
+    clearLines()
+    runLoops(); runLoops(); runLoops()
+    eq(converted, 0, "client: an FString with Len 9001 is never converted (ToString not called)")
+    local v, why = net.read("skeltest.revivesN", 0, 20)
+    ok(v == nil and why == "absent", "client: an oversized FString reads as no values")
+    eq(linesMatching("dropped from the host's State %(actor:.*9001 bytes"), 1, "client: one line for it, not one per tick")
+    ok(#tostring(HOST._world().raw) < 32, "client: only a small marker is kept", HOST._world().raw)
+end
 -- version mismatch: ignored with one line per world
 clearLines()
 remote.State, remote.CoreVersion = "#1=skeltest,1.revivesN=8", "0.10.0"
@@ -550,6 +585,18 @@ do
     runLoops(); CL._tick()
     eq(seen[2], "5/nil", "client watch: fires with the replicated value")
     net.unwatch(w)
+end
+
+-- a hot reload: the gen carries on from the shared variable, and a client with the old gen sees the new state
+do
+    SHARED["nucleus.net.gen"] = 41
+    HOST.init({ log = hlog(), setShared = function(k, v) SHARED[k] = v end, getShared = function(k) return SHARED[k] end, now = function() return clockT end })
+    ok(SHARED["nucleus.net.gen"] > 41, "hot reload: the gen rises past 41", SHARED["nucleus.net.gen"])
+    CL._reset(); CL.bind({ call = call, log = dlog, id = "skeltest", micros = function() return clockT end }); net = CL.API
+    SHARED["nucleus.net.role"], SHARED["nucleus.net.gen"] = "host", 41
+    eq(net.role(), "host", "client cache filled at gen 41")
+    HOST.init({ log = hlog(), setShared = function(k, v) SHARED[k] = v end, getShared = function(k) return SHARED[k] end, now = function() return clockT end })
+    eq(net.role(), "none", "after the reload the client (cached at gen 41) sees the new role")
 end
 
 -- core unloads

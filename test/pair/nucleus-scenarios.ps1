@@ -33,14 +33,29 @@ $script:NucleusRepo = Split-Path (Split-Path $PSScriptRoot)
 $script:NucleusName = (Get-Content (Join-Path $NucleusRepo 'mod.json') -Raw | ConvertFrom-Json).name
 $script:NucleusPairPackage = Join-Path $NucleusRepo 'build\package'
 
+# Where Get-NucleusNetStage stages a role (no checks, no side effects).
+function Get-NucleusNetStagePath([Parameter(Mandatory)] [ValidateSet('net-host', 'net-client')] [string] $Role) {
+    Join-Path (Join-Path ([IO.Path]::GetTempPath()) "nn-nucleus-stage-$Role") "${NucleusName}SkelTest"
+}
+
+# For VMRestore and -Stop: placeholders named like core, its pak and the test dependent (vm-deploy -Remove uses only
+# the names), so cleanup works without build/package and without staging anything.
+function Get-NucleusNetRemovePaths {
+    $r = Join-Path ([IO.Path]::GetTempPath()) 'nn-nucleus-remove'
+    New-Item -ItemType Directory -Force (Join-Path $r $NucleusName), (Join-Path $r "${NucleusName}SkelTest") | Out-Null
+    $pak = Join-Path $r "$NucleusName.pak"
+    if (-not (Test-Path $pak)) { Set-Content $pak '' -NoNewline }
+    @((Join-Path $r "${NucleusName}SkelTest"), (Join-Path $r $NucleusName), $pak)
+}
+
 # The test dependent staged with its role: a copy of test/SkelTest named <Core>SkelTest (it takes core's name from its
 # folder) with scenario.txt, exactly what deploy.ps1 -Test -Scenario <role> installs. Returns the folder.
 function Get-NucleusNetStage([Parameter(Mandatory)] [ValidateSet('net-host', 'net-client')] [string] $Role) {
     if (-not (Test-Path (Join-Path $NucleusPairPackage "Mods\$NucleusName\mod.json"))) { throw "No $NucleusName package at $NucleusPairPackage; build it with build.ps1 (not while a game runs)." }
     if (-not (Test-Path (Join-Path $NucleusPairPackage "LogicMods\$NucleusName.pak"))) { throw "No $NucleusName.pak in $NucleusPairPackage\LogicMods; rebuild." }
-    $stage = Join-Path ([IO.Path]::GetTempPath()) "nn-nucleus-stage-$Role"
+    $dest = Get-NucleusNetStagePath -Role $Role
+    $stage = Split-Path $dest
     Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
-    $dest = Join-Path $stage "${NucleusName}SkelTest"
     New-Item -ItemType Directory -Force $stage | Out-Null
     Copy-Item (Join-Path $NucleusRepo 'test\SkelTest') $dest -Recurse
     Remove-Item (Join-Path $dest 'Scripts\request.txt'), (Join-Path $dest 'Scripts\done.txt'), (Join-Path $dest 'settings.json') -ErrorAction SilentlyContinue
@@ -94,7 +109,7 @@ $script:NucleusPairScenarios = @{
             Invoke-VMDeploy -Path $client
         }
         VMRestore = {
-            Invoke-VMDeploy -Remove -Path (Get-NucleusNetStage -Role 'net-client'), $NucleusPairPackage
+            Invoke-VMDeploy -Remove -Path (Get-NucleusNetRemovePaths)
             Restore-VMBaseline
         }
         AfterJoin = {

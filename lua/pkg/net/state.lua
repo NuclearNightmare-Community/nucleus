@@ -165,7 +165,7 @@ function M.decode(s)
     for _, e in ipairs(entries) do
         if e:sub(1, 1) ~= "#" then
             local num, name, val = e:match("^(%d+)%.([^=]*)=(.*)$")
-            local id = num and #num <= 2 and ids[tonumber(num)] or nil
+            local id = num and #num <= 2 and num:sub(1, 1) ~= "0" and ids[tonumber(num)] or nil
             if not num then
                 if e ~= "" then reject("garbage", "unreadable entry '" .. q(e) .. "'") end
             elseif not id then

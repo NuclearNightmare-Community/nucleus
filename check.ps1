@@ -806,7 +806,7 @@ $netClient = $started + @(
     "\[$T\] SCENARIO net-client "
     "\[$T\] NETROLE net-client "
     "\[$N\] NET world .* role=client"
-    "\[$N\] NET holding ${N}Net_C_\d+ "
+    "\[$N\] NET holding ${N}Net_C_\d+ \(NotifyOnNewObject\) "
     "!\[$N\] NET spawned"
     "\[$T\] NETWATCH skeltest\.revivesN value=8 why=nil role=client "
     "\[$T\] NETWATCH skeltest\.enemyDamage value=250 why=nil role=client "
