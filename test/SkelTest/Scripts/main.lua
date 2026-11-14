@@ -617,6 +617,7 @@ local function offThreadCases(phase)
                 if S.uiOffHandle then uiOffThreadCases(P, S.uiOffHandle) end
                 objectivesOffThreadCases(P)
                 SETS.offThread(P)
+                SETS.NET.offThread(P) -- core story 22
             end)
             if not ok then check(false, "CASE %s off-thread block threw: %s", P .. "off", firstLine(err)) end
             doneOff = true
@@ -1761,6 +1762,10 @@ SETS.REV = CORE:lower() .. ".settings.rev"
 SETS.WATCHING = CORE:lower() .. ".test.settings.watching" -- test-only cue for SkelPeer (1: watcher registered)
 SETS.PEER_AT = CORE:lower() .. ".test.settings.peerAt"   -- test-only: <Core>_ClockMicros() when SkelPeer set it
 SETS.PEER = CORE .. "SkelPeer"
+-- Core story 22: core.net's bad-input cases and the pair-run roles net-host / net-client (net.lua next to this file;
+-- kept in a field: main.lua is at the 200-locals limit).
+SETS.NET = dofile(scriptDir .. "\\net.lua")({ case = case, E = E, step = step, check = check, say = say, CORE = CORE,
+    core = function() return core end, intFn = intFn, pc = pc, valid = valid })
 function SETS.cases(phase)
     local P = phase .. "."
     local ST = core.settings
@@ -1937,6 +1942,7 @@ local function badInputCases(phase)
     if phase == "menu1" then SETS.crossState(phase) end
     step(phase .. ": settings cases", function() SETS.cases(phase) end)
     SETS.restart(phase)
+    SETS.NET.badInput(phase) -- core story 22
     offThreadCases(phase)
 end
 
@@ -5067,6 +5073,8 @@ client.connect{
     onReady = function(api)
         core = api
         if SCENARIO == "manual" then profile(true) startManual() return end
+        -- Core story 22: the pair-run roles run on their own loop (no steps, no travel: PairDriver drives the session).
+        if SCENARIO == "net-host" or SCENARIO == "net-client" then SETS.NET.run(SCENARIO) return end
         if SCENARIO == "bad-input" then buildBadInput()
         elseif SCENARIO == "menu" then
             buildMenu() -- story 21 (Mod Manager story 2): the menu entry, the menu host and the window stack

@@ -22,7 +22,7 @@
 param(
     [string] $Instance,
     [string] $Log,
-    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'soak', 'manual')]
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'soak', 'manual', 'net-host', 'net-client', 'net-vanilla-host')]
     [string] $Scenario = 'skeleton',
     [ValidateSet('host', 'vm')] [string] $Target = 'host'
 )
@@ -324,6 +324,32 @@ $badInput += @(
     "\[$T\] OK SETX menu1 get\('test\.count'\) = 42"
     "!\[$T\] WARN settings"
     "!\[$Peer\] (FAIL|ERROR|WARN)"
+)
+# Core story 22: core.net. Every bad publish/read/watch/unwatch and channel-op row in both worlds and off the game
+# thread; the standalone and no-state results and no <name>Net in the menu; in the host match: publish then read at
+# once, out of bounds (one line), absent, the namespaced fixture through the channel, exactly one <name>Net
+# (replicated, always relevant, authority, no owner, this core's version, the published State), the caps.
+foreach ($p in 'menu1', 'match1') {
+    foreach ($id in 'net-role', 'net-role-arg', 'net-pub-other', 'net-pub-nodot', 'net-pub-name33', 'net-pub-badchars', 'net-pub-10k', 'net-pub-keynum',
+                    'net-pub-nil', 'net-pub-str', 'net-pub-2.5', 'net-pub-nan', 'net-pub-inf', 'net-pub-2^31', 'net-pub-2^53', 'net-pub-three',
+                    'net-read-keynum', 'net-read-nodot', 'net-read-badid', 'net-read-minfloat', 'net-read-maxstr', 'net-read-minmax', 'net-read-four',
+                    'net-watch-fn', 'net-watch-key', 'net-watch-minmax', 'net-unwatch-str', 'net-unwatch-unknown', 'net-watch-ok', 'net-unwatch-ok',
+                    'net-unwatch-again', 'net-watch-65', 'net-ch-noeq', 'net-ch-badid', 'net-ch-badval', 'net-ch-big', 'net-ch-long', 'net-ch-none',
+                    'net-modactor', 'net-count', 'off-net-publish', 'off-net-read', 'off-net-watch', 'off-net-unwatch', 'off-net-role') {
+        $badInput += "\[$T\] OK CASE $p\.$([regex]::Escape($id)) "
+    }
+}
+foreach ($id in 'net-pub-standalone', 'net-ch-standalone', 'net-read-nostate') { $badInput += "\[$T\] OK CASE menu1\.$([regex]::Escape($id)) " }
+foreach ($id in 'net-pub-ok', 'net-read-ok', 'net-pub-dmg', 'net-read-oob', 'net-read-absent', 'net-ch-ns', 'net-read-ns', 'net-actor-rep', 'net-actor-owner',
+                'net-actor-version', 'net-actor-state', 'net-pub-17', 'net-ch-65', 'net-pub-65') {
+    $badInput += "\[$T\] OK CASE match1\.$([regex]::Escape($id)) "
+}
+$badInput += @(
+    "\[$N\] READY .* features=(\S*,)?net,net\.publish,net\.read,net\.role,net\.unwatch,net\.watch(,\S*)?\s*$"
+    "\[$N\] NET world .*NewMainMenu.* role=standalone"
+    "\[$N\] NET world .*SmallMap.* role=host"
+    "#1|\[$N\] NET spawned ${N}Net_C_\d+ in .* replicates=true alwaysRelevant=true owner=none "
+    "#1|\[$T\] WARN $N\.net: skeltest\.enemyDamage = 250 is outside this mod's bounds 0\.\.200"
 )
 $NT = [regex]::Escape("${name}SkelNative")
 $badInput += @(
@@ -760,7 +786,47 @@ $manual = @(
     "!\[$N\] ERROR"
     "?!\[$T\] WARN manual "
 )
+# Core story 22: the pair-run roles (test/pair/nucleus-scenarios.ps1). net-host / net-vanilla-host judge the host's log
+# (the host can't tell a modded B from a vanilla one, so both are the same checks), net-client B's.
+$netHost = $started + @(
+    "\[$T\] SCENARIO net-host "
+    "\[$T\] NETROLE net-host "
+    "\[$N\] NET world .* role=host"
+    "\[$N\] NET spawned ${N}Net_C_\d+ in .* replicates=true alwaysRelevant=true owner=none "
+    "\[$T\] NETPUB skeltest\.revivesN=8 ok=true result=true server=\S+ us=\d+ players=[01]\s*$"
+    "\[$T\] NETPUB skeltest\.enemyDamage=250 ok=true result=true server=\S+ us=\d+ players=[01]\s*$"
+    "\[$T\] NETPUB nuclearnightmare-community\.skeltest-ns\.x=1 ok=true result=published "
+    "\[$T\] NETHOST PlayerArray holds 2 players "
+    "\[$T\] NETPUB skeltest\.enemyDamage=260 ok=true result=true server=\S+ us=\d+ players=2\s*$"
+    "\[$T\] OK NETHOST ${N}Net count=1 authority=true"
+    "\[$T\] END result=PASS"
+    "!\[$N\] (ERROR|WARN) NET"
+)
+$netClient = $started + @(
+    "\[$T\] SCENARIO net-client "
+    "\[$T\] NETROLE net-client "
+    "\[$N\] NET world .* role=client"
+    "\[$N\] NET holding ${N}Net_C_\d+ "
+    "!\[$N\] NET spawned"
+    "\[$T\] NETWATCH skeltest\.revivesN value=8 why=nil role=client "
+    "\[$T\] NETWATCH skeltest\.enemyDamage value=250 why=nil role=client "
+    "\[$T\] NETWATCH skeltest\.enemyDamage value=260 why=nil role=client "
+    "\[$T\] NETWATCH nuclearnightmare-community\.skeltest-ns\.x value=1 why=nil role=client "
+    "\[$T\] OK NETCLIENT read enemyDamage 0\.\.200 -> nil, out-of-bounds"
+    "#1|\[$T\] WARN $N\.net: skeltest\.enemyDamage = \d+ is outside this mod's bounds 0\.\.200"
+    "\[$T\] OK NETCLIENT publish raised: $([regex]::Escape($name.ToLower()))\.net\.publish: only the host publishes \(this machine is a client\)"
+    "\[$T\] OK NETCLIENT channel op on a client -> err:client "
+    "\[$T\] OK NETCLIENT ${N}Net count=1 authority=false"
+    "\[$T\] OK NETCLIENT after the match started: revivesN=8 enemyDamage=2[56]0 "
+    "\[$T\] OK NETCLIENT watch saw enemyDamage=260"
+    "\[$T\] END result=PASS"
+    "!\[$N\] WARN NET (ignoring|dropped)"
+    "!\[$N\] ERROR"
+)
 $expect = @{
+    'net-host'  = $netHost
+    'net-vanilla-host' = $netHost
+    'net-client' = $netClient
     'skeleton'  = $skeleton
     'ui'        = $ui
     'journal'   = $journal
@@ -835,6 +901,16 @@ if ($Scenario -eq 'bad-input') {
         if (-not $left) { Write-Host "ok:   no settings.json.tmp or .bak left in Mods/$t" }
         else { Write-Host "FAIL: left in Mods/$($t): $($left -join ', ')"; $failed++ }
     } else { Write-Host "warn: no -Instance: $t's settings.json not read back"; $warned++ }
+}
+if ($Scenario -eq 'net-client') {
+    # Core story 22 AC 1: B reads both values within 1 s of core first holding the host's <name>Net (one clock: core's
+    # ClockMicros, read by core's state and by the test dependent in the same process).
+    $hold = @($lines | Where-Object { $_ -match "\[$N\] NET holding .* us=(\d+)" } | ForEach-Object { [int64]$Matches[1] }) | Select-Object -First 1
+    foreach ($k in @(@('revivesN', '8'), @('enemyDamage', '250'))) {
+        $at = @($lines | Where-Object { $_ -match "\[$T\] NETWATCH skeltest\.$($k[0]) value=$($k[1]) .* us=(\d+)" } | ForEach-Object { [int64]$Matches[1] }) | Select-Object -First 1
+        if ($null -ne $hold -and $null -ne $at -and ($at - $hold) -le 1000000) { Write-Host ("ok:   B read {0}={1} {2:N0} us after core first held the actor (limit 1 s)" -f $k[0], $k[1], ($at - $hold)) }
+        else { Write-Host "FAIL: B's read of $($k[0])=$($k[1]) (us=$at) is not within 1 s of core first holding the actor (us=$hold)"; $failed++ }
+    }
 }
 if ($Scenario -eq 'menu') {
     # Story 21: no menu hook before a MainMenu_C exists. The test logs STARTUP while none is in the viewport, just before

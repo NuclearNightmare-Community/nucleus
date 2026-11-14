@@ -14,6 +14,8 @@
   build/native-out/test/main.dll, never packaged) as Mods/<name>SkelNative: the forced missing struct member case.
   -Scenario breaks one part on purpose: skeleton (all parts), no-native (no dlls/main.dll), no-pak (no LogicMods pak);
   bad-input, ui, journal, menu, soak and manual install all parts like skeleton. The scenario goes to the test dependent's Scripts/scenario.txt.
+  net-host and net-client (core story 22) are the pair-run roles of test/pair/nucleus-scenarios.ps1 (all parts, the
+  test dependent only; its mod.json "id" is skeltest, the id its core.net keys use); they run in a pair.ps1 session.
   manual is for hand testing: the test dependent never travels or presses keys, and keeps a text widget in the live
   HUD's top-right corner (README.md, "Hand testing").
   -Staged: $Instance is the host-side staging folder of a VM run (run.ps1 -Target vm, tools/vm/vm-sp.ps1), not a game
@@ -27,7 +29,7 @@
 param(
     [Parameter(Mandatory)] [string] $Instance,
     [switch] $Test,
-    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'soak', 'manual')]
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'soak', 'manual', 'net-host', 'net-client')]
     [string] $Scenario = 'skeleton',
     [switch] $Remove,
     [switch] $Staged

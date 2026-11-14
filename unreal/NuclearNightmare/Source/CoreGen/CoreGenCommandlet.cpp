@@ -1915,6 +1915,82 @@ namespace
 		return BP;
 	}
 
+	// ---------------------------------------------------------------- core story 22 (Net-1): host replicated state
+
+	/** Marks a member variable replicated (CPF_Net), no RepNotify. Ported from the network spike's SetVarNet. */
+	void SetVarNet(UBlueprint* BP, FName Var)
+	{
+		const int32 I = FBlueprintEditorUtils::FindNewVariableIndex(BP, Var);
+		check(I != INDEX_NONE);
+		BP->NewVariables[I].PropertyFlags |= CPF_Net;
+		FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(BP);
+	}
+
+	/** A setter <Core>_<Fn>(<Var>: String) that writes the member variable through a Blueprint set node. */
+	FFunc AddStringSetter(UBlueprint* BP, const FString& Core, const TCHAR* Fn, FName Var)
+	{
+		return AddFunction(BP, FName(Core + TEXT("_") + Fn), {{Var, StrT()}}, {});
+	}
+	void FillStringSetter(UBlueprint* BP, const FFunc& F, FName Var)
+	{
+		FGraph G(BP, F.G);
+		UK2Node_VariableSet* Set = G.Set(Var);
+		G.Link(F.Entry, Var, Set, Var);
+		G.Chain({F.Entry, Set});
+	}
+
+	/**
+	 * /Game/Mods/<Core>/<Core>Net (core story 22): the host's replicated state, the first replicated class in core's pak
+	 * (ModActor stays local). Replicated, always relevant; two replicated strings with no RepNotify (clients poll them):
+	 *   State        the published values ("#<n>=<mod id>" headers and "<n>.<name>=<int>" entries, comma-separated)
+	 *   CoreVersion  the host's core version; a client with another version ignores the actor
+	 * set only through <Core>_NetSetState(State) and <Core>_NetSetVersion(CoreVersion) (a Lua write would skip the
+	 * Blueprint set path, docs/networking.md A5). Core's Lua spawns it only on the host, with no owner. No events.
+	 * Public under story 18's add-only rule: names and the property list never change once released.
+	 */
+	UBlueprint* BuildNet(const FString& Dir, const FString& Core)
+	{
+		UBlueprint* BP = NewBlueprint(Dir / (Core + TEXT("Net")), AActor::StaticClass(), UBlueprint::StaticClass(), UBlueprintGeneratedClass::StaticClass());
+		const FName State = TEXT("State");
+		const FName Version = TEXT("CoreVersion");
+		for (const FName Var : {State, Version})
+		{
+			checkf(!AActor::StaticClass()->FindPropertyByName(Var), TEXT("AActor already has a property %s"), *Var.ToString());
+			FBlueprintEditorUtils::AddMemberVariable(BP, Var, StrT(), TEXT(""));
+			SetVarNet(BP, Var);
+		}
+		FFunc SetState = AddStringSetter(BP, Core, TEXT("NetSetState"), State);
+		FFunc SetVersion = AddStringSetter(BP, Core, TEXT("NetSetVersion"), Version);
+		if (!Compile(BP)) return nullptr;
+		FillStringSetter(BP, SetState, State);
+		FillStringSetter(BP, SetVersion, Version);
+		ClearGraph(BP, FBlueprintEditorUtils::FindEventGraph(BP));
+		if (!Compile(BP)) return nullptr;
+
+		AActor* CDO = CastChecked<AActor>(BP->GeneratedClass->GetDefaultObject());
+		// The CDO isn't initialized, so set bReplicates through its property (SetReplicates warns on pre-init actors).
+		FBoolProperty* RepProp = FindFProperty<FBoolProperty>(AActor::StaticClass(), TEXT("bReplicates"));
+		check(RepProp);
+		RepProp->SetPropertyValue_InContainer(CDO, true);
+		CDO->bAlwaysRelevant = true;
+		UE_LOG(LogCoreGen, Display, TEXT("NET %sNet CDO: bReplicates=%d bAlwaysRelevant=%d"), *Core, CDO->GetIsReplicated() ? 1 : 0, CDO->bAlwaysRelevant ? 1 : 0);
+		int32 NetProps = 0;
+		for (TFieldIterator<FProperty> It(BP->GeneratedClass, EFieldIteratorFlags::ExcludeSuper); It; ++It)
+		{
+			const bool bNet = It->HasAnyPropertyFlags(CPF_Net);
+			NetProps += bNet ? 1 : 0;
+			UE_LOG(LogCoreGen, Display, TEXT("NET %sNet property %s net=%d repnotify=%s"), *Core, *It->GetName(), bNet ? 1 : 0, *It->RepNotifyFunc.ToString());
+		}
+		if (!CDO->GetIsReplicated() || !CDO->bAlwaysRelevant || NetProps != 2)
+		{
+			UE_LOG(LogCoreGen, Error, TEXT("NET %sNet is not set up as intended (replicated=%d alwaysRelevant=%d net properties=%d, want 1 1 2)"),
+				*Core, CDO->GetIsReplicated() ? 1 : 0, CDO->bAlwaysRelevant ? 1 : 0, NetProps);
+			return nullptr;
+		}
+		if (!Save(BP)) return nullptr;
+		return BP;
+	}
+
 	// ---------------------------------------------------------------- the map markers (map service story 4)
 	//
 	// Public API under story 18's add-only rule: the class names, the settings (names, types) and the component layout
@@ -2308,6 +2384,8 @@ int32 UCoreGenCommandlet::Main(const FString& Params)
 	if (!BuildChoice(Dir, Core)) return 1;
 	if (!BuildSlider(Dir, Core)) return 1;
 	if (!BuildActor(Dir, Core)) return 1;
+	// Core story 22 (core 0.11.0): the replicated host state, a class of its own (ModActor stays non-replicated).
+	if (!BuildNet(Dir, Core)) return 1;
 	if (!BuildMarkers(Dir)) return 1;
 	if (!LayoutFile.IsEmpty() && !WriteLayout(Dir, LayoutFile)) return 1;
 	UE_LOG(LogCoreGen, Display, TEXT("CoreGen: all assets for %s generated."), *Core);
