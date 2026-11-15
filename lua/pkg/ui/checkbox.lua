@@ -206,6 +206,7 @@ function K.setEnabled(h, enabled)
         end)
         if not ok then C.warnOnce("enabled:" .. el.id, "checkbox '%s': SetEnabledState failed: %s", el.id, firstLine(err)) end
     end
+    X._hostChanged(C.hostOf(el)) -- core story 27: a disabled focused element hands keyboard focus on
 end
 
 function K.setVisible(h, visible)

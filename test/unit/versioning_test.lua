@@ -111,13 +111,23 @@ local want = { "call", "clock", "deref", "free", "map.setup",
     "ui.checkbox.setTooltip", "ui.checkbox.setVisible",
     "ui.choice", "ui.choice.create", "ui.choice.get", "ui.choice.isShown", "ui.choice.range", "ui.choice.remove", "ui.choice.set", "ui.choice.setEnabled",
     "ui.choice.setTooltip", "ui.choice.setVisible",
-    "ui.debug", "ui.elements", "ui.hud",
+    "ui.debug", "ui.elements", "ui.gap.compact", "ui.hud",
     "ui.image", "ui.image.create", "ui.image.isShown", "ui.image.remove", "ui.image.set", "ui.image.setTooltip", "ui.image.setVisible",
     "ui.journal", "ui.journal.regions", "ui.list", "ui.look", "ui.menu", "ui.overflow", "ui.panel", "ui.place", "ui.row", "ui.screen",
+    -- core story 27 (0.12.0): the window card, keys and focus
+    "ui.screen.focus", "ui.screen.panel",
     "ui.slider", "ui.slider.create", "ui.slider.get", "ui.slider.isShown", "ui.slider.remove", "ui.slider.set", "ui.slider.setDefault", "ui.slider.setEnabled",
     "ui.slider.setTooltip", "ui.slider.setVisible",
     "ui.text", "ui.text.setTooltip" }
-eq(table.concat(declared, ","), table.concat(want, ","), "declared(): the 0.12.0 feature list (map.setup, ui.journal.regions, ui.look, story 24's, story 4's, story 22's and story 23's names hand-named; settings, net), sorted")
+eq(table.concat(declared, ","), table.concat(want, ","), "declared(): the 0.12.0 feature list (map.setup, ui.journal.regions, ui.look, story 24's, story 4's, story 22's, story 23's and story 27's names hand-named; settings, net), sorted")
+-- Core story 27 (AC 5): a 0.11.0 core's list answers false for ui.screen.focus; this one true.
+do
+    local old = {}
+    for _, n in ipairs(want) do if n ~= "ui.screen.focus" and n ~= "ui.screen.panel" and n ~= "ui.gap.compact" then old[#old + 1] = n end end
+    ok(F.set(old)["ui.screen.focus"] == nil, "a 0.11.0 core: core.has('ui.screen.focus') is false")
+    ok(F.set(declared)["ui.screen.focus"] == true and F.set(declared)["ui.screen.panel"] == true and F.set(declared)["ui.gap.compact"] == true,
+        "0.12.0: ui.screen.focus, ui.screen.panel and ui.gap.compact are features")
+end
 -- Mod Manager story 4 (AC 4): a 0.9.0 core's list answers false for ui.slider.create; this one true.
 do
     local old = {}

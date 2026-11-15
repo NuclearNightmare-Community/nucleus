@@ -29,6 +29,10 @@ local P = {}
 
 local GAP = { tight = 8, normal = 16, loose = 32 }
 local GAP_NAMES = "tight, normal, loose"
+-- Core story 27: a list's and a row's gap between children also takes "compact" (4 units; a list's default). Placement
+-- intents and panels keep GAP.
+local LIST_GAP = { compact = 4, tight = 8, normal = 16, loose = 32 }
+local LIST_GAP_NAMES = "compact, tight, normal, loose"
 local CORNERS = {
     ["top-left"]     = { ax = 0, ay = 0, sx = 1,  sy = 1 },
     ["top-right"]    = { ax = 1, ay = 0, sx = -1, sy = 1 },
@@ -1076,7 +1080,8 @@ end
 -- element registry and attach).
 P.place = nil
 
-P._GAP, P._CORNERS, P._GAP_NAMES = GAP, CORNERS, GAP_NAMES
+P._GAP, P._CORNERS, P._GAP_NAMES, P._ANCHORS = GAP, CORNERS, GAP_NAMES, ANCHORS
+P._LIST_GAP, P._LIST_GAP_NAMES = LIST_GAP, LIST_GAP_NAMES
 P._REGIONS, P._REGION_NAMES, P._regionOk = REGIONS, REGION_NAMES, regionOk
 function P._jtick() return jtickNo end
 function P._mapMode() return mapMode end

@@ -561,11 +561,19 @@ local function applyGaps(p)
                 local pad = first and 0 or p.gapUnits
                 first = false
                 local fixed = keepsSize(ch)
-                local key = (isRow and (tostring(pad) .. "/" .. tostring(ch.fill)) or tostring(pad)) .. (fixed and "/k" or "")
+                -- Core story 27 (the clipped checkbox and gear, measured in the VM): Slate centres a child at
+                -- (allotted - size) / 2 + left - right padding, so a gap carried as left padding alone put a centred
+                -- fixed-size child half a gap past its slot's right edge (4 units at "tight", cut off at a list's edge).
+                -- Split 3/4 left, 1/4 right it sits centred in the slot less the gap, with the same total space. And a
+                -- list's children keep theme.listInset clear of its right edge (the scrollbar side).
+                local left, right = pad, 0
+                if horiz and fixed then left, right = pad * 0.75, pad * 0.25 end
+                local inset = (not horiz and p.kind == "list") and theme.listInset or 0
+                local key = (isRow and (tostring(pad) .. "/" .. tostring(ch.fill)) or tostring(pad)) .. (fixed and "/k" or "") .. (inset > 0 and ("/i" .. inset) or "")
                 if ch.padKey ~= key then
                     local ok, err = pcall(function()
                         C.count()
-                        w.Slot:SetPadding(horiz and { Left = pad, Top = 0, Right = 0, Bottom = 0 } or { Left = 0, Top = pad, Right = 0, Bottom = 0 })
+                        w.Slot:SetPadding(horiz and { Left = left, Top = 0, Right = right, Bottom = 0 } or { Left = 0, Top = pad, Right = inset, Bottom = 0 })
                         if isRow then
                             C.count()
                             w.Slot:SetSize({ SizeRule = ch.fill and SIZE_FILL or SIZE_AUTO, Value = ch.fill or 1.0 })
@@ -888,7 +896,22 @@ local function replace(el)
         if C.debugOn() then D.schedule(el, "re-place") end
     end
 end
-local function resized(el) if sizeMatters(el) then replace(el) end end
+-- Core story 27: a window's card hugs its content, so screen.lua re-fits it whenever an element on a window is created,
+-- removed, shown, hidden, re-texted, re-styled or moved (X._onHostChange, set by screen.lua). host: the element's host
+-- before the change. Never raises.
+X._onHostChange = nil
+local function firstLineOf(e) return (tostring(e):match("^[^\n]*")) end
+local function hostChanged(host)
+    local f = X._onHostChange
+    if not f or type(host) ~= "string" or C.hostKind(host) ~= "screen" then return end
+    local ok, err = pcall(f, host)
+    if not ok then C.warnOnce("refit " .. host, "re-fitting %s failed: %s", host, firstLineOf(err)) end
+end
+X._hostChanged = hostChanged
+local function resized(el)
+    if sizeMatters(el) then replace(el) end
+    hostChanged(C.hostOf(el))
+end
 X._resized = resized
 
 local function restackCorner(host, corner, region)
@@ -1629,6 +1652,7 @@ function X._new(kind, id, fields, place)
     C.handleOf[el.handle] = el
     ensureHost(el)
     attachNow(el, "create")
+    hostChanged(C.hostOf(el))
     return el
 end
 
@@ -1645,6 +1669,7 @@ end
 -- Takes an element out of where it is (a host canvas or a panel): its widget leaves, its handle is freed, and the
 -- place it left closes up. Its state stays.
 local function detach(el)
+    local wasHost = C.hostOf(el)
     local w = liveWidget(el)
     if w then removeWidget(w) end
     freeRef(el)
@@ -1657,10 +1682,12 @@ local function detach(el)
     elseif w and el.place.corner then
         restackCorner(el.place.host, el.place.corner, el.place.region)
     end
+    if w then hostChanged(wasHost) end
 end
 
 -- Removes an element for good (a panel with its children: their handles raise "was removed" from then on).
 local function removeEl(el, underRemovedPanel)
+    local wasHost = C.hostOf(el)
     local w = liveWidget(el)
     if w and not underRemovedPanel then removeWidget(w) end -- a child goes with its panel's widget
     freeRef(el)
@@ -1682,6 +1709,7 @@ local function removeEl(el, underRemovedPanel)
     elseif w and not el.panel and el.place.corner then
         restackCorner(el.place.host, el.place.corner, el.place.region)
     end
+    if not underRemovedPanel then hostChanged(wasHost) end
 end
 X._remove = removeEl
 
@@ -1725,6 +1753,7 @@ function X._setVisible(el, visible)
         elseif el.place.corner then restackCorner(el.place.host, el.place.corner, el.place.region) -- a hidden element takes no space
         elseif visible and C.debugOn() then D.schedule(el, "shown") end
     end
+    hostChanged(C.hostOf(el))
 end
 
 -- setStyle for any kind: s is a resolved style.
@@ -1742,6 +1771,7 @@ function X._setStyle(el, s)
         resized(el)
     end
 end
+
 
 -- ---------------------------------------------------------------- public: text
 
@@ -1837,10 +1867,18 @@ function X.setTooltip(h, ...) return X._setTooltipOf("text", h, (...), 1 + selec
 -- host moves the element: its widget leaves the old host's canvas, the old corner closes up, and it attaches on the
 -- new host now (or when that host next appears). Story 14: { panel = p } moves it into a panel (at the end; already
 -- there: nothing changes), and a host intent takes a child out of its panel.
+local placeImpl -- below
 P.place = function(h, intent)
     C.enter("place")
     local el = C.element(h, "place")
     local pl = P.validate(intent)
+    local before = C.hostOf(el)
+    placeImpl(el, pl)
+    hostChanged(before)
+    local after = C.hostOf(el)
+    if after ~= before then hostChanged(after) end
+end
+placeImpl = function(el, pl)
     if pl.panelEl then
         local p = pl.panelEl
         if p == el.panel then

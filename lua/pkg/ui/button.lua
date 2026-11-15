@@ -94,6 +94,7 @@ local function dispatch(ctx)
     local cur = el.ref and C.deref(el.ref)
     if not cur or cur:GetAddress() ~= w:GetAddress() then S.ignored = S.ignored + 1 return end -- not its live widget
     if not el.enabled or not chainVisible(el) then S.dropped = S.dropped + 1 return end
+    C.used(el) -- core story 27: a window's focus follows the mouse (and the Accept key, which clicks the focused Button)
     local now = C.micros()
     if el.lastClick and now - el.lastClick < DEBOUNCE_US then S.debounced = S.debounced + 1 return end
     el.lastClick = now
@@ -441,6 +442,7 @@ function B.setEnabled(h, enabled)
         local ok, err = pcall(applyEnabled, el, w)
         if not ok then C.warnOnce("enabled:" .. el.id, "button '%s': SetEnabledState failed: %s", el.id, firstLine(err)) end
     end
+    X._hostChanged(C.hostOf(el)) -- core story 27: a disabled focused element hands keyboard focus on
 end
 
 function B.setVisible(h, visible)

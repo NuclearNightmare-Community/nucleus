@@ -767,6 +767,57 @@ $menuChecks = $started + @(
     "!\[$T\] WARN (checkbox|choice|slider) "
     "!\[$T\] WARN .*(click handling failed|RegisterHook failed|can't be hooked)"
     "#1|\[$T\] (OK|FAIL) CTSTYLE "
+    # Core story 27 (UI-12): the card, BACK, the compact gap, keyboard and gamepad focus (window KB), then story 26's
+    # window and a Mod-Manager-shaped one in the card (CARD, GEOM). Each KFOCUS line: the model and HasKeyboardFocus agree.
+    "\[$T\] OK KBCASES ran 18 cases"
+    "\[$T\] OK KNOCLOSE Escape on a close = false window: it stays open"
+    "\[$T\] OK KFOCUS KB kb\.t1 "
+    "\[$T\] OK KLOOK the focused TOGGLE shows its focus look"
+    "\[$T\] OK CARD KB centred: "
+    "\[$T\] OK CARD KB hugs: "
+    "\[$T\] OK CARD KB padding "
+    "\[$T\] OK CARD KB BACK bottom-left "
+    "#3|\[$T\] OK KFOCUS KB kb\.t2 "
+    "#2|\[$T\] OK KFOCUS KB kb\.g2 "
+    "\[$T\] OK KCLICK Enter on the focused TOGGLE ran its onClick exactly once \(1\)"
+    "#1|\[$T\] KCB kb\.t2 "
+    "!\[$T\] KCB kb\.(t[13-9]|t1[0-2]|g)"
+    "\[$T\] OK KFOCUS KB kb\.t10 "
+    "\[$T\] OK KSCROLL row 10 "
+    "\[$T\] OK KFOCUS KB kb\.t12 "
+    "#2|\[$T\] OK KFOCUS KB kb\.ch "
+    "\[$T\] OK KCHOICE Right on the focused choice: option 2, onChange 1"
+    "\[$T\] OK KCHOICE Enter on the focused choice: nothing changes"
+    "#1|\[$T\] KCB kb\.ch "
+    "#2|\[$T\] OK KFOCUS KB kb\.sl "
+    "\[$T\] OK KSLIDER Right on the Default slider: 6 \(defaultValue \+ step\), onChange 1"
+    "\[$T\] OK KSLIDER Left: 5, onChange 2"
+    "#2|\[$T\] KCB kb\.sl "
+    "\[$T\] OK KFOCUS KB #close:KB "
+    "\[$T\] OK KFOCUS KB2 #close:KB2 "
+    "\[$T\] OK KCLOSE reason=close Escape closed the top window KB2 only"
+    "\[$T\] OK KRETURN KB got its last-focused element back \(#close:KB\)"
+    "\[$T\] OK KCLOSE reason=close Escape closed KB, no window left"
+    "\[$T\] OK KRETURN the menu holds keyboard focus again"
+    "\[$T\] SEVENT \d+ closed id=KB2 reason=close"
+    "\[$T\] SEVENT \d+ closed id=KB reason=close"
+    "!\[$T\] SEVENT \d+ closed id=KBN reason=close"
+    "\[$T\] GEOM CT list box "
+    "\[$T\] GEOM CT row ct\.row1 "
+    "\[$T\] OK GEOM CT no-clip: "
+    "\[$T\] OK GEOM CT-checkbox no-clip: "
+    "\[$T\] OK GEOM CT-checkbox fixed-size last children arranged at their desired size"
+    "\[$T\] OK CARD CT centred: "
+    "\[$T\] OK CARD CT hugs: "
+    "\[$T\] GEOM KBM row kbm\.r1 "
+    "\[$T\] OK GEOM KBM no-clip: "
+    "\[$T\] OK GEOM KBM fixed-size last children arranged at their desired size"
+    "\[$T\] OK CARD KBM centred: "
+    "\[$T\] OK CARD KBM hugs: "
+    "\[$T\] OK CARD KBM BACK bottom-left "
+    "\[$T\] OK KFOCUS KBM kbm\.g1 "
+    "\[$T\] OK KBEND every window closed"
+    "!\[$T\] WARN .*(window key|focus look|focus window|focus tick|card|re-fit|BACK button|NavHandled)"
     "\[$T\] END result=PASS"
 )
 # Core story 24: the ic-* group, on window IC (menu3), and every new function off the game thread.
@@ -799,6 +850,13 @@ foreach ($id in 'cb-none', 'cb-args', 'cb-unknown', 'cb-onchange', 'cb-size-8', 
                 'off-ch-settip', 'off-sl-create', 'off-sl-get', 'off-sl-set', 'off-sl-setdefault', 'off-sl-setenabled', 'off-sl-setvis', 'off-sl-remove',
                 'off-sl-isshown', 'off-sl-settip') {
     $menuChecks += "\[$T\] OK CASE menu3\.ct-$id "
+}
+# Core story 27: the kb-* group, on window KB (menu3): gap values and texts, every hook-noise row, an off-thread nav call,
+# focus with nothing focusable, the feature names.
+foreach ($id in 'gap-compact', 'gap-default', 'gap-row-compact', 'gap-tiny', 'gap-row-tiny', 'gap-place-compact', 'gap-panel-compact',
+                'nav-dir-99', 'nav-act-neg', 'nav-handled', 'nav-foreign', 'nav-stale', 'nav-throwing-tag', 'nav-closed', 'nofocus', 'nofocus-keys',
+                'has-focus', 'nav-offthread') {
+    $menuChecks += "\[$T\] OK CASE menu3\.kb-$id "
 }
 $manual = @(
     "\[$T\] SCENARIO manual "

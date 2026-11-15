@@ -150,6 +150,13 @@ local function step(ctx, delta)
     if not el or el.removed or el.kind ~= "choice" then S.ignored = S.ignored + 1 return end
     local cur = el.ref and C.deref(el.ref)
     if not cur or cur:GetAddress() ~= w:GetAddress() then S.ignored = S.ignored + 1 return end -- not its live widget
+    C.used(el) -- core story 27: a window's focus follows the mouse
+    return CH._stepEl(el, w, delta)
+end
+
+-- Core story 27: one step of a validated choice (an arrow click, or Left / Right on the focused choice): the same
+-- enabled, visibility, debounce and end-of-range rules, onChange once.
+function CH._stepEl(el, w, delta)
     if not el.enabled or not chainVisible(el) then S.dropped = S.dropped + 1 return end
     -- A repeat within 250 ms on the same arrow is one click; each arrow has its own time, set only by a click that
     -- changed the option (an inert end arrow's click never delays the other arrow).
@@ -317,6 +324,7 @@ function CH.setEnabled(h, enabled)
     if enabled == el.enabled then return end
     el.enabled = enabled
     refresh(el)
+    X._hostChanged(C.hostOf(el)) -- core story 27: a disabled focused element hands keyboard focus on
 end
 
 function CH.setVisible(h, visible)

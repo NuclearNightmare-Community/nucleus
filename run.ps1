@@ -17,7 +17,8 @@
   move and wheel bring the game window to the front first, like a click. Mod Manager story 4's slider adds
   "drag <x1> <y1> <x2> <y2>" (the left button down at the first point, ten moves to the second, up there; to the front
   first, like a click), "type <text>" (1-16 of 0-9 . , a-z -, each posted as WM_CHAR to the game window) and
-  "key BACK", "key TAB", "key ESCAPE" (posted like Enter).
+  "key BACK", "key TAB", "key ESCAPE" (posted like Enter). Core story 27's window keys add "key LEFT" and "key RIGHT"
+  (arrow keys, extended, like UP and DOWN).
   Keeps the log as <workspace>/dumps/<copy>/<name lowercase>/<scenario>.log (ignored by git) and runs check.ps1.
   Refuses to start while another runner's test or driver mod is enabled in the copy (the workspace's tools/run-guard:
   the refusal names each and the command that clears it); -AllowOtherDrivers runs anyway.
@@ -208,6 +209,8 @@ function Invoke-Request([string] $cmd) {
     if ($cmd -ceq 'key ENTER') { $vk, $scan, $label = 0x0D, 0x1C, 'ENTER' }
     elseif ($cmd -ceq 'key UP') { $vk, $scan, $label, $ext = 0x26, 0x48, 'UP', 1 }      # arrow keys are extended keys
     elseif ($cmd -ceq 'key DOWN') { $vk, $scan, $label, $ext = 0x28, 0x50, 'DOWN', 1 }
+    elseif ($cmd -ceq 'key LEFT') { $vk, $scan, $label, $ext = 0x25, 0x4B, 'LEFT', 1 }    # core story 27: window navigation
+    elseif ($cmd -ceq 'key RIGHT') { $vk, $scan, $label, $ext = 0x27, 0x4D, 'RIGHT', 1 }
     elseif ($cmd -ceq 'key BACK') { $vk, $scan, $label = 0x08, 0x0E, 'BACK' }     # Mod Manager story 4: the slider box
     elseif ($cmd -ceq 'key TAB') { $vk, $scan, $label = 0x09, 0x0F, 'TAB' }
     elseif ($cmd -ceq 'key ESCAPE') { $vk, $scan, $label = 0x1B, 0x01, 'ESCAPE' }

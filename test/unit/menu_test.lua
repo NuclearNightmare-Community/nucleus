@@ -170,6 +170,11 @@ local function newButtonW()
     function w:SetColors(...) self.colors = { ... } end
     function w:SetMaterials(n, h, ...) self.mats = { n, h, ... } end
     function w:SetLabelLook(f, ...) self.labelLook = { f, ... } end
+    -- core story 27: the inner Button takes keyboard focus; the widget shows its focus look
+    w.Btn = obj({ __class = "Button" }, w.__path .. ".WidgetTree.Btn")
+    function w.Btn:SetKeyboardFocus() F.focus = self end
+    function w.Btn:HasKeyboardFocus() return F.focus == self end
+    function w:SetFocusLook(on) self.focusLook = on end
     return w
 end
 local function newContainerW(c, boxName, horiz)
@@ -185,6 +190,14 @@ local function newScreenW()
     local w = widget("WBP_NucleusScreen_C", "/Engine/Transient.WBP_NucleusScreen_C_" .. (F.addr + 0x100))
     tagged(w)
     w.Canvas = newCanvas(w.__path .. ".WidgetTree.Canvas")
+    -- core story 27: the card (Border "Card" -> SizeBox "Inner" -> Canvas)
+    w.Card = obj({ SetBrushColor = function(self, c) self.color = c end, SetPadding = function(self, m) self.padding = m end }, w.__path .. ".WidgetTree.Card")
+    w.Inner = obj({ SetWidthOverride = function(self, v) self.w = v end, SetHeightOverride = function(self, v) self.h = v end }, w.__path .. ".WidgetTree.Inner")
+    function w:HasKeyboardFocus() return F.focus == self end
+    function w:HasFocusedDescendants()
+        for _, c in ipairs(self.Canvas.children) do if c.Btn and F.focus == c.Btn then return true end end
+        return false
+    end
     function w:SetIsFocusable(v) self.focusable = v end
     function w:GetWorld() return F.objects["/Game/Maps/NewMainMenu.NewMainMenu"] end
     function w:GetOwningPlayer() return nil end
@@ -469,12 +482,18 @@ local function screenOf(id)
     return nil
 end
 wa = screenOf("A")
-ok(wa and wa.inViewport and wa.vis == 0 and wa.z == 101 and F.focus == wa, "open A: in the viewport, on top, focused", wa and wa.z)
-ok(wa.Canvas.children[1] and wa.Canvas.children[1].label == "CLOSE" and wa.Canvas.children[1].mats, "open A: core's Close button, game look, CLOSE")
+ok(wa and wa.inViewport and wa.vis == 0 and wa.z == 101 and F.focus == wa.Canvas.children[1].Btn, "open A: in the viewport, on top, focus on its only focusable (BACK)", wa and wa.z)
+ok(wa.Canvas.children[1] and wa.Canvas.children[1].label == "BACK" and wa.Canvas.children[1].mats, "open A: core's BACK button, game look, BACK")
+ok(wa.Canvas.children[1].tag:find(":#close:A", 1, true) and wa.Canvas.children[1].Slot.anchors.Minimum.X == 0 and wa.Canvas.children[1].Slot.anchors.Minimum.Y == 1,
+    "open A: BACK keeps the #close: tag, in the card's bottom-left corner")
+ok(wa.Card.color and math.abs(wa.Card.color.A - 0.92) < 1e-9 and wa.Card.padding.Left == 24 and wa.Inner.w and wa.Inner.w > 0 and wa.Inner.h > 0,
+    "open A: the card's colour and padding; Inner sized to the content", wa.Inner.w)
+ok(wa.Canvas.children[1].focusLook == true, "open A: the focused BACK shows its focus look")
 ok(SC.open{ id = "A" } == A1, "open A again: the same handle, nothing changes")
 local list = LS.create{ id = "lst", place = { screen = A1, absolute = { anchor = "center", x = 0, y = 0 } }, size = { 600, 400 } }
 local listW = wa.Canvas.children[2]
 ok(listW and listW.__class == "WBP_NucleusList_C" and listW.listSize[1] == 600, "list on A: sized")
+ok(listW.parent == wa.Canvas and wa.Inner.w >= 600 and wa.Inner.h >= 400, "panel-relative: the list sits in the card's Canvas; the card's inner area hugs it", wa.Inner.w)
 local rows = {}
 for i = 1, 3 do
     rows[i] = RS.create{ id = "r" .. i, place = { list = list } }
@@ -487,7 +506,7 @@ ok(cell.Slot.Size.SizeRule == 1 and cell.Slot.Size.Value == 3 and listW.VBox.chi
 ok(listW.VBox.children[1].mat and listW.VBox.children[1].mat.__asset == "M_NN_WornStrip" and listW.VBox.children[1].matTint[4] == 0.72, "game look: a row has the worn strip at 0.72")
 local B1 = SC.open{ id = "B" }
 local wb = screenOf("B")
-ok(wb.z == 102 and wb.vis == 0 and wa.vis == 3 and F.focus == wb and SC.top() == B1, "open B: on top with focus; A not hit-testable")
+ok(wb.z == 102 and wb.vis == 0 and wa.vis == 3 and F.focus == wb.Canvas.children[1].Btn and SC.top() == B1, "open B: on top with focus; A not hit-testable")
 -- closing A closes B first (parent), then A; focus back to the menu
 SC.close(A1)
 ok(table.concat(events, " ") == "opened:A:screen.open opened:B:screen.open closed:B:parent closed:A:api", "close A: B closed first (parent)", table.concat(events, " "))
@@ -671,9 +690,9 @@ F.lang = "en"
 local WA = SC.open{ id = "A" }
 local WB = SC.open{ id = "B", close = false }
 local wa2, wb2 = screenOf("A"), screenOf("B")
-ok(#wb2.Canvas.children == 0, "close = false: no Close button")
+ok(#wb2.Canvas.children == 1 and wb2.Canvas.children[1].vis == 1 and F.focus == wb2, "close = false: BACK collapsed (no space); the window itself focused")
 SC.close(WB)
-ok(F.focus == wa2 and wa2.vis == 0 and SC.top() == WA, "close B: focus and input back to A, A on top")
+ok(F.focus == wa2.Canvas.children[1].Btn and wa2.vis == 0 and SC.top() == WA, "close B: focus and input back to A (its BACK), A on top")
 SC.close(WA)
 ok(F.focus == m9, "close A: focus back to the menu")
 
@@ -744,7 +763,7 @@ SC.open{ id = "B" }
 local wa3, wb3 = screenOf("A"), screenOf("B")
 kill(wb3)
 tick()
-ok(events2[#events2] == "lost:B" and SC.top() == WA2 and wa3.vis == 0 and F.focus == wa3, "widget gone: B lost, A on top, hit-testable and focused", events2[#events2])
+ok(events2[#events2] == "lost:B" and SC.top() == WA2 and wa3.vis == 0 and (F.focus == wa3 or (F.focus and F.focus.__path and F.focus.__path:find(wa3.__path, 1, true) == nil and F.focus.__class == "Button")), "widget gone: B lost, A on top, hit-testable and focused", events2[#events2])
 SC.close(WA2)
 
 -- ---------------------------------------------------------------- (g) at most 64 window ids
