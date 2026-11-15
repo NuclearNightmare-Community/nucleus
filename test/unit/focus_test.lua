@@ -815,5 +815,101 @@ do
     SC.close(W6)
 end
 
+-- ---------------------------------------------------------------- review fixes
+-- (1) A reopened window with unchanged content: its new widget's Inner gets the hug size again.
+do
+    local W7 = SC.open{ id = "K7" }
+    X.create{ id = "k7t", text = "SAME", place = { screen = W7, corner = "top-left" } }
+    local w7 = T.screenOf("K7")
+    local hugW, hugH = w7.Inner.w, w7.Inner.h
+    SC.close(W7)
+    SC.open{ id = "K7" }
+    local w7b = T.screenOf("K7")
+    ok(w7b ~= w7 and hugW and w7b.Inner.w == hugW and w7b.Inner.h == hugH, "reopen with unchanged content: the new widget's Inner gets the hug size again", tostring(w7b.Inner.w))
+    SC.close(W7)
+end
+
+-- (2) Slate moved focus to another element (the analog stick): the model adopts it on the next key, the look follows.
+do
+    local W8 = SC.open{ id = "K8" }
+    local L8 = LS.create{ id = "k8l", place = { screen = W8, corner = "top-left" }, size = { 300, 200 } }
+    for i = 1, 3 do
+        local r = RS.create{ id = "k8r" .. i, place = { list = L8 } }
+        B.create{ id = "k8b" .. i, label = "B" .. i, place = { row = r }, onClick = T.rec("k8b" .. i) }
+    end
+    local w8 = T.screenOf("K8")
+    ok(T.agree("k8b1"), "stick: the model starts on row 1")
+    F.focus = T.tagged("k8b2").Btn -- Slate's own navigation moved focus to row 2
+    ok(T.key(w8, D.down, INV_ACT) and T.agree("k8b3"), "stick: the model adopted row 2 and Down moved on from there (row 3)", SC.stats().focus)
+    ok(T.tagged("k8b1").focusLook == false and T.tagged("k8b3").focusLook == true, "stick: the focus look left row 1 and followed the model")
+    SC.close(W8)
+end
+
+-- (3) Interleaved windows of two mods (shared Z): a close gives focus to this mod's next window only when it is the
+-- global top; a lost top window leaves the next one the global top.
+do
+    local function setShared(k, v) ModRef:SetSharedVariable(k, v) end
+    local ZK = SC._OPEN_Z_KEY
+    local A1 = SC.open{ id = "ZA1" }
+    local za1 = T.screenOf("ZA1")
+    local zA1 = za1.z
+    -- another mod opens its window above (z + 1): the shared registry and counter say so
+    local other = zA1 + 1
+    setShared(ZK, (ModRef:GetSharedVariable(ZK) or "") .. "," .. other)
+    setShared("nucleus.ui.screenZ", other)
+    local A3 = SC.open{ id = "ZA3" }
+    ok(T.screenOf("ZA3").z == other + 1, "interleaved: this mod's second window above the other mod's")
+    F.focus = "other mod's window" -- focus sits in the other mod's window under ours
+    SC.close(A3)
+    ok(F.focus == "other mod's window", "interleaved: closing our top window doesn't focus our lower one under the other mod's")
+    tick()
+    ok(F.focus == "other mod's window", "interleaved: our lower window's tick doesn't take focus from the other mod's")
+    -- the other mod closes its window: ours is the global top again and its tick takes focus back
+    local list = {}
+    for _, z in ipairs(SC._openZs()) do if z ~= other then list[#list + 1] = tostring(z) end end
+    setShared(ZK, table.concat(list, ","))
+    tick()
+    ok(SC.stats().focus ~= nil and T.agree(SC.stats().focus), "interleaved: once the other mod's window closed, our window takes focus back", SC.stats().focus)
+    -- the lost path: our top window's widget dies; the one below is the global top and focused
+    local A4 = SC.open{ id = "ZA4" }
+    local za4 = T.screenOf("ZA4")
+    za4.__alive = false
+    tick()
+    local zs = SC._openZs()
+    local has4 = false
+    for _, z in ipairs(zs) do if z == za4.z then has4 = true end end
+    ok(not has4 and SC.top() == A1 and SC.stats().focus ~= nil and T.agree(SC.stats().focus), "lost: the dead window left the registry; the one below is the global top and focused", SC.stats().focus)
+    SC.close(A1)
+    local left = false
+    for _, z in ipairs(SC._openZs()) do if z == zA1 then left = true end end
+    ok(not left, "closed: its Z left the registry")
+    _ = A4
+end
+
+-- (4) Building into an open window: one prepass and re-fit per frame, not one per element.
+do
+    local queue = {}
+    ExecuteInGameThreadWithDelay = function(_, fn) queue[#queue + 1] = fn end
+    local W9 = SC.open{ id = "K9" }
+    local w9 = T.screenOf("K9")
+    local n = 0
+    w9.ForceLayoutPrepass = function() n = n + 1 end
+    local L9 = LS.create{ id = "k9l", place = { screen = W9, corner = "top-left" }, size = { 300, 200 } }
+    for i = 1, 20 do
+        local r = RS.create{ id = "k9r" .. i, place = { list = L9 } }
+        X.create{ id = "k9t" .. i, text = "ROW " .. i, place = { row = r, fill = 1 } }
+    end
+    ok(n == 0 and #queue == 1, "burst: 41 creates schedule one re-fit, none run yet", n .. " prepasses, " .. #queue .. " scheduled")
+    local before = w9.Inner.calls or 0
+    for _, fn in ipairs(queue) do fn() end
+    queue = {}
+    ok(n == 1 and (w9.Inner.calls or 0) == before + 1, "burst: the frame runs one prepass and one re-fit", n)
+    X.create{ id = "k9x", text = "ONE MORE", place = { screen = W9, corner = "top-right" } }
+    ok(#queue == 1, "after the frame: the next change schedules again")
+    for _, fn in ipairs(queue) do fn() end
+    ExecuteInGameThreadWithDelay = nil
+    SC.close(W9)
+end
+
 print(string.format("focus_test: %d passed, %d failed", pass, failN))
 if failN > 0 then os.exit(1) end

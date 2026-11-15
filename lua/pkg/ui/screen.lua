@@ -50,14 +50,45 @@ SC.MAX_OPEN = 8
 SC.MAX_IDS = 64
 local Z_BASE = 100
 local Z_KEY = C.LOWER .. ".ui.screenZ"
--- Core story 27: the Z of the window that should hold keyboard focus (the top open window across dependents), kept by
--- opens and closes; only that window's UI tick takes focus back.
-local FOCUS_Z_KEY = C.LOWER .. ".ui.screenFocusZ"
-local function focusZ()
-    local ok, z = pcall(function() return ModRef:GetSharedVariable(FOCUS_Z_KEY) end)
-    return ok and tonumber(z) or nil
+-- Core story 27: the Z of every open window across dependents (a shared variable: "z,z,..."), added at open and removed
+-- at every close (any reason). The window holding the largest is the global top: only it takes keyboard focus (on a
+-- close below it, on its UI tick, on its model's changes).
+local OPEN_Z_KEY = C.LOWER .. ".ui.screenOpenZ"
+local MAX_OPEN_Z = 256
+local function openZs()
+    local ok, v = pcall(function() return ModRef:GetSharedVariable(OPEN_Z_KEY) end)
+    local out = {}
+    if ok and type(v) == "string" then
+        for z in v:gmatch("%d+") do
+            if #out >= MAX_OPEN_Z then break end
+            out[#out + 1] = tonumber(z)
+        end
+    end
+    return out
 end
-local function setFocusZ(z) pcall(function() ModRef:SetSharedVariable(FOCUS_Z_KEY, z or 0) end) end
+local function setOpenZs(list)
+    local parts = {}
+    for i, z in ipairs(list) do parts[i] = string.format("%d", z) end
+    pcall(function() ModRef:SetSharedVariable(OPEN_Z_KEY, table.concat(parts, ",")) end)
+end
+local function addOpenZ(z)
+    if not z then return end
+    local list = openZs()
+    list[#list + 1] = z
+    setOpenZs(list)
+end
+local function removeOpenZ(z)
+    if not z then return end
+    local list, out = openZs(), {}
+    for _, v in ipairs(list) do if v ~= z then out[#out + 1] = v end end
+    setOpenZs(out)
+end
+local function topZ()
+    local m = nil
+    for _, z in ipairs(openZs()) do if not m or z > m then m = z end end
+    return m
+end
+SC._openZs, SC._OPEN_Z_KEY = openZs, OPEN_Z_KEY -- unit tests
 local WLL = "/Script/UMG.Default__WidgetLayoutLibrary"
 local INPUT_DO_NOT_LOCK = 0          -- EMouseLockMode::DoNotLock
 
@@ -142,6 +173,7 @@ end
 
 local closeById -- below
 local isGlobalTop -- below
+local flushWindow -- below
 
 -- ---------------------------------------------------------------- the card (core story 27)
 
@@ -304,24 +336,32 @@ local function closeOne(rec, reason, event)
     if w then pcall(C.call0, w, "RemoveFromParent") end
     if rec.ref then pcall(C.free, rec.ref) end
     rec.ref, rec.open = nil, false
+    rec.cardKey, rec.dirty = nil, false -- the next open's widget is new: its card is sized again
+    removeOpenZ(rec.z)
     if event == "lost" then T.lost = T.lost + 1 else T.closes = T.closes + 1 end
     dispatch(rec, { event = event or "closed", id = rec.id, reason = reason })
 end
 
 -- Closes a window and every window above it (top first, reason "parent"), then gives focus to the next window down,
 -- else to the menu.
+-- After a close: this mod's next window takes input; it takes focus only when it is the global top. With no window
+-- open anywhere, the menu takes it; with another mod's window on top, that window's UI tick does.
+local function focusAfterClose()
+    local top = order[#order] and C.windows[order[#order]] or nil
+    if top then setTop(top, true) end
+    if top and isGlobalTop(top) then focusWindow(top)
+    elseif #openZs() == 0 then focusMenu() end
+end
+
 local function closeRec(rec, reason)
     local idx = indexOf(rec.id)
     if not idx then return end
-    local fz, myTop = focusZ(), order[#order] and C.windows[order[#order]] or nil
     for i = #order, idx + 1, -1 do
         local above = C.windows[order[i]]
         if above then closeOne(above, "parent") end
     end
     closeOne(rec, reason)
-    local top = order[#order] and C.windows[order[#order]] or nil
-    if myTop and myTop.z and fz and myTop.z >= fz then setFocusZ(top and top.z or 0) end -- it held focus: the next one does
-    if top then setTop(top, true); focusWindow(top) else focusMenu() end
+    focusAfterClose()
 end
 closeById = function(id, reason)
     local rec = C.windows[id]
@@ -335,14 +375,13 @@ local function loseAll(reason)
         if rec then closeOne(rec, reason, "lost") end
     end
     order = {}
-    setFocusZ(0)
 end
 
--- Whether rec is the top window across every dependent (the shared Z counter's last value): only then does the tick
--- take keyboard focus back.
+-- Whether rec is the top window across every dependent (the largest open Z).
 isGlobalTop = function(rec)
-    local z = focusZ()
-    return z == nil or rec.z == nil or rec.z >= z
+    if not (rec and rec.open and rec.z) then return false end
+    local z = topZ()
+    return z == nil or rec.z >= z
 end
 
 local watchingMenu = false
@@ -360,6 +399,7 @@ local function ensureMenu()
                 local w = widgetOf(rec)
                 if w then
                     X._tickHost(C.windowHost(rec.id), w)
+                    if rec.dirty then pcall(flushWindow, rec) end -- a deferred re-fit that never ran
                     local okR, errR = pcall(refit, rec, false)
                     if not okR then C.warnOnce("refit tick", "window '%s': re-fitting its card failed: %s", rec.id, tostring(errR):match("^[^\n]*")) end
                     if i == #order and isGlobalTop(rec) then
@@ -368,8 +408,7 @@ local function ensureMenu()
                     end
                 else
                     closeOne(rec, "its widget is gone", "lost")
-                    local top = order[#order] and C.windows[order[#order]] or nil
-                    if top then setTop(top, true); focusWindow(top) else focusMenu() end
+                    focusAfterClose()
                 end
             end
         end
@@ -426,7 +465,7 @@ function SC.open(opts, ...)
     pcall(function() w:SetBackdrop(bd.r, bd.g, bd.b, bd.a) end)
     styleCard(w)
     rec.z = nextZ()
-    setFocusZ(rec.z)
+    addOpenZ(rec.z)
     w:AddToViewport(rec.z)
     rec.ref = C.ref(w)
     rec.open = true
@@ -511,13 +550,44 @@ F.init{
     windowWidget = function(rec) return widgetOf(rec) end,
     owner = function() local mm = M._poll() return mm and ownerOf(mm) or nil end,
     isTop = function(rec) return order[#order] == rec.id end,
+    isGlobalTop = function(rec) return isGlobalTop(rec) end,
     top = function() local id = order[#order] return id and C.windows[id] or nil end,
 }
+-- Coalesced: a change marks the window dirty; one layout prepass, re-fit and focus check per window run on the next
+-- game-thread frame (ExecuteInGameThreadWithDelay, scheduled from the game thread while none is pending), so building
+-- N elements into an open window costs one prepass, not N. The UI tick runs a pending one that never ran. Without the
+-- scheduler (unit tests), at once.
+local SCHEDULE_MS = 1
+local pending = false
+flushWindow = function(rec)
+    rec.dirty = false
+    if not (rec.open and rec.ref) then return end
+    refit(rec, true)
+    F.changed(rec)
+end
+local function flushAll()
+    pending = false
+    for _, id in ipairs(order) do
+        local rec = C.windows[id]
+        if rec and rec.dirty then
+            local ok, err = pcall(flushWindow, rec)
+            if not ok then C.warnOnce("refit " .. id, "window '%s': re-fitting its card failed: %s", id, tostring(err):match("^[^\n]*")) end
+        end
+    end
+end
 X._onHostChange = function(host)
     local rec = C.windows[host:sub(8)]
     if not (rec and rec.open and rec.ref) then return end
-    refit(rec, true)
-    F.changed(rec)
+    rec.dirty = true
+    if pending then return end
+    local sched = ExecuteInGameThreadWithDelay
+    if type(sched) ~= "function" or C.offGameThread() then flushAll() return end
+    pending = true
+    local ok = pcall(sched, SCHEDULE_MS, function()
+        local okF, errF = pcall(flushAll)
+        if not okF then pending = false; C.warnOnce("refit flush", "re-fitting windows failed: %s", tostring(errF):match("^[^\n]*")) end
+    end)
+    if not ok then flushAll() end
 end
 C.onUse = F.used
 

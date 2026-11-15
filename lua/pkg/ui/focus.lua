@@ -144,7 +144,13 @@ end
 
 -- ---------------------------------------------------------------- widgets (game thread)
 
-local cb = {} -- set by screen.lua: close(id, reason), windowWidget(rec), owner() -> player controller | nil, isTop(rec)
+local cb = {} -- set by screen.lua: close(id, reason), windowWidget(rec), owner() -> player controller | nil, isTop(rec),
+              -- isGlobalTop(rec) (the top window across every dependent), top()
+-- Focus moves outside a key event (a model change) only on the global top window: never take focus from another mod's.
+local function globalTop(rec)
+    if cb.isGlobalTop then return cb.isGlobalTop(rec) end
+    return not cb.isTop or cb.isTop(rec)
+end
 
 local function widgetOf(el)
     if not el.ref then return nil end
@@ -293,7 +299,7 @@ end
 -- focusable hands focus on (only while the window holds focus).
 function F.changed(rec)
     if rec.openFresh then
-        if cb.isTop and not cb.isTop(rec) then return end
+        if not globalTop(rec) then return end
         local lines = F.lines(C.windowHost(rec.id), backIdOf(rec))
         local first = lines[1] and lines[1].els[1] or nil
         if first and first.id ~= rec.focusId then focusEl(rec, first, lines, true) end
@@ -304,7 +310,7 @@ function F.changed(rec)
     if el and F.focusable(el) then return end
     local lines = F.lines(C.windowHost(rec.id), backIdOf(rec))
     if el and F.find(lines, el) then return end
-    if cb.isTop and not cb.isTop(rec) then return end
+    if not globalTop(rec) then return end
     local to = F.recover(lines, rec.focusPos)
     if to then
         S.recovered = S.recovered + 1
