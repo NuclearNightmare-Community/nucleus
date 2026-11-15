@@ -46,7 +46,7 @@ local SL = {}
 local MAX_STEPS, MAX_HINT = 10000, 64
 local CREATE_KEYS = { id = true, min = true, max = true, step = true, value = true, defaultValue = true, hint = true,
     onChange = true, place = true, enabled = true, tooltip = true }
-local S = { ends = 0, commits = 0, changes = 0, restored = 0, ignored = 0, dropped = 0, throws = 0, hooked = false }
+local S = { ends = 0, commits = 0, changes = 0, nudges = 0, restored = 0, ignored = 0, dropped = 0, throws = 0, hooked = false }
 
 local function firstLine(e) return (tostring(e):match("^[^\n]*")) end
 local function finite(v) return type(v) == "number" and v == v and v ~= math.huge and v ~= -math.huge end
@@ -272,7 +272,7 @@ function SL._nudge(el, w, dir)
     local v = snap(base + dir * el.step, el.min, el.max, el.step)
     if v == base then return false end -- a Default slider at its end stays Default
     el.value = v
-    S.nudges = (S.nudges or 0) + 1
+    S.nudges = S.nudges + 1
     settle(el, w, true)
     return true
 end

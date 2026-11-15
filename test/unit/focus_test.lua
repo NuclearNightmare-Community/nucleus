@@ -593,7 +593,8 @@ do
         { corner = "bottom-right", inset = 16, gap = 16, offset = { x = 0, y = 0 }, w = 120, h = 44 },
     }
     local W, H = SC._hug(items, SG)
-    ok(W == 716 and H == (16 + 40 + 16 + 420) + SG + (16 + 44), "hug: width from the widest stack, height from the left stacks plus the gap", W .. "x" .. H)
+    -- the list spans the width, so the bottom-right buttons (diagonal to it) go below it, not over its lower right
+    ok(W == 716 and H == (16 + 40 + 16 + 420) + SG + (16 + 44 + 16 + 44), "hug: width from the widest stack, height from the list plus the gap plus the bottom-right stack", W .. "x" .. H)
     local W2 = SC._hug({ { absolute = { anchor = "top-left", x = 360, y = 40 }, w = 560, h = 30 } }, SG)
     ok(W2 == 920, "hug: an absolute element at top-left needs x + w", W2)
     local W3, H3 = SC._hug({ { absolute = { anchor = "center", x = -20, y = 10 }, w = 600, h = 400 } }, SG)
@@ -602,6 +603,18 @@ do
         { corner = "top-right", inset = 16, gap = 16, offset = { x = 0, y = 0 }, w = 100, h = 10 } }, SG)
     ok(W4 == 116 + SG + 116, "hug: two stacks side by side add up, a gap between", W4)
     ok(select(1, SC._hug({}, SG)) == 0, "hug: nothing, nothing")
+    -- diagonal stacks that fit neither side by side nor one above the other: one goes above the other (BACK under a
+    -- top-right list, not over it)
+    local W5, H5 = SC._hug({ { corner = "top-right", inset = 16, gap = 16, offset = { x = 0, y = 0 }, w = 600, h = 300 },
+        { corner = "bottom-left", inset = 16, gap = 16, offset = { x = 0, y = 0 }, w = 90, h = 44 } }, SG)
+    ok(W5 == 616 and H5 == 316 + SG + 60, "hug: a top-right list and BACK bottom-left: BACK below the list", W5 .. "x" .. H5)
+    local W6, H6 = SC._hug({ { corner = "top-left", inset = 16, gap = 16, offset = { x = 0, y = 0 }, w = 600, h = 300 },
+        { corner = "bottom-right", inset = 16, gap = 16, offset = { x = 0, y = 0 }, w = 90, h = 44 } }, SG)
+    ok(W6 == 616 and H6 == 316 + SG + 60, "hug: a top-left list and a bottom-right button: the button below the list", W6 .. "x" .. H6)
+    local W7, H7 = SC._hug({ { corner = "top-left", inset = 16, gap = 16, offset = { x = 0, y = 0 }, w = 100, h = 300 },
+        { corner = "top-right", inset = 16, gap = 16, offset = { x = 0, y = 0 }, w = 500, h = 400 },
+        { corner = "bottom-right", inset = 16, gap = 16, offset = { x = 0, y = 0 }, w = 90, h = 44 } }, SG)
+    ok(W7 == 116 + SG + 516 and H7 == 416 + SG + 60, "hug: diagonal stacks side by side already: the height only from the column sums", W7 .. "x" .. H7)
     for _, vp in ipairs({ { 1280, 720, 1 }, { 1920, 1080, 1 }, { 3440, 1440, 1440 / 1080 } }) do
         local vw, vh = vp[1] / vp[3], vp[2] / vp[3]
         local w, h, clamped = SC._clamp(W, H, vw, vh, theme27.window.padding, theme27.window.margin)
@@ -688,6 +701,25 @@ ok(T.ncalls("kt3") == 1, "Enter / A on a focused button (its Button clicks): onC
 -- a mouse click moves the model's focus
 T.fire(T.CLICK, T.tagged("kg1"))
 ok(SC.stats().focus == "kg1" and T.tagged("kg1").focusLook == true and T.tagged("kt3").focusLook == false, "a mouse click moves the model's focus there")
+F.focus = T.tagged("kg1").Btn
+-- a click on a choice's arrow or a slider's drag end moves the focus there, keyboard focus included (their arrows and
+-- bar aren't focusable, so Slate's focus would stay on the button)
+tick() -- the poll registers the choice's and the slider's hooks
+T.fire(T.PREV, T.tagged("kch"))
+ok(T.agree("kch") and T.tagged("kch").focusLook == true and T.tagged("kg1").focusLook == false, "a click on a choice's arrow: the focus (model and keyboard) on the choice", SC.stats().focus)
+ok(T.key(wk, D.down, INV_ACT) and T.agree("ksl"), "Down after that click: from the choice to the slider", SC.stats().focus)
+T.fire(T.CLICK, T.tagged("kg1"))
+T.fire(T.END, T.tagged("ksl"))
+ok(T.agree("ksl") and T.tagged("kg1").focusLook == false, "a slider's drag end: the focus on the slider", SC.stats().focus)
+-- a focused choice or slider disabled: focus handed on at once (before any tick)
+SL.setEnabled(ksl, false)
+ok(T.agree("#close:K"), "a focused slider disabled: the line now at its index (Back)", SC.stats().focus)
+SL.setEnabled(ksl, true)
+T.fire(T.NEXT, T.tagged("kch"))
+CH.setEnabled(kch, false)
+ok(T.agree("ksl"), "a focused choice disabled: the line now at its index (the slider)", SC.stats().focus)
+CH.setEnabled(kch, true)
+T.fire(T.CLICK, T.tagged("kg1"))
 F.focus = T.tagged("kg1").Btn
 -- the focused element removed, hidden, disabled
 B.setEnabled(gears[1], false)
@@ -806,6 +838,10 @@ do
     F.focus = box -- a text box inside the window holds focus
     ok(T.key(w6, D.down, INV_ACT) == false and T.key(w6, INV_DIR, A.back) == false and SC.isOpen(W6), "a text box holds focus: every key is left to it (Escape doesn't close)")
     F.focus = T.tagged("k6b").Btn
+    T.key(w6, D.right, INV_ACT)
+    CK.setEnabled(cb6, false)
+    ok(T.agree("k6b"), "a focused checkbox disabled: focus to the nearest in its line", SC.stats().focus)
+    CK.setEnabled(cb6, true)
     -- the gap split for a fixed-size child in a row, the list inset
     local rw = T.tagged("k6r")
     local cw = T.tagged("k6c")

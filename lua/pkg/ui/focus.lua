@@ -39,7 +39,7 @@ F.NAV_FN = C.SCREEN_CLASS .. ":" .. C.NAME .. "_OnNav"
 local FOCUSABLE = { button = true, checkbox = true, choice = true, slider = true }
 local INPUT_DO_NOT_LOCK = 0
 local S = { navs = 0, handled = 0, ignored = 0, moves = 0, steps = 0, closes = 0, refocus = 0, recovered = 0,
-    faults = 0, hooked = false, hookTries = 0 }
+    scrolls = 0, faults = 0, hooked = false, hookTries = 0 }
 
 local function firstLine(e) return (tostring(e):match("^[^\n]*")) end
 
@@ -198,8 +198,8 @@ local function scrollIntoView(el)
         local scroll = lw.Scroll
         C.count(); scroll:ScrollWidgetIntoView(iw, false, 0, list.gapUnits or 0) -- IntoView, no animation
     end)
-    if not ok then C.warnOnce("scroll into view", "scrolling a focused row into view failed: %s", firstLine(err)) end
-    S.scrolls = (S.scrolls or 0) + 1
+    if not ok then C.warnOnce("scroll into view", "scrolling a focused row into view failed: %s", firstLine(err)) return end
+    S.scrolls = S.scrolls + 1
 end
 
 local function backIdOf(rec) return "#close:" .. rec.id end
@@ -213,12 +213,14 @@ local function focusEl(rec, el, lines, mode)
     if mode then
         local pc = cb.owner and cb.owner()
         if pc then
-            pcall(function()
+            local okM, errM = pcall(function()
                 StaticFindObject("/Script/UMG.Default__WidgetBlueprintLibrary"):SetInputMode_UIOnlyEx(pc, t, INPUT_DO_NOT_LOCK, false)
             end)
+            if not okM then C.warnOnce("focus input mode", "setting the window's input mode failed: %s", firstLine(errM)) end
         end
     end
-    pcall(C.call0, t, "SetKeyboardFocus")
+    local okK, errK = pcall(C.call0, t, "SetKeyboardFocus")
+    if not okK then C.warnOnce("focus move", "moving keyboard focus to '%s' failed: %s", el.id, firstLine(errK)) end
     if rec.lookId and rec.lookId ~= el.id then
         local old = C.els[rec.lookId]
         if old and not old.removed then setLook(old, false) end
@@ -240,12 +242,14 @@ local function focusWindowWidget(rec, mode)
     if mode then
         local pc = cb.owner and cb.owner()
         if pc then
-            pcall(function()
+            local okM, errM = pcall(function()
                 StaticFindObject("/Script/UMG.Default__WidgetBlueprintLibrary"):SetInputMode_UIOnlyEx(pc, w, INPUT_DO_NOT_LOCK, false)
             end)
+            if not okM then C.warnOnce("focus input mode", "setting the window's input mode failed: %s", firstLine(errM)) end
         end
     end
-    pcall(C.call0, w, "SetKeyboardFocus")
+    local okK, errK = pcall(C.call0, w, "SetKeyboardFocus")
+    if not okK then C.warnOnce("focus move window", "moving keyboard focus to window '%s' failed: %s", rec.id, firstLine(errK)) end
     if rec.lookId then
         local old = C.els[rec.lookId]
         if old and not old.removed then setLook(old, false) end
@@ -345,13 +349,10 @@ function F.used(el)
     local rec = C.windows[host:sub(8)]
     if not (rec and rec.open) then return end
     rec.openFresh = false
-    if rec.focusId == el.id then return end
-    if rec.lookId and rec.lookId ~= el.id and C.els[rec.lookId] then setLook(C.els[rec.lookId], false) end
-    setLook(el, true)
-    rec.lookId, rec.focusId = el.id, el.id
-    local lines = F.lines(host, backIdOf(rec))
-    local li, ci = F.find(lines, el)
-    if li then rec.focusPos = { li = li, ci = ci, owner = lines[li].owner } end
+    if rec.focusId == el.id and hasFocus(targetOf(el)) then return end
+    -- Keyboard focus moves too: a choice's arrows and a slider's bar aren't focusable, so a click on them leaves Slate's
+    -- focus where it was, and the next key would start from there.
+    focusEl(rec, el, F.lines(host, backIdOf(rec)), false)
 end
 
 -- ---------------------------------------------------------------- one navigation event
@@ -369,7 +370,7 @@ function F.nav(rec, dir, act)
     if cb.isTop and not cb.isTop(rec) then
         -- A window below the top one holds focus (a stale focus): give it back to the top one.
         local top = cb.top and cb.top()
-        if top then F.focusWindow(top) end
+        if top and globalTop(top) then F.focusWindow(top) end
         return true
     end
     rec.openFresh = false
@@ -416,7 +417,7 @@ end
 local function navBody(ctx)
     if C.offGameThread() then S.ignored = S.ignored + 1 return end
     local w = ctx:get()
-    if not C.valid(w) then return end
+    if not C.valid(w) then S.ignored = S.ignored + 1 return end
     local okT, tag = pcall(function() return w.CoreTag:ToString() end)
     if not (okT and type(tag) == "string") then S.ignored = S.ignored + 1 return end
     local mine = C.LOWER .. ":" .. C.modTag .. ":#screen:"
