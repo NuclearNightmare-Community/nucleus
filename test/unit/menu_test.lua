@@ -763,7 +763,10 @@ SC.open{ id = "B" }
 local wa3, wb3 = screenOf("A"), screenOf("B")
 kill(wb3)
 tick()
-ok(events2[#events2] == "lost:B" and SC.top() == WA2 and wa3.vis == 0 and (F.focus == wa3 or (F.focus and F.focus.__path and F.focus.__path:find(wa3.__path, 1, true) == nil and F.focus.__class == "Button")), "widget gone: B lost, A on top, hit-testable and focused", events2[#events2])
+local backA = nil
+for _, c in ipairs(wa3.Canvas.children) do if c.tag and c.tag:find(":#close:A", 1, true) then backA = c end end
+ok(events2[#events2] == "lost:B" and SC.top() == WA2 and wa3.vis == 0 and (F.focus == wa3 or (backA ~= nil and F.focus == backA.Btn)),
+    "widget gone: B lost, A on top, hit-testable and focused (A's BACK or A itself)", events2[#events2])
 SC.close(WA2)
 
 -- ---------------------------------------------------------------- (g) at most 64 window ids

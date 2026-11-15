@@ -4979,6 +4979,28 @@ local function buildMenu()
             check(back ~= nil and br and math.abs((br.l - inner.l) / sc - 16) <= 1 and math.abs((inner.b - br.b) / sc - 16) <= 1
                 and try(function() return back.Label:GetText():ToString() end) == "BACK",
                 "CARD %s BACK bottom-left (%s in %s), label BACK", window, rsA(br), rsA(inner))
+            -- Independent of refit's numbers: every visible element placed on the window (corner or absolute) lies inside
+            -- Inner's rectangle (1 unit), and the extremes reach Inner's right and bottom less the corner inset (16, the
+            -- default gap: a corner element keeps it from its own edges), so the card is neither cut nor loose.
+            local host = CC.windowHost(window)
+            local n, outside, maxR, maxB = 0, 0, -1e9, -1e9
+            for _, el in ipairs(CC.order) do
+                if not el.removed and not el.panel and el.visible and el.place.host == host and (el.place.corner or el.place.absolute) then
+                    local w = el.ref and CC.deref(el.ref)
+                    local r = w and absR(w)
+                    if r and r.r > r.l then
+                        n = n + 1
+                        if r.l < inner.l - sc or r.t < inner.t - sc or r.r > inner.r + sc or r.b > inner.b + sc then
+                            outside = outside + 1
+                            say("CARD %s element '%s' %s outside inner %s", window, el.id, rsA(r), rsA(inner))
+                        end
+                        maxR, maxB = math.max(maxR, r.r), math.max(maxB, r.b)
+                    end
+                end
+            end
+            local gapR, gapB = (inner.r - maxR) / sc, (inner.b - maxB) / sc
+            check(n >= 2 and outside == 0 and gapR >= -1 and gapR <= 16 + 1 and gapB >= -1 and gapB <= 16 + 1,
+                "CARD %s contains: %d elements inside inner %s, %d outside; space right %.1f, bottom %.1f (0..16 within 1)", window, n, rsA(inner), outside, gapR, gapB)
         end
 
         -- GEOM: per fully visible row of a list, its last child: arranged vs desired size and right edge vs the list's
