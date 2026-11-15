@@ -5168,9 +5168,32 @@ local function buildMenu()
         end)
         shot("kb-panel")
         kkey("DOWN", "down 1", function() kfocus("KB", "kb.t2") end)
-        kkey("RIGHT", "right 1", function() kfocus("KB", "kb.g2") end)
+        -- KLOOK off and repeat: the TOGGLE that lost focus shows its own brush again; a TOGGLE focused across a UI tick (its
+        -- look set again) keeps its own style in SavedStyle, not the hover look.
+        local function kbToggle(i)
+            return childTagged(prop(childTagged(prop(childTagged(prop(win("kb.title"), "Canvas"), "kb.list"), "VBox"), "kb.r" .. i), "HBox"), "kb.t" .. i)
+        end
+        kkey("RIGHT", "right 1", function()
+            kfocus("KB", "kb.g2")
+            local t2 = kbToggle(2)
+            local n = try(function() return oname(t2.Btn.WidgetStyle.Normal.ResourceObject) end) or "?"
+            check(try(function() return t2.FocusLook end) == false and n:find("M_NN_WornStrip", 1, true) ~= nil,
+                "KLOOK off: the TOGGLE that lost focus shows its own normal brush again (%s)", n)
+        end)
         kkey("RIGHT", "right 2", function() kfocus("KB", "kb.g2") end)
         kkey("LEFT", "left 1", function() kfocus("KB", "kb.t2") end)
+        step("kb: look kept across a tick", function()
+            local t = os.clock() + 0.7 -- at least one 500 ms UI tick re-applies the focus look
+            return function()
+                if os.clock() < t then return false end
+                local t2 = kbToggle(2)
+                local sv = try(function() return oname(t2.SavedStyle.Normal.ResourceObject) end) or "?"
+                local cur = try(function() return oname(t2.Btn.WidgetStyle.Normal.ResourceObject) end) or "?"
+                check(try(function() return t2.FocusLook end) == true and sv:find("M_NN_WornStrip", 1, true) ~= nil and cur:find("M_NN_CinematicSelection", 1, true) ~= nil,
+                    "KLOOK repeat: after a UI tick the focused TOGGLE keeps its own style saved (%s) and shows the hover brush (%s)", sv, cur)
+                return true
+            end, 5, "look kept across a tick"
+        end)
         kkey("ENTER", "enter 1", function()
             check(hits("kb.t2") == 1 and hits("kb.t1") == 0, "KCLICK Enter on the focused TOGGLE ran its onClick exactly once (%d)", hits("kb.t2"))
             kfocus("KB", "kb.t2")

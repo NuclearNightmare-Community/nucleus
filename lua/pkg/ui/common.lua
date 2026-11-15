@@ -195,7 +195,9 @@ C.inDispatch = 0
 C.onUse = nil
 function C.used(el)
     local f = C.onUse
-    if f then pcall(f, el) end
+    if not f then return end
+    local ok, err = pcall(f, el)
+    if not ok then C.warnOnce("focus use", "moving the focus to a clicked element failed: %s", (tostring(err):match("^[^\n]*"))) end
 end
 
 -- One log line per key for the life of this Lua state.

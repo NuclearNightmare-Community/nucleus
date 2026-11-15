@@ -214,6 +214,13 @@ function SC._hug(items, stackGap)
     local tl, tr, bl, br = st["top-left"], st["top-right"], st["bottom-left"], st["bottom-right"]
     W = math.max(W, sum(tl.w, tr.w), sum(bl.w, br.w))
     H = math.max(H, sum(tl.h, bl.h), sum(tr.h, br.h))
+    -- Diagonal stacks (top-left and bottom-right, top-right and bottom-left) that fit neither side by side nor one above
+    -- the other would overlap (BACK over a top-right list): one goes above the other.
+    local function diagonal(a, b)
+        if sum(a.w, b.w) > W and sum(a.h, b.h) > H then H = sum(a.h, b.h) end
+    end
+    diagonal(tl, br)
+    diagonal(tr, bl)
     return W, H
 end
 
@@ -389,7 +396,10 @@ local function ensureMenu()
     if watchingMenu then return end
     watchingMenu = true
     M._watch(function(_, info)
-        if info.event == "lost" then loseAll("the menu is gone (" .. tostring(info.reason) .. ")") end
+        if info.event == "lost" then
+            loseAll("the menu is gone (" .. tostring(info.reason) .. ")")
+            setOpenZs({}) -- every dependent's windows go with the menu: a z left by a Lua state that went away goes too
+        end
     end)
     -- A window widget that is gone while open (another mod removed it): lost.
     M._ticker(function()
@@ -441,7 +451,10 @@ function SC.open(opts, ...)
     local mm = M._poll()
     if not mm then C.fail("%s: the title-screen menu is not open (windows open only over it)", pre) end
     local rec = C.windows[id]
-    if rec and rec.open and widgetOf(rec) then return rec.handle end
+    if rec and rec.open then
+        if widgetOf(rec) then return rec.handle end
+        closeOne(rec, "its widget is gone", "lost") -- before the UI tick saw it: its z and its place in the order go
+    end
     if #order >= SC.MAX_OPEN then C.fail("%s: this mod already has %d windows open (at most %d)", pre, #order, SC.MAX_OPEN) end
     if not rec then
         local n = 0

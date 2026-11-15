@@ -773,6 +773,8 @@ $menuChecks = $started + @(
     "\[$T\] OK KNOCLOSE Escape on a close = false window: it stays open"
     "\[$T\] OK KFOCUS KB kb\.t1 "
     "\[$T\] OK KLOOK the focused TOGGLE shows its focus look"
+    "\[$T\] OK KLOOK off: the TOGGLE that lost focus shows its own normal brush again "
+    "\[$T\] OK KLOOK repeat: after a UI tick the focused TOGGLE keeps its own style saved "
     "\[$T\] OK CARD KB centred: "
     "\[$T\] OK CARD KB hugs: "
     "\[$T\] OK CARD KB contains: "
@@ -820,7 +822,7 @@ $menuChecks = $started + @(
     "\[$T\] OK CARD KBM BACK bottom-left "
     "\[$T\] OK KFOCUS KBM kbm\.g1 "
     "\[$T\] OK KBEND every window closed"
-    "!\[$T\] WARN .*(window key|focus look|focus window|focus tick|card|re-fit|BACK button|NavHandled)"
+    "!\[$T\] WARN .*(window key|focus look|focus window|focus tick|focusing it failed|focused row|keyboard focus|input mode|clicked element|card|re-fit|BACK button|NavHandled)"
     "\[$T\] END result=PASS"
 )
 # Core story 24: the ic-* group, on window IC (menu3), and every new function off the game thread.
