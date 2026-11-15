@@ -1,5 +1,6 @@
 -- Story 21 (Mod Manager story 2): rows. Exposed as core.ui.row on the connect API:
---   create{ id = <string>, place = <intent>, style = <style|nil>, gap = "tight" | "normal" | "loose" | nil } -> handle
+--   create{ id = <string>, place = <intent>, style = <style|nil>, gap = "compact" | "tight" | "normal" | "loose" | nil } -> handle
+-- (core story 27: "compact" is 4 units; a row's default stays "tight")
 --   setStyle(handle, style)    setVisible(handle, visible)    remove(handle)    isShown(handle) -> boolean
 -- (panel.setStyle, setVisible, remove and isShown take a row too, and core.ui.place moves it.)
 --
@@ -19,7 +20,7 @@ local CREATE_KEYS = { id = true, place = true, style = true, gap = true }
 
 local function validGap(v)
     if v == nil then return "tight" end
-    if type(v) ~= "string" or not P._GAP[v] then C.fail("%s.row.create: unknown gap %s (valid: %s)", C.UI, C.describe(v), P._GAP_NAMES) end
+    if type(v) ~= "string" or not P._LIST_GAP[v] then C.fail("%s.row.create: unknown gap %s (valid: %s)", C.UI, C.describe(v), P._LIST_GAP_NAMES) end
     return v
 end
 
@@ -42,11 +43,11 @@ function R.create(opts, ...)
     local el = X._existing(id, "row", "row.create")
     if el then
         X._setStyle(el, style)
-        if el.gap ~= gap then el.gap, el.gapUnits = gap, P._GAP[gap]; X._applyGaps(el); X._resized(el) end
+        if el.gap ~= gap then el.gap, el.gapUnits = gap, P._LIST_GAP[gap]; X._applyGaps(el); X._resized(el) end
         P.place(el.handle, intent)
         return el.handle
     end
-    el = X._new("row", id, { style = style, layout = "horizontal", gap = gap, gapUnits = P._GAP[gap], children = {} }, place)
+    el = X._new("row", id, { style = style, layout = "horizontal", gap = gap, gapUnits = P._LIST_GAP[gap], children = {} }, place)
     return el.handle
 end
 

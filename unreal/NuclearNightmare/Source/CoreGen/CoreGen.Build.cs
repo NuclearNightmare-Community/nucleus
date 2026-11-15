@@ -12,6 +12,8 @@ public class CoreGen : ModuleRules
 			"UMG", "UMGEditor", "Slate", "SlateCore",
 			// Core story 24: the icons (PNG -> texture source).
 			"ImageCore",
+			// Core story 27: the window's OnKeyDown compares keys (EKeys).
+			"InputCore",
 		});
 	}
 }

@@ -36,6 +36,9 @@ M.HAND = {
     "net.publish", "net.read", "net.watch", "net.unwatch", "net.role",
     -- core story 23 (Net-2): player presence and the netCompat rule, new functions of the core.net module
     "net.presence", "net.watchPresence", "net.compatible", "net.versionsCompatible",
+    -- core story 27 (UI-12): a window's content on a hugging card (corner and absolute intents inside it), BACK, keyboard
+    -- and gamepad focus with Escape / B closing the top window, and the list and row gap "compact"
+    "ui.screen.panel", "ui.screen.focus", "ui.gap.compact",
 }
 
 -- The UI part of the api table: path -> { module, function } (client.lua builds api.ui from this).

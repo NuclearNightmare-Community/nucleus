@@ -1,6 +1,7 @@
 -- Story 21 (Mod Manager story 2): scrolling lists. Exposed as core.ui.list on the connect API:
 --   create{ id = <string>, place = <intent>, size = { w = 32..4096, h = 32..4096 } (or { w, h }),
---           style = <style|nil>, gap = "tight" | "normal" | "loose" | nil } -> handle
+--           style = <style|nil>, gap = "compact" | "tight" | "normal" | "loose" | nil } -> handle
+-- Core story 27: gap "compact" (4 units) is the default between a list's children (it was "tight", 8).
 --   setStyle(handle, style)    setVisible(handle, visible)    remove(handle)    isShown(handle) -> boolean
 -- (panel.setStyle, setVisible, remove and isShown take a list too, and core.ui.place moves it.)
 --
@@ -36,8 +37,8 @@ local function validSize(v)
 end
 
 local function validGap(v)
-    if v == nil then return "tight" end
-    if type(v) ~= "string" or not P._GAP[v] then C.fail("%s.list.create: unknown gap %s (valid: %s)", C.UI, C.describe(v), P._GAP_NAMES) end
+    if v == nil then return "compact" end
+    if type(v) ~= "string" or not P._LIST_GAP[v] then C.fail("%s.list.create: unknown gap %s (valid: %s)", C.UI, C.describe(v), P._LIST_GAP_NAMES) end
     return v
 end
 
@@ -65,11 +66,11 @@ function L.create(opts, ...)
         local w = X._liveWidget(el)
         if w then pcall(X.KIND.list.content, el, w, false); X._resized(el) end
         X._setStyle(el, style)
-        if el.gap ~= gap then el.gap, el.gapUnits = gap, P._GAP[gap]; X._applyGaps(el); X._resized(el) end
+        if el.gap ~= gap then el.gap, el.gapUnits = gap, P._LIST_GAP[gap]; X._applyGaps(el); X._resized(el) end
         P.place(el.handle, intent)
         return el.handle
     end
-    el = X._new("list", id, { style = style, layout = "vertical", gap = gap, gapUnits = P._GAP[gap], size = size, children = {} }, place)
+    el = X._new("list", id, { style = style, layout = "vertical", gap = gap, gapUnits = P._LIST_GAP[gap], size = size, children = {} }, place)
     return el.handle
 end
 

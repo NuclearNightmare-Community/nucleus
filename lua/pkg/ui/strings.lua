@@ -16,7 +16,7 @@ S.MAX_BYTES = 64
 
 -- Core's own strings: language -> key -> string. Add a language as one table; English is required for every key.
 S.CORE = {
-    en = { close = "CLOSE" },
+    en = { close = "CLOSE", back = "BACK" }, -- core story 27: BACK replaces CLOSE on windows; close stays
 }
 
 local KIL = "/Script/Engine.Default__KismetInternationalizationLibrary"

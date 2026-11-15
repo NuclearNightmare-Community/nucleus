@@ -41,6 +41,8 @@
 #include "ImageUtils.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/PlayerStart.h"
+#include "InputCoreTypes.h"
+#include "K2Node_BreakStruct.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_ComponentBoundEvent.h"
 #include "K2Node_CustomEvent.h"
@@ -51,6 +53,7 @@
 #include "K2Node_MakeStruct.h"
 #include "K2Node_VariableGet.h"
 #include "K2Node_VariableSet.h"
+#include "Kismet/KismetInputLibrary.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "Kismet/KismetStringLibrary.h"
 #include "Kismet/KismetTextLibrary.h"
@@ -684,6 +687,159 @@ namespace
 		return WBP;
 	}
 
+	// ---------------------------------------------------------------- core story 27: keys and the focus look
+
+	/** <Fn>(): Count = Count + 1 (the hookable function a bound event calls; it does nothing else). */
+	void FillCounter(UBlueprint* BP, const FFunc& F, FName Count)
+	{
+		FGraph G(BP, F.G);
+		UK2Node_VariableGet* GetCount = G.Get(Count);
+		UK2Node_CallFunction* Add = G.Call(UKismetMathLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, Add_IntInt));
+		G.Link(GetCount, Count, Add, TEXT("A"));
+		G.Default(Add, TEXT("B"), TEXT("1"));
+		UK2Node_VariableSet* SetCount = G.Set(Count);
+		G.Link(Add, PN_Ret, SetCount, Count);
+		G.Chain({F.Entry, SetCount});
+	}
+
+
+	/** EqualEqual_KeyKey(Key pin, a fixed key); returns the node. */
+	UK2Node_CallFunction* KeyIs(FGraph& G, UEdGraphPin* KeyPin, const FKey& Key)
+	{
+		UK2Node_CallFunction* Eq = G.Call(UKismetInputLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetInputLibrary, EqualEqual_KeyKey));
+		G.Link(KeyPin, G.Pin(Eq, TEXT("A")));
+		G.Default(Eq, TEXT("B"), Key.GetFName().ToString());
+		return Eq;
+	}
+
+	/**
+	 * A copy of a struct value (Src pin) through Break + Make, each member wired by name, with some members taken from
+	 * another member of the source (Overrides: target member -> source member). Returns the Make node's output pin.
+	 */
+	UEdGraphPin* CopyStructWith(FGraph& G, UScriptStruct* Struct, UEdGraphPin* Src, const TMap<FName, FName>& Overrides)
+	{
+		FGraphNodeCreator<UK2Node_BreakStruct> BC(*G.G);
+		UK2Node_BreakStruct* Br = BC.CreateNode(false);
+		Br->StructType = Struct;
+		G.Place(Br);
+		BC.Finalize();
+		UEdGraphPin* BrIn = nullptr;
+		for (UEdGraphPin* P : Br->Pins) if (P->Direction == EGPD_Input) { BrIn = P; break; }
+		checkf(BrIn, TEXT("No input pin on Break %s"), *Struct->GetName());
+		G.Link(Src, BrIn);
+		UK2Node_MakeStruct* Mk = G.MakeStruct(Struct);
+		int32 Wired = 0;
+		for (UEdGraphPin* P : Mk->Pins)
+		{
+			if (P->Direction != EGPD_Input || P->PinType.PinCategory == UEdGraphSchema_K2::PC_Exec) continue;
+			const FName* From = Overrides.Find(P->PinName);
+			UEdGraphPin* Out = Br->FindPin(From ? *From : P->PinName, EGPD_Output);
+			if (Out) { G.Link(Out, P); ++Wired; }
+		}
+		checkf(Wired > 0, TEXT("Copying %s wired no member"), *Struct->GetName());
+		return G.OnlyOutput(Mk);
+	}
+
+	/**
+	 * The window's key override, UUserWidget::OnPreviewKeyDown (a BlueprintImplementableEvent with a return value, so a
+	 * function graph): NavDir and NavAction from the key event (as ints), Escape and Gamepad_FaceButton_Right always
+	 * Back, NavHandled = false, then NavFn() (the hookable counter), then Handled iff NavHandled.
+	 * Core story 27, measured in the VM: OnKeyDown never sees the arrow keys. SWidget::OnKeyDown of any focusable widget
+	 * (the focused Button) answers a navigation key with Handled plus Slate's own navigation request, so nothing bubbles
+	 * to the window. The preview pass tunnels from the window down to the focused widget first; Lua leaves a key it
+	 * doesn't handle (Accept on a Button, any key while a text box has focus) to the focused widget.
+	 */
+	bool AddKeyDown(UWidgetBlueprint* WBP, FName NavFn)
+	{
+		UEdGraph* Gr = FBlueprintEditorUtils::CreateNewGraph(WBP, TEXT("OnPreviewKeyDown"), UEdGraph::StaticClass(), UEdGraphSchema_K2::StaticClass());
+		FBlueprintEditorUtils::AddFunctionGraph<UClass>(WBP, Gr, /*bIsUserCreated*/ false, UUserWidget::StaticClass());
+		TArray<UK2Node_FunctionEntry*> Entries;
+		Gr->GetNodesOfClass(Entries);
+		TArray<UK2Node_FunctionResult*> Results;
+		Gr->GetNodesOfClass(Results);
+		if (Entries.Num() != 1 || Results.Num() != 1)
+		{
+			UE_LOG(LogCoreGen, Error, TEXT("SCREEN: the OnPreviewKeyDown override has %d entry and %d result nodes (want 1 and 1)"), Entries.Num(), Results.Num());
+			return false;
+		}
+		UK2Node_FunctionEntry* Entry = Entries[0];
+		UK2Node_FunctionResult* Yes = Results[0];
+		for (UEdGraphPin* P : Entry->Pins) if (P->PinType.PinCategory == UEdGraphSchema_K2::PC_Exec) P->BreakAllPinLinks();
+		FGraph G(WBP, Gr);
+		G.X = 400;
+		UEdGraphPin* Ev = G.Pin(Entry, TEXT("InKeyEvent"));
+		UK2Node_CallFunction* Dir = G.Call(UKismetInputLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetInputLibrary, Key_GetNavigationDirectionFromKey));
+		G.Link(Ev, G.Pin(Dir, TEXT("InKeyEvent")));
+		UK2Node_CallFunction* DirInt = G.Call(UKismetMathLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, Conv_ByteToInt));
+		G.Link(G.Pin(Dir, PN_Ret), G.Pin(DirInt, TEXT("InByte")));
+		UK2Node_VariableSet* SetDir = G.Set(TEXT("NavDir"));
+		G.Link(DirInt, PN_Ret, SetDir, TEXT("NavDir"));
+		UK2Node_CallFunction* Act = G.Call(UKismetInputLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetInputLibrary, Key_GetNavigationActionFromKey));
+		G.Link(Ev, G.Pin(Act, TEXT("InKeyEvent")));
+		UK2Node_CallFunction* ActInt = G.Call(UKismetMathLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, Conv_ByteToInt));
+		G.Link(G.Pin(Act, PN_Ret), G.Pin(ActInt, TEXT("InByte")));
+		UK2Node_CallFunction* Key = G.Call(UKismetInputLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetInputLibrary, GetKey));
+		G.Link(Ev, G.Pin(Key, TEXT("Input")));
+		UK2Node_CallFunction* Esc = KeyIs(G, G.Pin(Key, PN_Ret), EKeys::Escape);
+		UK2Node_CallFunction* PadB = KeyIs(G, G.Pin(Key, PN_Ret), EKeys::Gamepad_FaceButton_Right);
+		UK2Node_CallFunction* Or = G.Call(UKismetMathLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, BooleanOR));
+		G.Link(Esc, PN_Ret, Or, TEXT("A"));
+		G.Link(PadB, PN_Ret, Or, TEXT("B"));
+		UK2Node_CallFunction* Sel = G.Call(UKismetMathLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, SelectInt));
+		G.Default(Sel, TEXT("A"), TEXT("1")); // EUINavigationAction::Back
+		G.Link(ActInt, PN_Ret, Sel, TEXT("B"));
+		G.Link(Or, PN_Ret, Sel, TEXT("bPickA"));
+		UK2Node_VariableSet* SetAct = G.Set(TEXT("NavAction"));
+		G.Link(Sel, PN_Ret, SetAct, TEXT("NavAction"));
+		UK2Node_VariableSet* SetH = G.Set(TEXT("NavHandled"));
+		G.Default(SetH, TEXT("NavHandled"), TEXT("false"));
+		UK2Node_CallFunction* Call = G.CallSelf(NavFn);
+		UK2Node_VariableGet* GetH = G.Get(TEXT("NavHandled"));
+		UK2Node_IfThenElse* Br = G.Branch();
+		G.Link(GetH, TEXT("NavHandled"), Br, UEdGraphSchema_K2::PN_Condition);
+		G.Chain({Entry, SetDir, SetAct, SetH, Call, Br});
+		UK2Node_CallFunction* H = G.Call(UWidgetBlueprintLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UWidgetBlueprintLibrary, Handled));
+		G.Link(Br, UEdGraphSchema_K2::PN_Then, Yes, PN_Exec);
+		G.Link(H, PN_Ret, Yes, PN_Ret);
+		G.Place(Yes);
+		FGraphNodeCreator<UK2Node_FunctionResult> RC(*Gr);
+		UK2Node_FunctionResult* No = RC.CreateNode(false);
+		No->FunctionReference = Yes->FunctionReference;
+		G.Place(No);
+		No->NodePosY = 200;
+		RC.Finalize();
+		UK2Node_CallFunction* U = G.Call(UWidgetBlueprintLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UWidgetBlueprintLibrary, Unhandled));
+		G.Link(Br, UEdGraphSchema_K2::PN_Else, No, PN_Exec);
+		G.Link(U, PN_Ret, No, PN_Ret);
+		return true;
+	}
+
+	/** theme.game.textHover / theme.game.text: a content tint that draws the game's text colour in its hover colour. */
+	const TCHAR* FocusTint = TEXT("(R=1.170732,G=1.141176,B=1.119048,A=1.000000)");
+
+	/**
+	 * SetFocusLook(Focused: Bool) on a widget with a Border "Background" around its content (the choice, the slider's
+	 * number box): Background.SetContentColorAndOpacity(Focused ? FocusTint : white), so the game's text colour inside
+	 * draws in its hover colour.
+	 */
+	FFunc AddTintFocusLook(UBlueprint* BP)
+	{
+		return AddFunction(BP, TEXT("SetFocusLook"), {{TEXT("Focused"), BoolT()}}, {});
+	}
+	void FillTintFocusLook(UBlueprint* BP, const FFunc& F)
+	{
+		FGraph G(BP, F.G);
+		UK2Node_CallFunction* Pick = G.Call(UKismetMathLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, SelectColor));
+		G.Default(Pick, TEXT("A"), FocusTint);
+		G.Default(Pick, TEXT("B"), WhiteColor);
+		G.Link(F.Entry, TEXT("Focused"), Pick, TEXT("bPickA"));
+		UK2Node_VariableGet* GetBg = G.Get(TEXT("Background"));
+		UK2Node_CallFunction* Set = G.Call(UBorder::StaticClass(), GET_FUNCTION_NAME_CHECKED(UBorder, SetContentColorAndOpacity));
+		G.Link(GetBg, TEXT("Background"), Set, PN_Self);
+		G.Link(Pick, PN_Ret, Set, TEXT("InContentColorAndOpacity"));
+		G.Chain({F.Entry, Set});
+	}
+
 	/**
 	 * WBP_<Core>Button (story 15): SizeBox "Box" (story 2) -> Button "Btn" -> HorizontalBox "Content" (core story 24) ->
 	 * [SizeBox "IconBox" (collapsed until SetIcon) -> Image "Icon"], Spacer "IconGap" (8 x 1, collapsed), TextBlock "Label"
@@ -714,6 +870,12 @@ namespace
 	 *   SetContentColors(NR, NG, NB, NA, HR, HG, HB, HA: Float)   NormalTextColor/HoverTextColor = N/H, Label and Icon
 	 *                                       drawn in N now; Btn.OnHovered/OnUnhovered colour the Icon like the Label
 	 *                                       (SetLabelLook colours the Icon too)
+	 * Core story 27 (keyboard and gamepad focus):
+	 *   SetFocusLook(Focused: Bool)         on: SavedStyle = Btn's style, Btn shows it with Normal = Hovered (the hover
+	 *                                       brush while focused), Label and Icon in HoverTextColor; off: SavedStyle back,
+	 *                                       NormalTextColor. Nothing when FocusLook already equals Focused; SetColors and
+	 *                                       SetMaterials (a fresh style) turn FocusLook off, SetContentColors and
+	 *                                       OnUnhovered keep the hover colour while it is on
 	 * Lua draws it disabled at the theme's opacity (SetRenderOpacity on the widget), its icon included.
 	 */
 	UWidgetBlueprint* BuildButton(const FString& Dir, const FString& Core)
@@ -722,7 +884,7 @@ namespace
 			UUserWidget::StaticClass(), UWidgetBlueprint::StaticClass(), UWidgetBlueprintGeneratedClass::StaticClass()));
 		const FString ClickFn = Core + TEXT("_OnClicked");
 		CheckNames({TEXT("SetLabel"), TEXT("SetEnabledState"), TEXT("SetColors"), TEXT("SetTag"), *ClickFn,
-			TEXT("SetMaterials"), TEXT("SetLabelLook"), TEXT("SetIcon"), TEXT("ClearIcon"), TEXT("SetContentColors")});
+			TEXT("SetMaterials"), TEXT("SetLabelLook"), TEXT("SetIcon"), TEXT("ClearIcon"), TEXT("SetContentColors"), TEXT("SetFocusLook")});
 
 		UWidgetTree* T = WBP->WidgetTree;
 		USizeBox* Box = T->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Box"));
@@ -786,6 +948,9 @@ namespace
 		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("ClickCount"), IntT(), TEXT("0"));
 		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("NormalTextColor"), LinearColorT(), WhiteColor);
 		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("HoverTextColor"), LinearColorT(), WhiteColor);
+		// Core story 27: the focus look (SetFocusLook) and the style it replaced.
+		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("FocusLook"), BoolT(), TEXT("false"));
+		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("SavedStyle"), PinType(UEdGraphSchema_K2::PC_Struct, FButtonStyle::StaticStruct()));
 
 		// The functions need the compiled widget variables, so compile first.
 		FFunc SetLabel = AddFunction(WBP, TEXT("SetLabel"), {{TEXT("NewLabel"), StrT()}}, {});
@@ -827,6 +992,7 @@ namespace
 			}
 		}
 		FFunc SetContent = AddFunction(WBP, TEXT("SetContentColors"), ContentIn, {});
+		FFunc SetFocus = AddFunction(WBP, TEXT("SetFocusLook"), {{TEXT("Focused"), BoolT()}}, {});
 		if (!Compile(WBP)) return nullptr;
 		FillTag(WBP, SetTag);
 		{
@@ -869,14 +1035,20 @@ namespace
 			G.Link(N, PN_Ret, SetN, TEXT("NormalTextColor"));
 			UK2Node_VariableSet* SetHv = G.Set(TEXT("HoverTextColor"));
 			G.Link(H, PN_Ret, SetHv, TEXT("HoverTextColor"));
+			// Core story 27: while the focus look is on, both are drawn in H.
+			UK2Node_VariableGet* GetFL = G.Get(TEXT("FocusLook"));
+			UK2Node_CallFunction* Pick = G.Call(UKismetMathLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, SelectColor));
+			G.Link(H, PN_Ret, Pick, TEXT("A"));
+			G.Link(N, PN_Ret, Pick, TEXT("B"));
+			G.Link(GetFL, TEXT("FocusLook"), Pick, TEXT("bPickA"));
 			UK2Node_VariableGet* GetLabel = G.Get(TEXT("Label"));
 			UK2Node_CallFunction* SetC = G.Call(UTextBlock::StaticClass(), GET_FUNCTION_NAME_CHECKED(UTextBlock, SetColorAndOpacity));
 			G.Link(GetLabel, TEXT("Label"), SetC, PN_Self);
-			G.Link(SlateColorOf(G, G.Pin(N, PN_Ret)), G.Pin(SetC, TEXT("InColorAndOpacity")));
+			G.Link(SlateColorOf(G, G.Pin(Pick, PN_Ret)), G.Pin(SetC, TEXT("InColorAndOpacity")));
 			UK2Node_VariableGet* GetIcon = G.Get(TEXT("Icon"));
 			UK2Node_CallFunction* SetI = G.Call(UImage::StaticClass(), GET_FUNCTION_NAME_CHECKED(UImage, SetColorAndOpacity));
 			G.Link(GetIcon, TEXT("Icon"), SetI, PN_Self);
-			G.Link(N, PN_Ret, SetI, TEXT("InColorAndOpacity"));
+			G.Link(Pick, PN_Ret, SetI, TEXT("InColorAndOpacity"));
 			G.Chain({SetContent.Entry, SetN, SetHv, SetC, SetI});
 		}
 		{
@@ -943,7 +1115,9 @@ namespace
 			UK2Node_CallFunction* Min = G.Call(USizeBox::StaticClass(), GET_FUNCTION_NAME_CHECKED(USizeBox, SetMinDesiredHeight));
 			G.Link(GetBox, TEXT("Box"), Min, PN_Self);
 			G.Default(Min, TEXT("InMinDesiredHeight"), TEXT("0.0"));
-			G.Chain({SetColors.Entry, Set, Tint, Min});
+			UK2Node_VariableSet* Unfocus = G.Set(TEXT("FocusLook"));
+			G.Default(Unfocus, TEXT("FocusLook"), TEXT("false"));
+			G.Chain({SetColors.Entry, Unfocus, Set, Tint, Min});
 		}
 		{
 			// SetMaterials: Btn.SetStyle(Make ButtonStyle(Normal/Disabled = brush of Normal, Hovered/Pressed = brush of
@@ -975,7 +1149,9 @@ namespace
 			UK2Node_CallFunction* Min = G.Call(USizeBox::StaticClass(), GET_FUNCTION_NAME_CHECKED(USizeBox, SetMinDesiredHeight));
 			G.Link(GetBox, TEXT("Box"), Min, PN_Self);
 			G.Link(SetMats.Entry, TEXT("MinHeight"), Min, TEXT("InMinDesiredHeight"));
-			G.Chain({SetMats.Entry, Set, Tint, Min});
+			UK2Node_VariableSet* Unfocus = G.Set(TEXT("FocusLook"));
+			G.Default(Unfocus, TEXT("FocusLook"), TEXT("false"));
+			G.Chain({SetMats.Entry, Unfocus, Set, Tint, Min});
 		}
 		{
 			// SetLabelLook: the two colour variables, then the label's font, normal colour and shadow.
@@ -1004,6 +1180,64 @@ namespace
 			G.Link(GetIcon, TEXT("Icon"), SetI, PN_Self);
 			G.Link(N, PN_Ret, SetI, TEXT("InColorAndOpacity"));
 			G.Chain({SetLook.Entry, SetN, SetH, SetF, SetC, SetS, SetI});
+		}
+		{
+			// Core story 27: SetFocusLook(Focused). Nothing when FocusLook already equals Focused. On: SavedStyle = Btn's
+			// style, Btn's style with Normal = Hovered (the hovered brush while focused), label and icon in
+			// HoverTextColor. Off: SavedStyle back, label and icon in NormalTextColor. Dimmed buttons have both colours
+			// the disabled one, so they get the brush only.
+			FGraph G(WBP, SetFocus.G);
+			UK2Node_VariableGet* GetFL = G.Get(TEXT("FocusLook"));
+			UK2Node_CallFunction* Same = G.Call(UKismetMathLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, EqualEqual_BoolBool));
+			G.Link(SetFocus.Entry, TEXT("Focused"), Same, TEXT("A"));
+			G.Link(GetFL, TEXT("FocusLook"), Same, TEXT("B"));
+			UK2Node_IfThenElse* Skip = G.Branch();
+			G.Link(Same, PN_Ret, Skip, UEdGraphSchema_K2::PN_Condition);
+			UK2Node_VariableSet* SetFL = G.Set(TEXT("FocusLook"));
+			G.Link(SetFocus.Entry, TEXT("Focused"), SetFL, TEXT("FocusLook"));
+			UK2Node_IfThenElse* Which = G.Branch();
+			G.Link(SetFocus.Entry, TEXT("Focused"), Which, UEdGraphSchema_K2::PN_Condition);
+			UK2Node_VariableGet* GetBtn = G.Get(TEXT("Btn"));
+			FGraphNodeCreator<UK2Node_VariableGet> GC(*G.G);
+			UK2Node_VariableGet* GetStyle = GC.CreateNode(false);
+			GetStyle->VariableReference.SetExternalMember(TEXT("WidgetStyle"), UButton::StaticClass());
+			G.Place(GetStyle);
+			GC.Finalize();
+			G.Link(GetBtn, TEXT("Btn"), GetStyle, PN_Self);
+			UK2Node_VariableSet* Save = G.Set(TEXT("SavedStyle"));
+			G.Link(GetStyle, TEXT("WidgetStyle"), Save, TEXT("SavedStyle"));
+			UK2Node_VariableGet* GetSaved = G.Get(TEXT("SavedStyle"));
+			UEdGraphPin* Swapped = CopyStructWith(G, FButtonStyle::StaticStruct(), G.Pin(GetSaved, TEXT("SavedStyle")),
+				{{GET_MEMBER_NAME_CHECKED(FButtonStyle, Normal), GET_MEMBER_NAME_CHECKED(FButtonStyle, Hovered)}});
+			UK2Node_CallFunction* SetOn = G.Call(UButton::StaticClass(), GET_FUNCTION_NAME_CHECKED(UButton, SetStyle));
+			G.Link(GetBtn, TEXT("Btn"), SetOn, PN_Self);
+			G.Link(Swapped, G.Pin(SetOn, TEXT("InStyle")));
+			UK2Node_CallFunction* SetOff = G.Call(UButton::StaticClass(), GET_FUNCTION_NAME_CHECKED(UButton, SetStyle));
+			G.Link(GetBtn, TEXT("Btn"), SetOff, PN_Self);
+			G.Link(GetSaved, TEXT("SavedStyle"), SetOff, TEXT("InStyle"));
+			UK2Node_VariableGet* GetN = G.Get(TEXT("NormalTextColor"));
+			UK2Node_VariableGet* GetH = G.Get(TEXT("HoverTextColor"));
+			UK2Node_CallFunction* Pick = G.Call(UKismetMathLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, SelectColor));
+			G.Link(GetH, TEXT("HoverTextColor"), Pick, TEXT("A"));
+			G.Link(GetN, TEXT("NormalTextColor"), Pick, TEXT("B"));
+			G.Link(SetFocus.Entry, TEXT("Focused"), Pick, TEXT("bPickA"));
+			UK2Node_VariableGet* GetLabel = G.Get(TEXT("Label"));
+			UK2Node_CallFunction* SetC = G.Call(UTextBlock::StaticClass(), GET_FUNCTION_NAME_CHECKED(UTextBlock, SetColorAndOpacity));
+			G.Link(GetLabel, TEXT("Label"), SetC, PN_Self);
+			G.Link(SlateColorOf(G, G.Pin(Pick, PN_Ret)), G.Pin(SetC, TEXT("InColorAndOpacity")));
+			UK2Node_VariableGet* GetIcon = G.Get(TEXT("Icon"));
+			UK2Node_CallFunction* SetI = G.Call(UImage::StaticClass(), GET_FUNCTION_NAME_CHECKED(UImage, SetColorAndOpacity));
+			G.Link(GetIcon, TEXT("Icon"), SetI, PN_Self);
+			G.Link(Pick, PN_Ret, SetI, TEXT("InColorAndOpacity"));
+			G.Link(SetFocus.Entry, PN_Then, Skip, PN_Exec);
+			G.Link(Skip, UEdGraphSchema_K2::PN_Else, SetFL, PN_Exec);
+			G.Link(SetFL, PN_Then, Which, PN_Exec);
+			G.Link(Which, UEdGraphSchema_K2::PN_Then, Save, PN_Exec);
+			G.Link(Save, PN_Then, SetOn, PN_Exec);
+			G.Link(SetOn, PN_Then, SetC, PN_Exec);
+			G.Link(Which, UEdGraphSchema_K2::PN_Else, SetOff, PN_Exec);
+			G.Link(SetOff, PN_Then, SetC, PN_Exec);
+			G.Link(SetC, PN_Then, SetI, PN_Exec);
 		}
 		{
 			// <Core>_OnClicked(): ClickCount = ClickCount + 1.
@@ -1043,15 +1277,22 @@ namespace
 				G.Place(HoverBound);
 				HC.Finalize();
 				UK2Node_VariableGet* GetColor = G.Get(E.Value);
+				// Core story 27: unhovered while focused, the label stays in the hover colour.
+				UK2Node_VariableGet* GetHover = G.Get(TEXT("HoverTextColor"));
+				UK2Node_VariableGet* GetFL = G.Get(TEXT("FocusLook"));
+				UK2Node_CallFunction* Pick = G.Call(UKismetMathLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, SelectColor));
+				G.Link(GetHover, TEXT("HoverTextColor"), Pick, TEXT("A"));
+				G.Link(GetColor, E.Value, Pick, TEXT("B"));
+				G.Link(GetFL, TEXT("FocusLook"), Pick, TEXT("bPickA"));
 				UK2Node_VariableGet* GetLabel = G.Get(TEXT("Label"));
 				UK2Node_CallFunction* SetC = G.Call(UTextBlock::StaticClass(), GET_FUNCTION_NAME_CHECKED(UTextBlock, SetColorAndOpacity));
 				G.Link(GetLabel, TEXT("Label"), SetC, PN_Self);
-				G.Link(SlateColorOf(G, G.Pin(GetColor, E.Value)), G.Pin(SetC, TEXT("InColorAndOpacity")));
+				G.Link(SlateColorOf(G, G.Pin(Pick, PN_Ret)), G.Pin(SetC, TEXT("InColorAndOpacity")));
 				// Core story 24: the icon follows the label (dimmed: both colours are the disabled one, no change).
 				UK2Node_VariableGet* GetIcon = G.Get(TEXT("Icon"));
 				UK2Node_CallFunction* SetI = G.Call(UImage::StaticClass(), GET_FUNCTION_NAME_CHECKED(UImage, SetColorAndOpacity));
 				G.Link(GetIcon, TEXT("Icon"), SetI, PN_Self);
-				G.Link(GetColor, E.Value, SetI, TEXT("InColorAndOpacity"));
+				G.Link(Pick, PN_Ret, SetI, TEXT("InColorAndOpacity"));
 				G.Chain({HoverBound, SetC, SetI});
 			}
 		}
@@ -1298,23 +1539,40 @@ namespace
 	}
 
 	/**
-	 * WBP_<Core>Screen (story 2, the window stack): Overlay "Root" -> [Border "Backdrop" (Visible: hit-testable, so it
-	 * blocks everything below; solid, colour (0, 0, 0, 0.85)), CanvasPanel "Canvas" (self-hit-test-invisible; the
-	 * window's elements go here)]. Lua adds it to the viewport above the menu. The class default is focusable, so the
-	 * top window can hold keyboard focus. Functions:
+	 * WBP_<Core>Screen (story 2, the window stack; core story 27, the card and the keys): Overlay "Root" ->
+	 * [Border "Backdrop" (Visible: hit-testable, so it blocks everything below; solid, colour (0, 0, 0, 0.85)),
+	 * Border "Card" (centred both ways, self-hit-test-invisible, solid; Lua sets its colour and padding from
+	 * theme.window) -> SizeBox "Inner" (Lua sets its width and height to the content's hug size) -> CanvasPanel "Canvas"
+	 * (self-hit-test-invisible; the window's elements go here, so their corners are the card's inner area)]. Lua adds it
+	 * to the viewport above the menu. The class default is focusable, so the top window can hold keyboard focus. Root's
+	 * navigation rules are Stop in every direction: Slate's own (analog stick) navigation never leaves the window.
+	 * Functions:
 	 *   SetBackdrop(R, G, B, A: Float)      Backdrop.SetBrushColor((R, G, B, A))
 	 *   SetTag(NewTag: String)              CoreTag = NewTag
+	 *   <Core>_OnNav()                      NavCount += 1; the OnPreviewKeyDown override calls it and nothing else; each
+	 *                                       dependent's Lua post-hooks it by full path and sets NavHandled
+	 *   OnPreviewKeyDown (override)         NavDir = Key_GetNavigationDirectionFromKey (EUINavigation as an int: Left 0,
+	 *                                       Right 1, Up 2, Down 3, Next 4, Previous 5, Invalid 7), NavAction =
+	 *                                       Key_GetNavigationActionFromKey (Accept 0, Back 1, Invalid 3), Escape and
+	 *                                       Gamepad_FaceButton_Right always Back; NavHandled = false; <Core>_OnNav();
+	 *                                       Handled when NavHandled, else Unhandled
 	 */
 	UWidgetBlueprint* BuildScreen(const FString& Dir, const FString& Core)
 	{
 		UWidgetBlueprint* WBP = CastChecked<UWidgetBlueprint>(NewBlueprint(Dir / FString::Printf(TEXT("WBP_%sScreen"), *Core),
 			UUserWidget::StaticClass(), UWidgetBlueprint::StaticClass(), UWidgetBlueprintGeneratedClass::StaticClass()));
-		CheckNames({TEXT("SetBackdrop"), TEXT("SetTag")});
+		const FString NavFn = Core + TEXT("_OnNav");
+		CheckNames({TEXT("SetBackdrop"), TEXT("SetTag"), *NavFn});
 
 		UWidgetTree* T = WBP->WidgetTree;
 		UOverlay* Root = T->ConstructWidget<UOverlay>(UOverlay::StaticClass(), TEXT("Root"));
 		Root->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 		Root->bIsVariable = true;
+		for (const EUINavigation D : {EUINavigation::Left, EUINavigation::Right, EUINavigation::Up, EUINavigation::Down,
+		                              EUINavigation::Next, EUINavigation::Previous})
+		{
+			Root->SetNavigationRuleBase(D, EUINavigationRule::Stop);
+		}
 		T->RootWidget = Root;
 		UBorder* Backdrop = T->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Backdrop"));
 		Backdrop->SetBrushColor(FLinearColor(0.f, 0.f, 0.f, 0.85f));
@@ -1324,20 +1582,41 @@ namespace
 		UOverlaySlot* BackSlot = CastChecked<UOverlaySlot>(Root->AddChild(Backdrop));
 		BackSlot->SetHorizontalAlignment(HAlign_Fill);
 		BackSlot->SetVerticalAlignment(VAlign_Fill);
+		UBorder* Card = T->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Card"));
+		Card->SetBrushColor(FLinearColor(0.012f, 0.016f, 0.020f, 0.92f));
+		Card->SetPadding(FMargin(24.f));
+		Card->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		Card->bIsVariable = true;
+		UOverlaySlot* CardSlot = CastChecked<UOverlaySlot>(Root->AddChild(Card));
+		CardSlot->SetHorizontalAlignment(HAlign_Center);
+		CardSlot->SetVerticalAlignment(VAlign_Center);
+		USizeBox* Inner = T->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Inner"));
+		Inner->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		Inner->SetWidthOverride(320.f);
+		Inner->SetHeightOverride(200.f);
+		Inner->bIsVariable = true;
+		UBorderSlot* InnerSlot = CastChecked<UBorderSlot>(Card->AddChild(Inner));
+		InnerSlot->SetPadding(FMargin(0.f));
+		InnerSlot->SetHorizontalAlignment(HAlign_Fill);
+		InnerSlot->SetVerticalAlignment(VAlign_Fill);
 		UCanvasPanel* Canvas = T->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("Canvas"));
 		Canvas->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 		Canvas->bIsVariable = true;
-		UOverlaySlot* CanvasSlot = CastChecked<UOverlaySlot>(Root->AddChild(Canvas));
+		USizeBoxSlot* CanvasSlot = CastChecked<USizeBoxSlot>(Inner->AddChild(Canvas));
 		CanvasSlot->SetHorizontalAlignment(HAlign_Fill);
 		CanvasSlot->SetVerticalAlignment(VAlign_Fill);
-		WBP->OnVariableAdded(TEXT("Root"));
-		WBP->OnVariableAdded(TEXT("Backdrop"));
-		WBP->OnVariableAdded(TEXT("Canvas"));
+		for (const TCHAR* W : {TEXT("Root"), TEXT("Backdrop"), TEXT("Card"), TEXT("Inner"), TEXT("Canvas")}) WBP->OnVariableAdded(W);
+		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("NavDir"), IntT(), TEXT("7"));
+		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("NavAction"), IntT(), TEXT("3"));
+		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("NavHandled"), BoolT(), TEXT("false"));
+		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("NavCount"), IntT(), TEXT("0"));
 
 		FFunc SetBackdrop = AddFunction(WBP, TEXT("SetBackdrop"), {{TEXT("R"), RealT()}, {TEXT("G"), RealT()}, {TEXT("B"), RealT()}, {TEXT("A"), RealT()}}, {});
 		FFunc SetTag = AddTag(WBP);
+		FFunc OnNav = AddFunction(WBP, FName(NavFn), {}, {});
 		if (!Compile(WBP)) return nullptr;
 		FillTag(WBP, SetTag);
+		FillCounter(WBP, OnNav, TEXT("NavCount"));
 		{
 			FGraph G(WBP, SetBackdrop.G);
 			UK2Node_VariableGet* GetBd = G.Get(TEXT("Backdrop"));
@@ -1347,11 +1626,15 @@ namespace
 			G.Link(Make, PN_Ret, Set, TEXT("InBrushColor"));
 			G.Chain({SetBackdrop.Entry, Set});
 		}
+		if (!AddKeyDown(WBP, FName(NavFn))) return nullptr;
 		if (!Compile(WBP)) return nullptr;
 		UUserWidget* CDO = CastChecked<UUserWidget>(WBP->GeneratedClass->GetDefaultObject());
 		CDO->SetIsFocusable(true);
 		CDO->MarkPackageDirty();
-		UE_LOG(LogCoreGen, Display, TEXT("SCREEN %s class default focusable=%s"), *WBP->GetPathName(), CDO->IsFocusable() ? TEXT("true") : TEXT("false"));
+		const bool bOwnKeyDown = WBP->GeneratedClass->FindFunctionByName(TEXT("OnPreviewKeyDown"), EIncludeSuperFlag::ExcludeSuper) != nullptr;
+		UE_LOG(LogCoreGen, Display, TEXT("SCREEN %s class default focusable=%s OnPreviewKeyDown override=%s"), *WBP->GetPathName(),
+			CDO->IsFocusable() ? TEXT("true") : TEXT("false"), bOwnKeyDown ? TEXT("true") : TEXT("false"));
+		if (!bOwnKeyDown) { UE_LOG(LogCoreGen, Error, TEXT("SCREEN: the OnPreviewKeyDown override did not compile into the class")); return nullptr; }
 		if (!Save(WBP)) return nullptr;
 		return WBP;
 	}
@@ -1384,18 +1667,6 @@ namespace
 		return Bound;
 	}
 
-	/** <Fn>(): Count = Count + 1 (the hookable function a bound event calls; it does nothing else). */
-	void FillCounter(UBlueprint* BP, const FFunc& F, FName Count)
-	{
-		FGraph G(BP, F.G);
-		UK2Node_VariableGet* GetCount = G.Get(Count);
-		UK2Node_CallFunction* Add = G.Call(UKismetMathLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, Add_IntInt));
-		G.Link(GetCount, Count, Add, TEXT("A"));
-		G.Default(Add, TEXT("B"), TEXT("1"));
-		UK2Node_VariableSet* SetCount = G.Set(Count);
-		G.Link(Add, PN_Ret, SetCount, Count);
-		G.Chain({F.Entry, SetCount});
-	}
 
 	/** The choice's arrow buttons: no face, a faint light on hover and press (the game's picker has bare arrows). */
 	FButtonStyle ArrowStyle()
@@ -1440,6 +1711,8 @@ namespace
 	 *   <Core>_OnPrev(), <Core>_OnNext()    PrevCount / NextCount += 1. Prev.OnClicked / Next.OnClicked call them and
 	 *                                       nothing else; each dependent's Lua post-hooks them by full path (story 15's
 	 *                                       click pattern)
+	 *   SetFocusLook(Focused: Bool)         core story 27: Background's content tint (theme text -> hover colour) on or off
+	 * Core story 27: the class default is focusable (the choice takes keyboard focus); its arrows are not.
 	 */
 	UWidgetBlueprint* BuildChoice(const FString& Dir, const FString& Core)
 	{
@@ -1447,7 +1720,7 @@ namespace
 			UUserWidget::StaticClass(), UWidgetBlueprint::StaticClass(), UWidgetBlueprintGeneratedClass::StaticClass()));
 		const FString PrevFn = Core + TEXT("_OnPrev"), NextFn = Core + TEXT("_OnNext");
 		CheckNames({TEXT("SetValueText"), TEXT("SetArrows"), TEXT("SetValueLook"), TEXT("SetBackground"), TEXT("SetBackgroundPadding"),
-			TEXT("SetBackgroundMaterial"), TEXT("SetBackgroundSolid"), TEXT("SetTag"), *PrevFn, *NextFn});
+			TEXT("SetBackgroundMaterial"), TEXT("SetBackgroundSolid"), TEXT("SetTag"), *PrevFn, *NextFn, TEXT("SetFocusLook")});
 
 		UWidgetTree* T = WBP->WidgetTree;
 		USizeBox* Frame = T->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Frame"));
@@ -1470,6 +1743,9 @@ namespace
 		{
 			UButton* B = T->ConstructWidget<UButton>(UButton::StaticClass(), Name);
 			B->SetStyle(ArrowStyle());
+			PRAGMA_DISABLE_DEPRECATION_WARNINGS
+			B->IsFocusable = false; // core story 27: the choice itself takes focus, never its arrows (read when its SButton is built)
+			PRAGMA_ENABLE_DEPRECATION_WARNINGS
 			B->bIsVariable = true;
 			UButtonSlot* S = CastChecked<UButtonSlot>(B->AddChild(PlainText(T, LabelName, Glyph)));
 			S->SetPadding(FMargin(0.f));
@@ -1510,7 +1786,9 @@ namespace
 		FFunc SetTag = AddTag(WBP);
 		FFunc OnPrev = AddFunction(WBP, FName(PrevFn), {}, {});
 		FFunc OnNext = AddFunction(WBP, FName(NextFn), {}, {});
+		FFunc Focus = AddTintFocusLook(WBP);
 		if (!Compile(WBP)) return nullptr;
+		FillTintFocusLook(WBP, Focus);
 		FillBackground(WBP, SetBg, SetPad);
 		FillBackgroundMaterial(WBP, Mat);
 		FillTag(WBP, SetTag);
@@ -1584,7 +1862,13 @@ namespace
 			UK2Node_ComponentBoundEvent* N = BindEvent(WBP, EG, G, TEXT("Next"), UButton::StaticClass(), TEXT("OnClicked"));
 			G.Chain({N, G.CallSelf(FName(NextFn))});
 		}
-		if (!Compile(WBP) || !Save(WBP)) return nullptr;
+		if (!Compile(WBP)) return nullptr;
+		// Core story 27: the widget itself takes keyboard focus (the window's Lua focus model moves it here).
+		UUserWidget* CDO = CastChecked<UUserWidget>(WBP->GeneratedClass->GetDefaultObject());
+		CDO->SetIsFocusable(true);
+		CDO->MarkPackageDirty();
+		UE_LOG(LogCoreGen, Display, TEXT("CHOICE %s class default focusable=%s"), *WBP->GetPathName(), CDO->IsFocusable() ? TEXT("true") : TEXT("false"));
+		if (!Save(WBP)) return nullptr;
 		return WBP;
 	}
 
@@ -1609,6 +1893,9 @@ namespace
 	 *   SetTag(NewTag: String)              CoreTag = NewTag
 	 *   <Core>_OnSliderEnd()                EndCount += 1; Bar.OnMouseCaptureEnd and OnControllerCaptureEnd call it
 	 *   <Core>_OnSliderCommit()             CommitCount += 1; Box.OnTextCommitted (Enter or focus lost) calls it
+	 *   SetFocusLook(Focused: Bool)         core story 27: the number box's content tint (text -> hover colour) on or off
+	 * Core story 27: the class default is focusable (the slider takes keyboard focus; the Bar is not, the Box only by
+	 * mouse, for typing).
 	 */
 	UWidgetBlueprint* BuildSlider(const FString& Dir, const FString& Core)
 	{
@@ -1617,7 +1904,7 @@ namespace
 		const FString EndFn = Core + TEXT("_OnSliderEnd"), CommitFn = Core + TEXT("_OnSliderCommit");
 		CheckNames({TEXT("SetRange"), TEXT("SetSliderValue"), TEXT("SetSliderEmpty"), TEXT("SetHint"), TEXT("SetBoxWidth"), TEXT("SetEnabledState"), TEXT("SetBoxLook"),
 			TEXT("CopySliderStyle"), TEXT("SetBackground"), TEXT("SetBackgroundPadding"), TEXT("SetBackgroundMaterial"), TEXT("SetBackgroundSolid"),
-			TEXT("SetTag"), *EndFn, *CommitFn});
+			TEXT("SetTag"), *EndFn, *CommitFn, TEXT("SetFocusLook")});
 
 		UWidgetTree* T = WBP->WidgetTree;
 		USizeBox* Frame = T->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Frame"));
@@ -1705,7 +1992,9 @@ namespace
 		FFunc SetTag = AddTag(WBP);
 		FFunc OnEnd = AddFunction(WBP, FName(EndFn), {}, {});
 		FFunc OnCommit = AddFunction(WBP, FName(CommitFn), {}, {});
+		FFunc Focus = AddTintFocusLook(WBP);
 		if (!Compile(WBP)) return nullptr;
+		FillTintFocusLook(WBP, Focus);
 		FillBackground(WBP, SetBg, SetPad);
 		FillBackgroundMaterial(WBP, Mat);
 		FillTag(WBP, SetTag);
@@ -1840,7 +2129,13 @@ namespace
 			UK2Node_ComponentBoundEvent* Commit = BindEvent(WBP, EG, G, TEXT("Box"), UEditableText::StaticClass(), TEXT("OnTextCommitted"));
 			G.Chain({Commit, G.CallSelf(FName(CommitFn))});
 		}
-		if (!Compile(WBP) || !Save(WBP)) return nullptr;
+		if (!Compile(WBP)) return nullptr;
+		// Core story 27: the widget itself takes keyboard focus (the window's Lua focus model moves it here).
+		UUserWidget* CDO = CastChecked<UUserWidget>(WBP->GeneratedClass->GetDefaultObject());
+		CDO->SetIsFocusable(true);
+		CDO->MarkPackageDirty();
+		UE_LOG(LogCoreGen, Display, TEXT("SLIDER %s class default focusable=%s"), *WBP->GetPathName(), CDO->IsFocusable() ? TEXT("true") : TEXT("false"));
+		if (!Save(WBP)) return nullptr;
 		return WBP;
 	}
 

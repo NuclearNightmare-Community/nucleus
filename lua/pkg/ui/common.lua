@@ -190,6 +190,14 @@ end
 -- registered then (the poll does it) and core's own asset reads there use the cache only.
 C.inDispatch = 0
 
+-- Core story 27: fn(el) run (under pcall) when a click, a drag end or a commit reached one of this mod's elements, so a
+-- window's keyboard focus model follows the mouse (focus.lua sets it). nil: nothing.
+C.onUse = nil
+function C.used(el)
+    local f = C.onUse
+    if f then pcall(f, el) end
+end
+
 -- One log line per key for the life of this Lua state.
 local warned = {}
 function C.warnOnce(key, fmt, ...)

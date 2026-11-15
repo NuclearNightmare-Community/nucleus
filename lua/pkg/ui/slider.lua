@@ -214,6 +214,7 @@ local function target(ctx)
     local cur = el.ref and C.deref(el.ref)
     if not cur or cur:GetAddress() ~= w:GetAddress() then S.ignored = S.ignored + 1 return nil end -- not its live widget
     if not el.enabled or not chainVisible(el) then S.dropped = S.dropped + 1 return nil end
+    C.used(el) -- core story 27: a window's focus follows the mouse
     return el, w
 end
 
@@ -261,6 +262,19 @@ local function onCommit(ctx)
     local changed = v ~= el.value
     el.value = v
     settle(el, w, changed)
+end
+
+-- Core story 27: Left / Right on the focused slider: value +- step, clamped to min..max (a Default slider starts from
+-- defaultValue); onChange once when the value changed. True when it changed.
+function SL._nudge(el, w, dir)
+    if not el.enabled or not chainVisible(el) then S.dropped = S.dropped + 1 return false end
+    local base = el.value ~= nil and el.value or el.default
+    local v = snap(base + dir * el.step, el.min, el.max, el.step)
+    if v == base then return false end -- a Default slider at its end stays Default
+    el.value = v
+    S.nudges = (S.nudges or 0) + 1
+    settle(el, w, true)
+    return true
 end
 
 local function guarded(fn, what)
@@ -408,6 +422,7 @@ function SL.setEnabled(h, enabled)
     if enabled == el.enabled then return end
     el.enabled = enabled
     refresh(el, { enabled = true })
+    X._hostChanged(C.hostOf(el)) -- core story 27: a disabled focused element hands keyboard focus on
 end
 
 function SL.setVisible(h, visible)

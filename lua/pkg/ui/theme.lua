@@ -29,7 +29,17 @@ M.disabledOpacity = 0.45
 
 -- Story 21 (Mod Manager story 2): lists, rows and windows.
 M.listDefault = { background = "dim", padding = "normal" } -- an unstyled list is a visible box, like a panel
+M.listInset = 4 -- core story 27: a list's children keep 4 units clear of its right edge (nothing cut at the scrollbar side)
 M.backdrop = { r = 0, g = 0, b = 0, a = 0.85 }               -- a window's backdrop over the whole viewport
+-- Core story 27 (core 0.12.0): the card a window's content sits on, centred and hugging the content plus padding.
+-- Internal: dependents can't set it. background.game in the game look, background.plain when the game look's assets
+-- can't be loaded; margin: the least space left between the card and each viewport edge (larger content is clamped).
+M.window = {
+    background = { game = { r = 0.012, g = 0.016, b = 0.020, a = 0.92 }, plain = { r = 0.05, g = 0.05, b = 0.05, a = 0.90 } },
+    padding = 24,
+    margin = 32,
+    stackGap = 16,   -- between two non-empty corner stacks side by side or one above the other (the hug rule)
+}
 
 -- Story 21: the game's own look (style.look = "game", the default on the menu and screen hosts), copied from the
 -- title screen's Remaster styles (docs/mod-manager-research.md 1.4). The game's assets are referenced by path and

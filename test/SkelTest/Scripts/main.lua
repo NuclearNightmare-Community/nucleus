@@ -3824,7 +3824,8 @@ local function buildMenu()
         local n = v(canvas) and (try(function() return canvas:GetChildrenCount() end) or 0) or 0
         for i = 0, n - 1 do
             local c = try(function() return canvas:GetChildAt(i) end)
-            if cname(c) == BUTTON_S and try(function() return c.Label:GetText():ToString() end) == "CLOSE" then return c end
+            -- core story 27: BACK replaces CLOSE (the tag #close:<id> stays)
+            if cname(c) == BUTTON_S and try(function() return c.Label:GetText():ToString() end) == "BACK" then return c end
         end
         return nil
     end
@@ -3865,7 +3866,8 @@ local function buildMenu()
         UI.text.create{ id = "atitle", text = "SKEL WINDOW A", place = { screen = MM.A, corner = "top-left" }, style = { font = "title" } }
         UI.button.create{ id = "aopen", label = "OPEN B", place = { screen = MM.A, corner = "bottom-left" },
             onClick = function() MM.aopen = MM.aopen + 1 say("MCLICK aopen %d", MM.aopen) openB() end }
-        local L = UI.list.create{ id = "alist", place = { screen = MM.A, absolute = { anchor = "center", x = 0, y = 0 } }, size = { w = 900, h = 440 }, gap = "tight" }
+        -- core story 27: in a corner, under the title (a centred absolute list would cover the card's corners now)
+        local L = UI.list.create{ id = "alist", place = { screen = MM.A, corner = "top-left" }, size = { w = 900, h = 440 }, gap = "tight" }
         for i = 1, ROWS do
             local r = UI.row.create{ id = "r" .. i, place = { list = L } }
             UI.text.create{ id = "c1-" .. i, text = "SKEL MOD " .. i, place = { row = r, fill = 3 }, style = { font = "body" } }
@@ -4062,7 +4064,9 @@ local function buildMenu()
         local font = try(function() return oname(c1.Text.Font.FontObject) end) or "?"
         local rowBrush = try(function() return oname(rw.Background.Background.ResourceObject) end) or "?"
         local cb = closeButtonIn(prop(s, "Canvas"))
-        local cbN = try(function() return oname(cb.Btn.WidgetStyle.Normal.ResourceObject) end) or "?"
+        -- core story 27: a focused BACK shows its hover brush as its normal one; its own style is then SavedStyle
+        local cbStyle = try(function() return cb.FocusLook end) == true and try(function() return cb.SavedStyle end) or try(function() return cb.Btn.WidgetStyle end)
+        local cbN = try(function() return oname(cbStyle.Normal.ResourceObject) end) or "?"
         local cbH = try(function() return oname(cb.Btn.WidgetStyle.Hovered.ResourceObject) end) or "?"
         local cbF = try(function() return oname(cb.Label.Font.FontObject) end) or "?"
         check(font:find("AlumniSans", 1, true) ~= nil and cbF:find("AlumniSans", 1, true) ~= nil, "MLOOKGAME fonts: row text %s, Close label %s (AlumniSans)", font, cbF)
@@ -4544,7 +4548,7 @@ local function buildMenu()
             local UIx = UI
             CT.W = UIx.screen.open{ id = "CT", close = true }
             UIx.text.create{ id = "ct.title", text = "SKEL CONTROLS", place = { screen = CT.W, corner = "top-left" }, style = { font = "title" } }
-            CT.list = UIx.list.create{ id = "ct.list", place = { screen = CT.W, absolute = { anchor = "center", x = 0, y = 0 } }, size = { w = 900, h = 420 }, gap = "tight" }
+            CT.list = UIx.list.create{ id = "ct.list", place = { screen = CT.W, corner = "top-left" }, size = { w = 900, h = 420 }, gap = "tight" }
             local function row(n, label)
                 local r = UIx.row.create{ id = "ct.row" .. n, place = { list = CT.list } }
                 UIx.text.create{ id = "ct.l" .. n, text = label, place = { row = r, fill = 2 } }
@@ -4907,6 +4911,341 @@ local function buildMenu()
         end)
     end
     MM.controlSteps()
+    -- ---- core story 27 (UI-12): the card, BACK, the "compact" gap and keyboard / gamepad focus, over the third menu.
+    -- The kb-* bad-input group (gap values and texts, every hook-noise row, an off-thread nav call, focus with nothing
+    -- focusable), then a key walk on window KB (12 rows TOGGLE | name | gear in a 300-high list, a choice and a slider)
+    -- with real keys: KFOCUS <window> <id> after every key (the focus model and the target's HasKeyboardFocus agree),
+    -- KCLICK, KCHOICE, KSLIDER, KSCROLL, KCLOSE and KRETURN; CARD (centred, hugging, padded) and GEOM (no row child cut
+    -- at the right) on story 26's window and a Mod-Manager-shaped one. Shots kb-panel, kb-focus, kb-back, kb-controls,
+    -- kb-mm-rows. Hung off MM (main.lua is at Lua's 200-locals limit).
+    MM.kbSteps = function()
+        local KB = { n = {}, cases = 0 }
+        local LO = CORE:lower()
+        local UIP = LO .. ".ui"
+        local FO = require(LO .. ".ui.focus")
+        local CC = require(LO .. ".ui.common")
+        local SCR = require(LO .. ".ui.screen")
+        local NROWS = 12
+        local function f(fn, ...) local a = table.pack(...) return function() return fn(table.unpack(a, 1, a.n)) end end
+        local function kcase(id, desc, fn, expect) KB.cases = KB.cases + 1; case("menu3.kb-" .. id, desc, fn, expect) end
+        local function hits(id) return KB.n[id] or 0 end
+        local function hit(id) return function() KB.n[id] = (KB.n[id] or 0) + 1 say("KCB %s %d", id, KB.n[id]) end end
+        local function win(tagId) local s, c = screenWith(tagId) return s, c end
+        local function sizeOf(w) local d = try(function() return w:GetDesiredSize() end) return d and d.X or -1, d and d.Y or -1 end
+
+        -- KFOCUS: the model's element is want, and its target holds keyboard focus.
+        local function kfocus(window, want)
+            local id = SCR.stats().focus
+            local el = CC.els[want]
+            local t = el and FO._targetOf(el)
+            local has = t ~= nil and FO._hasFocus(t)
+            check(id == want and has, "KFOCUS %s %s (model %s, HasKeyboardFocus %s)", window, want, tostring(id), bool(has))
+        end
+        -- One real key, then (0.8 s later) the checks.
+        local function kkey(k, label, after)
+            step("kb: key " .. label, function()
+                local done = request("key " .. k)
+                local t
+                return function()
+                    if not done() then return false end
+                    t = t or os.clock() + 0.8
+                    if os.clock() < t then return false end
+                    local ok, err = pcall(after)
+                    if not ok then check(false, "KSTEP %s threw: %s", label, firstLine(err)) end
+                    return true
+                end, 30, "key " .. label
+            end)
+        end
+
+        -- CARD: the card centred in the viewport (within 1 unit), its inner area the content's hug, the padding 24.
+        local function cardCheck(window, tagId)
+            local s = win(tagId)
+            local sc = scale(menu())
+            local root, card, inner = absR(s), absR(prop(s, "Card")), absR(prop(s, "Inner"))
+            local st = SCR.stats().card
+            if not check(root and card and inner and st, "CARD %s measurable (root %s, card %s, inner %s)", window, rsA(root), rsA(card), rsA(inner)) then return end
+            local dx = ((card.l + card.r) / 2 - (root.l + root.r) / 2) / sc
+            local dy = ((card.t + card.b) / 2 - (root.t + root.b) / 2) / sc
+            check(math.abs(dx) <= 1 and math.abs(dy) <= 1, "CARD %s centred: offset (%.2f, %.2f) units", window, dx, dy)
+            local iw, ih = (inner.r - inner.l) / sc, (inner.b - inner.t) / sc
+            check(math.abs(iw - st.w) <= 1 and math.abs(ih - st.h) <= 1 and (st.clamped or (math.abs(st.w - st.contentW) < 0.01 and math.abs(st.h - st.contentH) < 0.01)),
+                "CARD %s hugs: inner %.1fx%.1f, hug %.1fx%.1f (content %.1fx%.1f, clamped %s)", window, iw, ih, st.w, st.h, st.contentW, st.contentH, bool(st.clamped))
+            local pl, pt = (inner.l - card.l) / sc, (inner.t - card.t) / sc
+            local pr, pb = (card.r - inner.r) / sc, (card.b - inner.b) / sc
+            check(math.abs(pl - 24) <= 1 and math.abs(pt - 24) <= 1 and math.abs(pr - 24) <= 1 and math.abs(pb - 24) <= 1,
+                "CARD %s padding %.1f/%.1f/%.1f/%.1f (24)", window, pl, pt, pr, pb)
+            local back = childTagged(prop(s, "Canvas"), "#close:" .. window)
+            local br = absR(back)
+            check(back ~= nil and br and math.abs((br.l - inner.l) / sc - 16) <= 1 and math.abs((inner.b - br.b) / sc - 16) <= 1
+                and try(function() return back.Label:GetText():ToString() end) == "BACK",
+                "CARD %s BACK bottom-left (%s in %s), label BACK", window, rsA(br), rsA(inner))
+        end
+
+        -- GEOM: per fully visible row of a list, its last child: arranged vs desired size and right edge vs the list's
+        -- visible right (the ScrollBox's and its content's, whichever is smaller), layout units.
+        local function geom(window, lw, rowIds, lastIds, fixed)
+            local sc = scale(menu())
+            local scroll, vbox = prop(lw, "Scroll"), prop(lw, "VBox")
+            local sr, vr = absR(scroll), absR(vbox)
+            if not check(sr and vr, "GEOM %s list measurable (scroll %s, content %s)", window, rsA(sr), rsA(vr)) then return end
+            local visR = math.min(sr.r, vr.r)
+            local bw, bh = sizeOf(prop(lw, "Box"))
+            say("GEOM %s list box desired %.1fx%.1f scroll %.1fx%.1f content %.1fx%.1f scrollRight %.1f contentRight %.1f",
+                window, bw, bh, (sr.r - sr.l) / sc, (sr.b - sr.t) / sc, (vr.r - vr.l) / sc, (vr.b - vr.t) / sc, sr.r / sc, vr.r / sc)
+            local n, worstRight, worstSize = 0, -1e9, 0
+            for i, rid in ipairs(rowIds) do
+                local rw = childTagged(vbox, rid)
+                local rr = absR(rw)
+                if rr and rr.t >= sr.t - 0.5 and rr.b <= sr.b + 0.5 and rr.b > rr.t then
+                    local hb = prop(rw, "HBox")
+                    local hr = absR(hb)
+                    local last = childTagged(hb, lastIds[i])
+                    local lr = absR(last)
+                    local dw, dh = sizeOf(last)
+                    if lr and hr then
+                        local aw, ah = (lr.r - lr.l) / sc, (lr.b - lr.t) / sc
+                        local gap = (visR - lr.r) / sc
+                        say("GEOM %s row %s rowRect %s hbox %s (right %.1f) last %s arranged %.1fx%.1f desired %.1fx%.1f right %.1f visibleRight %.1f space %.1f",
+                            window, rid, rsA(rr), rsA(hr), hr.r / sc, lastIds[i], aw, ah, dw, dh, lr.r / sc, visR / sc, gap)
+                        n = n + 1
+                        worstRight = math.max(worstRight, -gap)
+                        if fixed then worstSize = math.max(worstSize, math.abs(aw - dw), math.abs(ah - dh)) end
+                    end
+                end
+            end
+            check(n >= 1 and worstRight <= -4 + 0.01, "GEOM %s no-clip: %d visible rows, every last child's right edge at least 4 units inside the visible right (worst space %.1f)", window, n, -worstRight)
+            if fixed then check(n >= 1 and worstSize <= 0.5, "GEOM %s fixed-size last children arranged at their desired size (worst %.2f units)", window, worstSize) end
+        end
+
+        -- ---- the kb-* group
+        step("kb: cases", function()
+            local LC, RC = UIP .. ".list.create: ", UIP .. ".row.create: "
+            KB.stok = UI.screen.watch(function(_, info)
+                MM.sev[#MM.sev + 1] = { event = info.event, id = info.id, reason = info.reason }
+                say("SEVENT %d %s id=%s reason=%s", #MM.sev, tostring(info.event), tostring(info.id), tostring(info.reason))
+            end)
+            KB.W = UI.screen.open{ id = "KB", close = true }
+            UI.text.create{ id = "kb.title", text = "SKEL KEYS", place = { screen = KB.W, corner = "top-left" }, style = { font = "title" } }
+            kcase("gap-compact", "ui.list.create{ gap = 'compact' } [control]", function()
+                local h = UI.list.create{ id = "kb.gl", place = { screen = KB.W, corner = "top-right" }, size = { w = 100, h = 60 }, gap = "compact" }
+                local units = CC.els["kb.gl"] and CC.els["kb.gl"].gapUnits
+                UI.list.remove(h)
+                return units
+            end, E.ret("4", function(r) return r[1] == 4 end))
+            kcase("gap-default", "ui.list.create{} [default gap]", function()
+                local h = UI.list.create{ id = "kb.gd", place = { screen = KB.W, corner = "top-right" }, size = { w = 100, h = 60 } }
+                local g = CC.els["kb.gd"] and CC.els["kb.gd"].gap
+                UI.list.remove(h)
+                return g
+            end, E.ret("'compact'", function(r) return r[1] == "compact" end))
+            kcase("gap-row-compact", "ui.row.create{ gap = 'compact' } [control]", function()
+                local L = UI.list.create{ id = "kb.gr", place = { screen = KB.W, corner = "top-right" }, size = { w = 100, h = 60 } }
+                local r = UI.row.create{ id = "kb.grr", place = { list = L }, gap = "compact" }
+                local u, d = CC.els["kb.grr"].gapUnits, nil
+                local r2 = UI.row.create{ id = "kb.grd", place = { list = L } }
+                d = CC.els["kb.grd"].gap
+                UI.row.remove(r) UI.row.remove(r2) UI.list.remove(L)
+                return u, d
+            end, E.ret("4, 'tight'", function(r) return r[1] == 4 and r[2] == "tight" end))
+            kcase("gap-tiny", "ui.list.create{ gap = 'tiny' }", f(UI.list.create, { id = "kb.gt", place = { screen = KB.W, corner = "top-right" }, size = { w = 100, h = 60 }, gap = "tiny" }),
+                E.err(LC .. "unknown gap 'tiny' (valid: compact, tight, normal, loose)"))
+            kcase("gap-row-tiny", "ui.row.create{ gap = 'tiny' }", f(UI.row.create, { id = "kb.gt2", place = { screen = KB.W, corner = "top-right" }, gap = "tiny" }),
+                E.err(RC .. "unknown gap 'tiny' (valid: compact, tight, normal, loose)"))
+            kcase("gap-place-compact", "place = { corner, gap = 'compact' }", f(UI.text.create, { id = "kb.gp", text = "x", place = { screen = KB.W, corner = "top-right", gap = "compact" } }),
+                E.err(UIP .. ".place: unknown gap 'compact' (valid: tight, normal, loose)"))
+            kcase("gap-panel-compact", "ui.panel.create{ gap = 'compact' }", f(UI.panel.create, { id = "kb.gpp", place = { screen = KB.W, corner = "top-right" }, gap = "compact" }),
+                E.err("unknown gap 'compact' (valid: tight, normal, loose)"))
+            -- hook noise, through the hook's own function with KB's live widget (and stand-ins for the rest)
+            local s = win("kb.title")
+            local function nav(w, dir, act)
+                return function()
+                    pcall(function() w.NavDir = dir; w.NavAction = act; w.NavHandled = false end)
+                    local before = SCR.stats().focus
+                    FO._onNav({ get = function() return w end })
+                    local handled = try(function() return w.NavHandled end)
+                    return handled, SCR.stats().focus == before
+                end
+            end
+            local unhandled = E.ret("false, focus unchanged", function(r) return r[1] == false and r[2] == true end)
+            kcase("nav-dir-99", "<Core>_OnNav with NavDir 99, NavAction 3", nav(s, 99, 3), unhandled)
+            kcase("nav-act-neg", "<Core>_OnNav with NavDir 7, NavAction -1", nav(s, 7, -1), unhandled)
+            kcase("nav-handled", "<Core>_OnNav with NavDir Down [control]", nav(s, 3, 3), E.ret("true", function(r) return r[1] == true end))
+            local foreign = { NavDir = 3, NavAction = 3, NavHandled = false, IsValid = function() return true end, GetAddress = function() return 1 end,
+                CoreTag = { ToString = function() return LO .. ":OtherMod:#screen:KB" end } }
+            kcase("nav-foreign", "<Core>_OnNav on another mod's window", nav(foreign, 3, 3), unhandled)
+            local stale = { NavDir = 3, NavAction = 3, NavHandled = false, IsValid = function() return true end, GetAddress = function() return 2 end,
+                CoreTag = { ToString = function() return LO .. ":" .. CORE .. "SkelTest:#screen:KB" end } }
+            kcase("nav-stale", "<Core>_OnNav on a stale widget tagged as KB", nav(stale, 3, 3), unhandled)
+            local throwing = { IsValid = function() return true end, CoreTag = { ToString = function() error("boom") end } }
+            kcase("nav-throwing-tag", "<Core>_OnNav on a widget whose tag read throws", nav(throwing, 3, 3), E.ret("no handled, no fault", function(r) return r[1] ~= true and FO.stats().faults == 0 end))
+            KB.X = UI.screen.open{ id = "KBX", close = true }
+            UI.text.create{ id = "kbx.t", text = "X", place = { screen = KB.X, corner = "top-left" } }
+            local sx = win("kbx.t")
+            UI.screen.close(KB.X)
+            kcase("nav-closed", "<Core>_OnNav on a window closed mid-event", nav(sx, 3, 3), unhandled)
+            KB.N = UI.screen.open{ id = "KBN", close = false }
+            UI.text.create{ id = "kbn.t", text = "NOTHING TO FOCUS", place = { screen = KB.N, corner = "top-left" } }
+            kcase("nofocus", "a window with only text and close = false: the window itself holds focus", function()
+                local sn = win("kbn.t")
+                return try(function() return sn:HasKeyboardFocus() end), SCR.stats().focus
+            end, E.ret("true, nil", function(r) return r[1] == true and r[2] == nil end))
+            kcase("nofocus-keys", "<Core>_OnNav Down on it: Handled, nothing moves", nav(win("kbn.t"), 3, 3), E.ret("true", function(r) return r[1] == true end))
+            kcase("has-focus", "core.has('ui.screen.focus'), ('ui.screen.panel'), ('ui.gap.compact')", function()
+                return core.has("ui.screen.focus"), core.has("ui.screen.panel"), core.has("ui.gap.compact")
+            end, E.ret("true, true, true", function(r) return r[1] == true and r[2] == true and r[3] == true end))
+            return msAfter(0.5), 3
+        end)
+        -- Escape on the close = false window: nothing closes.
+        kkey("ESCAPE", "escape on KBN", function()
+            check(UI.screen.isOpen(KB.N) and rawequal(UI.screen.top(), KB.N) and count("CreateServer_C") == 0, "KNOCLOSE Escape on a close = false window: it stays open")
+            UI.screen.close(KB.N)
+        end)
+        step("kb: off-thread", function()
+            local done = false
+            LoopAsync(10, function()
+                local ok, err = pcall(function()
+                    local before = FO.stats().ignored
+                    local fake = { IsValid = function() return true end }
+                    KB.cases = KB.cases + 1
+                    case("menu3.kb-nav-offthread", "<Core>_OnNav [off thread]", function()
+                        FO._onNav({ get = function() return fake end })
+                        return FO.stats().ignored > before, FO.stats().faults
+                    end, E.ret("ignored, no fault", function(r) return r[1] == true and r[2] == 0 end))
+                end)
+                if not ok then check(false, "CASE menu3.kb-off block threw: %s", firstLine(err)) end
+                done = true
+                return true
+            end)
+            return function() return done end, 10, "kb off-thread case"
+        end)
+        step("kb: cases done", function() check(true, "KBCASES ran %d cases", KB.cases) end)
+
+        -- ---- window KB: 12 rows TOGGLE | name | gear in a 300-high list, a choice and a slider, BACK
+        step("kb: window", function()
+            local L = UI.list.create{ id = "kb.list", place = { screen = KB.W, corner = "top-left" }, size = { w = 640, h = 300 } }
+            for i = 1, NROWS do
+                local r = UI.row.create{ id = "kb.r" .. i, place = { list = L } }
+                UI.button.create{ id = "kb.t" .. i, label = "TOGGLE", place = { row = r }, onClick = hit("kb.t" .. i) }
+                UI.text.create{ id = "kb.x" .. i, text = "SKEL KEY ROW " .. i, place = { row = r, fill = 4 }, style = { overflow = "ellipsis" } }
+                UI.button.create{ id = "kb.g" .. i, icon = { icon = "gear" }, iconSize = 28, dimmed = true, place = { row = r }, onClick = hit("kb.g" .. i) }
+            end
+            KB.ch = UI.choice.create{ id = "kb.ch", options = { "LOW", "MID", "HIGH" }, selected = 1, place = { screen = KB.W, corner = "top-right" },
+                onChange = function(_, i) KB.n["kb.ch"] = hits("kb.ch") + 1 say("KCB kb.ch %d %d", KB.n["kb.ch"], i) end }
+            KB.sl = UI.slider.create{ id = "kb.sl", min = 0, max = 10, step = 1, defaultValue = 5, hint = "DEFAULT (5)", place = { screen = KB.W, corner = "top-right" },
+                onChange = function(_, v) KB.n["kb.sl"] = hits("kb.sl") + 1 say("KCB kb.sl %d %s", KB.n["kb.sl"], tostring(v)) end }
+            -- reopen, so focus goes where an open puts it
+            UI.screen.close(KB.W)
+            KB.W = UI.screen.open{ id = "KB", close = true }
+            return msAfter(1.5), 4
+        end)
+        step("kb: opened", function()
+            kfocus("KB", "kb.t1")
+            local t1 = childTagged(prop(childTagged(prop(childTagged(prop(win("kb.title"), "Canvas"), "kb.list"), "VBox"), "kb.r1"), "HBox"), "kb.t1")
+            check(try(function() return t1.FocusLook end) == true, "KLOOK the focused TOGGLE shows its focus look")
+            cardCheck("KB", "kb.title")
+        end)
+        shot("kb-panel")
+        kkey("DOWN", "down 1", function() kfocus("KB", "kb.t2") end)
+        kkey("RIGHT", "right 1", function() kfocus("KB", "kb.g2") end)
+        kkey("RIGHT", "right 2", function() kfocus("KB", "kb.g2") end)
+        kkey("LEFT", "left 1", function() kfocus("KB", "kb.t2") end)
+        kkey("ENTER", "enter 1", function()
+            check(hits("kb.t2") == 1 and hits("kb.t1") == 0, "KCLICK Enter on the focused TOGGLE ran its onClick exactly once (%d)", hits("kb.t2"))
+            kfocus("KB", "kb.t2")
+        end)
+        shot("kb-focus")
+        for i = 3, 10 do kkey("DOWN", "down to row " .. i, function() kfocus("KB", "kb.t" .. i) end) end
+        step("kb: scroll", function()
+            local lw = childTagged(prop(win("kb.title"), "Canvas"), "kb.list")
+            local sr, rr = absR(prop(lw, "Scroll")), absR(childTagged(prop(lw, "VBox"), "kb.r10"))
+            local off = try(function() return lw.Scroll:GetScrollOffset() end) or -1
+            check(sr and rr and off > 0 and rr.t >= sr.t - 0.5 and rr.b <= sr.b + 0.5, "KSCROLL row 10 %s fully inside the list's visible area %s (offset %.1f)", rsA(rr), rsA(sr), off)
+        end)
+        kkey("DOWN", "down to row 11", function() kfocus("KB", "kb.t11") end)
+        kkey("DOWN", "down to row 12", function() kfocus("KB", "kb.t12") end)
+        kkey("DOWN", "down to the choice", function() kfocus("KB", "kb.ch") end)
+        kkey("RIGHT", "right on the choice", function()
+            check(UI.choice.get(KB.ch) == 2 and hits("kb.ch") == 1, "KCHOICE Right on the focused choice: option %s, onChange %d", tostring(UI.choice.get(KB.ch)), hits("kb.ch"))
+            kfocus("KB", "kb.ch")
+        end)
+        kkey("ENTER", "enter on the choice", function()
+            check(UI.choice.get(KB.ch) == 2 and hits("kb.ch") == 1, "KCHOICE Enter on the focused choice: nothing changes")
+        end)
+        kkey("DOWN", "down to the slider", function() kfocus("KB", "kb.sl") end)
+        kkey("RIGHT", "right on the slider", function()
+            check(UI.slider.get(KB.sl) == 6 and hits("kb.sl") == 1, "KSLIDER Right on the Default slider: %s (defaultValue + step), onChange %d", tostring(UI.slider.get(KB.sl)), hits("kb.sl"))
+        end)
+        kkey("LEFT", "left on the slider", function()
+            check(UI.slider.get(KB.sl) == 5 and hits("kb.sl") == 2, "KSLIDER Left: %s, onChange %d", tostring(UI.slider.get(KB.sl)), hits("kb.sl"))
+            kfocus("KB", "kb.sl")
+        end)
+        kkey("DOWN", "down to back", function() kfocus("KB", "#close:KB") end)
+        shot("kb-back")
+        step("kb: window KB2", function()
+            KB.since = #MM.sev
+            KB.W2 = UI.screen.open{ id = "KB2", close = true }
+            UI.text.create{ id = "kb2.t", text = "SKEL KEYS TWO", place = { screen = KB.W2, corner = "top-left" }, style = { font = "heading" } }
+            return msAfter(1.2), 4
+        end)
+        step("kb: KB2 focus", function() kfocus("KB2", "#close:KB2") end)
+        kkey("ESCAPE", "escape on KB2", function()
+            check(sevAfter(KB.since, "closed", "KB2", "close")() and not UI.screen.isOpen(KB.W2) and UI.screen.isOpen(KB.W), "KCLOSE reason=close Escape closed the top window KB2 only")
+            check(SCR.stats().focus == "#close:KB" and FO._hasFocus(FO._targetOf(CC.els["#close:KB"])), "KRETURN KB got its last-focused element back (%s)", tostring(SCR.stats().focus))
+            KB.since = #MM.sev
+        end)
+        kkey("ESCAPE", "escape on KB", function()
+            check(sevAfter(KB.since, "closed", "KB", "close")() and not UI.screen.isOpen(KB.W) and #liveAll(SCREEN_SHORT) == 0, "KCLOSE reason=close Escape closed KB, no window left")
+            check(hasKeyFocus(menu()), "KRETURN the menu holds keyboard focus again")
+        end)
+
+        -- ---- story 26's window in the card, and a Mod-Manager-shaped window: CARD, GEOM, shots
+        step("kb: controls window", function()
+            KB.CT = UI.screen.open{ id = "CT", close = true }
+            return msAfter(1.5), 4
+        end)
+        step("kb: controls geometry", function()
+            local _, c = screenWith("ct.title")
+            local lw = childTagged(c, "ct.list")
+            local rows, lasts = {}, {}
+            for n, last in ipairs({ "ct.cb", "ct.ch", "ct.rg", "ct.s1", "ct.s2", "ct.dsl" }) do rows[n], lasts[n] = "ct.row" .. n, last end
+            geom("CT", lw, rows, lasts, false)
+            geom("CT-checkbox", lw, { "ct.row1" }, { "ct.cb" }, true)
+            cardCheck("CT", "ct.title")
+        end)
+        shot("kb-controls")
+        step("kb: controls close", function() UI.screen.close(KB.CT) return msAfter(0.8), 3 end)
+        step("kb: mod manager rows", function()
+            KB.MM = UI.screen.open{ id = "KBM", close = true }
+            UI.text.create{ id = "kbm.h", text = "MANAGE MODS", place = { screen = KB.MM, corner = "top-left" }, style = { font = "title" } }
+            local L = UI.list.create{ id = "kbm.list", place = { screen = KB.MM, corner = "top-left" }, size = { w = 720, h = 400 } }
+            for i = 1, 8 do
+                local r = UI.row.create{ id = "kbm.r" .. i, place = { list = L } }
+                UI.image.create{ id = "kbm.i" .. i, image = { game = "/Game/Graphics/MainMenu/Textures/checkbox_ticked.checkbox_ticked" }, size = 28, place = { row = r } }
+                UI.text.create{ id = "kbm.n" .. i, text = "A MOD WITH A RATHER LONG NAME NUMBER " .. i, place = { row = r, fill = 4 }, style = { overflow = "ellipsis" } }
+                UI.text.create{ id = "kbm.v" .. i, text = "1.0." .. i, place = { row = r, fill = 1 } }
+                UI.text.create{ id = "kbm.s" .. i, text = "ACTIVE", place = { row = r, fill = 1 }, style = { font = "small" } }
+                UI.button.create{ id = "kbm.g" .. i, icon = { icon = "gear" }, iconSize = 28, dimmed = true, place = { row = r }, onClick = hit("kbm.g" .. i) }
+            end
+            return msAfter(1.5), 4
+        end)
+        step("kb: mod manager geometry", function()
+            local _, c = screenWith("kbm.h")
+            local lw = childTagged(c, "kbm.list")
+            local rows, lasts = {}, {}
+            for i = 1, 8 do rows[i], lasts[i] = "kbm.r" .. i, "kbm.g" .. i end
+            geom("KBM", lw, rows, lasts, true)
+            cardCheck("KBM", "kbm.h")
+            kfocus("KBM", "kbm.g1")
+        end)
+        shot("kb-mm-rows")
+        step("kb: mod manager close", function()
+            UI.screen.close(KB.MM)
+            UI.screen.unwatch(KB.stok)
+            check(#liveAll(SCREEN_SHORT) == 0, "KBEND every window closed")
+            return msAfter(0.8), 3
+        end)
+    end
+    MM.kbSteps()
 end
 
 -- ---------------------------------------------------------------- runner (game thread, every 250 ms)
