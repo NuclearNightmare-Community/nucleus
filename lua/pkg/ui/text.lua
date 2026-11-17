@@ -41,6 +41,10 @@
 -- Core story 31 (core 0.13.0): the game's own screens as hosts (game.lua; first "createServer"): every open is a new
 -- screen, so its elements get new widgets in its root canvas at the poll's opened, and closed / lost free their
 -- handles, as for a window. They have a cursor and the game look, like the menu.
+--
+-- Core story 32 (core 0.14.0): on a game screen an element can also sit inside one of the game's own boxes, at a
+-- position among the game's children (place { container = <name>, after | before | index | at }); the insert pass
+-- (below ensureMenu) attaches it there and rebuilds the box once per open.
 local BASE = (...):gsub("%.ui%.text$", "")
 local C = require(BASE .. ".ui.common")
 local H = require(BASE .. ".ui.hud")
@@ -753,7 +757,9 @@ local function attachOne(el, hostObj, container, byId, reason, report, steps)
         P.applyVisibility(el, w) -- before it joins the container, so a hidden element never flashes
         C.pa("attach.vis", t)
         t = C.pt()
-        if el.panel then C.count(); container:AddChild(w) else C.count(); container:AddChildToCanvas(w) end
+        -- Core story 32: an element in a game container joins it in the insert pass, at its position (never appended here).
+        if el.panel then C.count(); container:AddChild(w)
+        elseif not el.place.container then C.count(); container:AddChildToCanvas(w) end
         C.pa("attach.add", t)
         how, fresh = "created", true
         C.stats.attachCreated = C.stats.attachCreated + 1
@@ -780,7 +786,7 @@ local function attachOne(el, hostObj, container, byId, reason, report, steps)
     if not fresh then el.appliedVis = nil end
     if el.panel then el.padKey = fresh and "0" or nil end
     if el.children then attachChildren(el, w, hostObj, fresh, reason, report, steps) end
-    if C.debugOn() and not el.panel then D.schedule(el, "attach") end -- story 12: overlap check about 1 s later (debug only, HUD only)
+    if C.debugOn() and not el.panel and not el.place.container then D.schedule(el, "attach") end -- story 12: overlap check about 1 s later (debug only, HUD only)
     -- DEBUG only: a log line costs 0.3-0.8 ms on the game thread, and a successful attach is routine. Failures keep
     -- their INFO/WARN lines (onHud, warnOnce).
     if report then
@@ -1187,7 +1193,8 @@ local function attachHostEls(host, obj, canvas, byId, reason, skipLive, jpath)
     local n, pending, did = 0, nil, {}
     local live = liveIn(canvas)
     for _, el in ipairs(C.order) do
-        if not el.removed and el.place.host == host then
+        -- core story 32: an element in a game container attaches in the insert pass for its container
+        if not el.removed and el.place.host == host and not el.place.container then
             n = n + 1
             if not (skipLive and live(el) and not (el.children ~= nil and liveChildrenMissing(el))) then
                 local ok, res = pcall(attachOne, el, obj, canvas, byId, reason, report, steps)
@@ -1490,6 +1497,13 @@ local function attachNow(el, reason)
         return
     end
     local host = el.place.host
+    -- Core story 32: an element in a game container attaches by the insert pass for its container.
+    if el.place.container then
+        local ad = hostA(host)
+        local s = ad and ad.poll()
+        if s then X._insertPass(host, s, el.place.container, reason) end
+        return
+    end
     local obj, canvas = liveHost(host)
     if not obj then return end
     local byId = {}
@@ -1591,21 +1605,316 @@ function X._tickHost(host, obj)
 end
 X._ensureMenu = function() ensureMenu() end
 
+-- ---------------------------------------------------------------- core story 32: insert into a game container
+-- An element placed { host = <game screen>, container = <name>, after | before | index | at } lives in one of the game's
+-- own boxes (a VerticalBox, HorizontalBox or ScrollBox), found by name in the open screen's widget tree (a bounded
+-- walk). Box panels only append (InsertChildAt isn't reflected), so the insert pass attaches every element of the box,
+-- works out the wanted order (P.insertOrder: positions count the game's children only), and rebuilds the box once:
+-- from the first child out of order, every child is removed and added back in the wanted order, each game child with
+-- its saved slot values (padding, size, alignment; plain Lua values). Nothing is rebuilt when the order is right. The
+-- game's children are never changed otherwise. Another mod's core widgets in the box follow the game child before them.
+-- Runs at the poll's opened and from a dependent's own create / place while the screen is open (never inside a game
+-- hook). A missing anchor puts the element at the end and a missing container leaves it pending until the next open,
+-- each with one WARN for the life of the Lua state.
+local INSERT_CLASSES = { VerticalBox = true, HorizontalBox = true, ScrollBox = true }
+local INSERT_CLASS_NAMES = "a VerticalBox, HorizontalBox or ScrollBox"
+local WALK_MAX, WALK_DEPTH = 4096, 32
+-- host -> { path = <the screen's path>, refs = { name -> weak handle of the box }, missing = { name -> why } }
+local boxCache = {}
+
+local function widgetNameOf(w)
+    local ok, n = pcall(function() return w:GetFName():ToString() end)
+    return ok and type(n) == "string" and n or nil
+end
+local function classNameOf(w)
+    local ok, n = pcall(function() return w:GetClass():GetFName():ToString() end)
+    return ok and type(n) == "string" and n or nil
+end
+local function childCountOf(w)
+    local ok, n = pcall(function() return w:GetChildrenCount() end)
+    return ok and tonumber(n) or 0
+end
+local function childAt(w, i)
+    local ok, c = pcall(function() return w:GetChildAt(i) end)
+    return ok and C.valid(c) and c or nil
+end
+
+-- The widgets named in want (name -> true; left of them), depth-first from root in child order: the first of each name.
+-- At most WALK_MAX widgets and WALK_DEPTH levels; user widgets inside (a picker) are not entered (no children).
+local function findNamed(root, want, left)
+    local found = {}
+    local ws, ds = { root }, { 0 }
+    local seen = 0
+    while #ws > 0 and left > 0 do
+        local w, d = ws[#ws], ds[#ds]
+        ws[#ws], ds[#ds] = nil, nil
+        seen = seen + 1
+        if seen > WALK_MAX then
+            C.warnOnce("insert walk", "ui: the open screen has more than %d widgets; containers past them are not found", WALK_MAX)
+            break
+        end
+        local nm = widgetNameOf(w)
+        if nm and want[nm] and not found[nm] then found[nm] = w; left = left - 1 end
+        if d < WALK_DEPTH then
+            for i = childCountOf(w) - 1, 0, -1 do
+                local c = childAt(w, i)
+                if c then ws[#ws + 1], ds[#ds + 1] = c, d + 1 end
+            end
+        end
+    end
+    return found
+end
+
+local function dropBoxes(host)
+    local bc = boxCache[host]
+    if not bc then return end
+    for _, r in pairs(bc.refs) do pcall(C.free, r) end
+    boxCache[host] = nil
+end
+
+-- The boxes of names (a list) on the open screen s: name -> box (valid only in this callback). Found once per open
+-- and kept as weak handles; a name not found (or not a box) is remembered as missing until the next open.
+local function boxesOf(host, s, names)
+    local sp = C.pathOf(s)
+    local bc = boxCache[host]
+    if not bc or bc.path ~= sp then
+        dropBoxes(host)
+        bc = { path = sp, refs = {}, missing = {} }
+        boxCache[host] = bc
+    end
+    local out, want, left = {}, {}, 0
+    for _, nm in ipairs(names) do
+        local r = bc.refs[nm]
+        local okD, w = pcall(C.deref, r)
+        if r and okD and w then out[nm] = w
+        elseif not bc.missing[nm] then
+            if r then pcall(C.free, r); bc.refs[nm] = nil end
+            want[nm] = true
+            left = left + 1
+        end
+    end
+    if left > 0 then
+        local root = G._rootOf(host, s)
+        local found = root and findNamed(root, want, left) or {}
+        for nm in pairs(want) do
+            local w = found[nm]
+            local cls = w and classNameOf(w)
+            if w and INSERT_CLASSES[cls] then
+                out[nm] = w
+                local okR, h = pcall(C.ref, w)
+                if okR then bc.refs[nm] = h end
+            else
+                bc.missing[nm] = w and ("it is a " .. tostring(cls) .. ", not " .. INSERT_CLASS_NAMES) or ("no widget of that name is in the open screen")
+            end
+        end
+    end
+    return out, bc.missing
+end
+
+-- A box child's slot values (plain numbers; nil for what can't be read).
+local function saveSlot(w)
+    local okS, s = pcall(C.prop, w, "Slot")
+    if not (okS and s ~= nil) then return nil end
+    local v = {}
+    pcall(function()
+        local p = s.Padding
+        local m = { Left = tonumber(p.Left), Top = tonumber(p.Top), Right = tonumber(p.Right), Bottom = tonumber(p.Bottom) }
+        if m.Left and m.Top and m.Right and m.Bottom then v.pad = m end
+    end)
+    pcall(function()
+        local z = s.Size
+        local r, val = tonumber(z.SizeRule), tonumber(z.Value)
+        if r and val then v.size = { SizeRule = r, Value = val } end
+    end)
+    pcall(function() v.ha = tonumber(s.HorizontalAlignment) end)
+    pcall(function() v.va = tonumber(s.VerticalAlignment) end)
+    return v
+end
+local function restoreSlot(w, v, name)
+    local okS, s = pcall(C.prop, w, "Slot")
+    if not (okS and s ~= nil) then return end
+    local function set(fn, arg)
+        if arg == nil then return end
+        local ok, err = pcall(function() C.count(); s[fn](s, arg) end)
+        if not ok then C.warnOnce("insert slot " .. name .. fn, "ui: restoring a game child's %s in '%s' failed: %s", fn, name, firstLineOf(err)) end
+    end
+    set("SetPadding", v.pad)
+    set("SetSize", v.size)
+    set("SetHorizontalAlignment", v.ha)
+    set("SetVerticalAlignment", v.va)
+end
+
+-- A box child's core tag (any mod's), or nil for a game widget.
+local function coreTagOf(c)
+    local kind = kindOfClass(classNameOf(c) or "")
+    if not kind then return nil end
+    local t = readTag(c, kind)
+    if t and t:sub(1, #TAG_PREFIX) == TAG_PREFIX then return t end
+    return nil
+end
+
+local function idsOf(els)
+    local ids = {}
+    for i, el in ipairs(els) do
+        if i > 8 then ids[#ids + 1] = "..." break end
+        ids[#ids + 1] = "'" .. el.id .. "'"
+    end
+    return table.concat(ids, ", ")
+end
+
+-- One box: attach its elements (els, creation order), then put the box in the wanted order (one rebuild at most).
+-- Returns the number attached.
+local function insertBox(host, s, name, box, els, reason)
+    local belongs = function(el) return not el.panel and el.place.host == host and el.place.container == name end
+    local okS, byId, orphans = pcall(scan, box, belongs)
+    if okS then
+        for _, o in ipairs(orphans) do removeWidget(o.w) end
+    else
+        byId = {}
+    end
+    local items, ws, done = {}, {}, {}
+    for _, el in ipairs(els) do
+        local ok, res = pcall(attachOne, el, s, box, byId, reason)
+        local w = ok and res and liveWidget(el) or nil
+        if w then
+            local pl = el.place
+            items[#items + 1] = { after = pl.after, before = pl.before, index = pl.index, at = pl.at }
+            ws[#ws + 1], done[#done + 1] = w, el
+        else
+            el.attached = false
+            if not ok then C.warnOnce("attach:" .. el.id, "attach %s: %s", el.id, firstLineOf(res)) end
+        end
+    end
+    -- The box as it is: our widgets, then the game's children (units: a game child and the other mods' core widgets
+    -- after it; those before the first game child lead).
+    local ours = {}
+    for _, w in ipairs(ws) do ours[w:GetAddress()] = true end
+    local cur, units, lead, gameNames = {}, {}, {}, {}
+    for i = 0, childCountOf(box) - 1 do
+        local c = childAt(box, i)
+        if c then
+            cur[#cur + 1] = c
+            if not ours[c:GetAddress()] then
+                if coreTagOf(c) then
+                    if #units == 0 then lead[#lead + 1] = c else table.insert(units[#units], c) end
+                else
+                    units[#units + 1] = { c }
+                    gameNames[#gameNames + 1] = widgetNameOf(c) or ""
+                end
+            end
+        end
+    end
+    local order, missing, pastEnd = P.insertOrder(gameNames, items)
+    for _, k in ipairs(missing) do
+        local a = items[k].after or items[k].before
+        C.warnOnce("insert anchor " .. host .. "|" .. name .. "|" .. a,
+            "ui %s: anchor '%s' is not a child of '%s'; %s '%s' (and any other element placed at it) goes to the end of '%s'",
+            host, a, name, done[k].kind, done[k].id, name)
+    end
+    for _, k in ipairs(pastEnd) do
+        C.warnOnce("insert index " .. host .. "|" .. name .. "|" .. items[k].index,
+            "ui %s: index %d is past the end of '%s' (%d game children); %s '%s' goes to the end",
+            host, items[k].index, name, #gameNames, done[k].kind, done[k].id)
+    end
+    local want = {}
+    for _, c in ipairs(lead) do want[#want + 1] = c end
+    for _, o in ipairs(order) do
+        if o.game then for _, c in ipairs(units[o.game]) do want[#want + 1] = c end
+        else want[#want + 1] = ws[o.item] end
+    end
+    local k = 1
+    while k <= #cur and k <= #want and cur[k]:GetAddress() == want[k]:GetAddress() do k = k + 1 end
+    if k <= #want or k <= #cur then
+        -- From the first child out of order: save the game's slots, take every child out, add them back in order.
+        local saved, removed = {}, 0
+        for i = k, #cur do
+            local c = cur[i]
+            local a = c:GetAddress()
+            if not ours[a] then saved[a] = saveSlot(c) end
+            local ok, err = pcall(function() C.count(); return box:RemoveChild(c) end)
+            if ok then removed = removed + 1
+            else C.warnOnce("insert remove " .. host .. "|" .. name, "ui %s: taking a child out of '%s' failed: %s", host, name, firstLineOf(err)) end
+        end
+        for i = k, #want do
+            local c = want[i]
+            local ok, err = pcall(function() C.count(); box:AddChild(c) end)
+            if ok then
+                local v = saved[c:GetAddress()]
+                if v then restoreSlot(c, v, name) end
+            else
+                C.warnOnce("insert add " .. host .. "|" .. name, "ui %s: putting a child back into '%s' failed: %s", host, name, firstLineOf(err))
+            end
+        end
+        if removed > 0 then C.stats.containerRebuilds = (C.stats.containerRebuilds or 0) + 1 end
+    end
+    for _, el in ipairs(done) do
+        local w = liveWidget(el)
+        if w then
+            el.appliedVis = nil
+            local ok, err = pcall(P.applyVisibility, el, w)
+            if not ok then C.warnOnce("vis:" .. el.id, "%s '%s': SetVisibility failed: %s", el.kind, el.id, firstLineOf(err)) end
+        end
+    end
+    return #done
+end
+
+-- The insert pass of a game screen's host (s: the open screen, valid only in this callback): every container element,
+-- or only those of one container. Returns the number of elements attached.
+local function insertPass(host, s, only, reason)
+    local byName, names = {}, {}
+    for _, el in ipairs(C.order) do
+        local pl = el.place
+        if not el.removed and not el.panel and pl.host == host and pl.container and (only == nil or pl.container == only) then
+            local list = byName[pl.container]
+            if not list then list = {}; byName[pl.container] = list; names[#names + 1] = pl.container end
+            list[#list + 1] = el
+        end
+    end
+    if #names == 0 then return 0 end
+    local boxes, missing = boxesOf(host, s, names)
+    local n = 0
+    for _, nm in ipairs(names) do
+        local els = byName[nm]
+        local box = boxes[nm]
+        if box then
+            local ok, res = pcall(insertBox, host, s, nm, box, els, reason)
+            if ok then n = n + res
+            else C.warnOnce("insert " .. host .. "|" .. nm, "ui %s: inserting into '%s' failed: %s", host, nm, firstLineOf(res)) end
+        else
+            for _, el in ipairs(els) do
+                local w = liveWidget(el)
+                if w then removeWidget(w) end
+                freeRef(el)
+                el.attached = false
+            end
+            C.warnOnce("insert container " .. host .. "|" .. nm,
+                "ui %s: container '%s' is missing (%s; it must be %s, by name); %s stay(s) pending until the next open",
+                host, nm, tostring(missing[nm]), INSERT_CLASS_NAMES, idsOf(els))
+        end
+    end
+    return n
+end
+X._insertPass = insertPass
+
 -- Core story 31: the game screens (createServer). Like a window: every open is a new screen, so its elements get new
 -- widgets in its root canvas at the poll's opened (never inside a hook of the game's), and on closed or lost only their
--- handles are freed (the widgets went, or go, with the screen). Corner stacks settle on the screen's ticks.
+-- handles are freed (the widgets went, or go, with the screen). Corner stacks settle on the screen's ticks. Core story
+-- 32: then the insert pass puts the container elements into the game's boxes.
 local gameWatching = {}
 ensureGame = function(host)
     if gameWatching[host] then return end
     gameWatching[host] = true
     G._watch(host, function(s, info)
         if info.event == "opened" then
-            local canvas = G._canvasOf(host, s)
-            if not canvas then return end -- _canvasOf warned once; the elements stay pending until the next open
             local t0 = C.micros()
-            local n = X._attachHost(host, s, canvas, info.reason)
+            dropBoxes(host)
+            local n = 0
+            local canvas = G._canvasOf(host, s) -- nil: _canvasOf warned once; those elements stay pending until the next open
+            if canvas then n = X._attachHost(host, s, canvas, info.reason) end
+            n = n + insertPass(host, s, nil, info.reason)
             if n > 0 and C.debugOn() then C.log.debug("ui %s attach n=%d in %d us (%s)", host, n, C.micros() - t0, tostring(info.reason)) end
         else
+            dropBoxes(host)
             local freed = X._detachHost(host)
             if freed > 0 and C.debugOn() then C.log.debug("ui %s %s: freed %d widget handle(s) (%s)", host, info.event, freed, tostring(info.reason)) end
         end
@@ -1743,6 +2052,17 @@ local function shown(el)
         if not shown(el.panel) then return false end
         local pw = liveWidget(el.panel)
         container = pw and boxOf(el.panel, pw)
+    elseif el.place.container then
+        -- Core story 32: its parent is the named game box of the open screen, and the screen is drawn.
+        local ad = hostA(el.place.host)
+        if not ad then return false end
+        local obj, drawn = ad.poll()
+        if not obj or not drawn then return false end
+        local okP, p = pcall(function() return w:GetParent() end)
+        if not (okP and C.valid(p) and widgetNameOf(p) == el.place.container) then return false end
+        local okA, sp, pp = pcall(function() return C.pathOf(obj), C.pathOf(p) end)
+        if not (okA and pp:sub(1, #sp + 1) == sp .. ".") then return false end
+        return C.drawn(tonumber(w:GetVisibility()) or 0)
     else
         local ad = hostA(el.place.host)
         if not ad then return false end
@@ -1929,6 +2249,19 @@ placeImpl = function(el, pl)
         attachNow(el, "place on host " .. pl.host)
         return
     end
+    -- Core story 32: into, out of, or within a game container: the same place changes nothing; any other takes the
+    -- widget out (its box closes up) and attaches it again where it now belongs.
+    if el.place.container or pl.container then
+        if el.place.container and pl.container and P.sameInsert(el.place, pl) then
+            if not el.attached then attachNow(el, "place") end
+            return
+        end
+        detach(el)
+        el.place = pl
+        ensureHost(el)
+        attachNow(el, "place in container " .. tostring(pl.container or pl.corner or "canvas"))
+        return
+    end
     el.place = pl
     el.slotKey, el.nearAbsent = nil, false
     if liveWidget(el) then
@@ -1952,7 +2285,7 @@ function X.stats()
     return { elements = n, uobjectCalls = C.stats.uobjectCalls, attachCreated = C.stats.attachCreated,
         attachReused = C.stats.attachReused, handlesFreed = C.stats.handlesFreed, findAllCalls = C.stats.findAllCalls,
         overlapScheduled = C.stats.overlapScheduled, overlapChecks = C.stats.overlapChecks,
-        panelRebuilds = C.stats.panelRebuilds or 0 }
+        panelRebuilds = C.stats.panelRebuilds or 0, containerRebuilds = C.stats.containerRebuilds or 0 }
 end
 
 -- The tag a widget of this mod's element carries (for tests and diagnostics).

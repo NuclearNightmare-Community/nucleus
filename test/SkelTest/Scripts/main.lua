@@ -1981,6 +1981,7 @@ local function badInputCases(phase)
     SETS.NET.badInput(phase) -- core story 22
     SETS.PRES.badInput(phase) -- core story 23
     SETS.GAME.cases(phase) -- core story 31
+    SETS.INS.cases(phase) -- core story 32
     offThreadCases(phase)
 end
 
@@ -5360,6 +5361,9 @@ end
 SETS.GAME = dofile(scriptDir .. "\\gamescreen.lua")({ case = case, E = E, step = step, check = check, say = say, CORE = CORE,
     core = function() return core end, absR = absR, request = request, waitWorld = waitWorld, travel = travel,
     worldName = worldName, taggedIn = taggedIn, PRE_CONNECT = PRE_CONNECT, MENU_MAP = MENU_MAP })
+-- Core story 32: the game-container bad-input cases and the gameinsert scenario (gameinsert.lua; gamescreen.lua's helpers).
+SETS.INS = dofile(scriptDir .. "\\gameinsert.lua")({ case = case, E = E, step = step, check = check, say = say, CORE = CORE,
+    core = function() return core end, absR = absR, request = request, waitWorld = waitWorld, worldName = worldName, taggedIn = taggedIn }, SETS.GAME)
 
 -- ---------------------------------------------------------------- runner (game thread, every 250 ms)
 local idx, waiting, busy, finished = 0, nil, false, false
@@ -5562,6 +5566,9 @@ client.connect{
             core.log.debugEnabled = true
             profile(true)
             SETS.GAME.build()
+        elseif SCENARIO == "gameinsert" then
+            -- Core story 32: elements inside the create-server screen's settings list (its insert cases in menu1)
+            SETS.INS.build()
         elseif SCENARIO == "journal" then
             core.log.debugEnabled = true -- the journal attach lines (cost per open) are DEBUG; no profiler: real costs
             buildJournal()

@@ -9,6 +9,9 @@
 --   { host = "hud" | "journal", absolute = { anchor = <corner> | "center", x = <number>, y = <number> } }
 --
 --   { panel = <panel handle> }        (story 14) inside a panel: the panel arranges it; no other key goes with it
+--   { host = <game screen>, container = <game widget name>, after = <name> | before = <name> | index = n | at = "end" }
+--                                     (core story 32) inside one of the game's own boxes on a game screen (createServer):
+--                                     after or before a named game child, before the game's n-th child, or at the end
 --
 -- host "journal" (story 13) is the Journal's map page (journal.lua). Story 19 (core 0.6.0, CAP-10): named regions of
 -- the open Journal (REGIONS below). A journal corner sits inside a region (a plain journal corner means "cover"), and
@@ -92,8 +95,9 @@ local KEYS = {
 }
 
 local ALL_KEYS = { host = true, corner = true, near = true, absolute = true, gap = true, side = true, align = true, offset = true, panel = true,
-    region = true, inset = true, list = true, row = true, fill = true, screen = true }
-local ALL_KEY_NAMES = "absolute, align, corner, fill, gap, host, inset, list, near, offset, panel, region, row, screen, side"
+    region = true, inset = true, list = true, row = true, fill = true, screen = true,
+    container = true, after = true, before = true, index = true, at = true } -- core story 32
+local ALL_KEY_NAMES = "absolute, after, align, at, before, container, corner, fill, gap, host, index, inset, list, near, offset, panel, region, row, screen, side"
 -- Core story 31: and the game screens (createServer).
 local HOSTS = { hud = true, journal = true, menu = true, screen = true }
 for k in pairs(C.GAME_SCREENS) do HOSTS[k] = true end
@@ -141,6 +145,61 @@ local function windowOf(wh)
     return rec
 end
 
+-- Core story 32: a game container intent. container and anchors are widget names inside the open screen's tree (names,
+-- never paths); exactly one position; index 1-based over the game's children only (1..INDEX_MAX here; past the live
+-- container's end: the end, one WARN at attach).
+local INSERT_KEYS = { host = true, container = true, after = true, before = true, index = true, at = true }
+local INSERT_KEY_NAMES = "after, at, before, container, host, index"
+local POSITIONS = { "after", "before", "index", "at" }
+local NAME_MAX, INDEX_MAX = 64, 256
+P.INSERT_INDEX_MAX = INDEX_MAX
+
+local function widgetName(v, what)
+    if type(v) ~= "string" then bad("%s must be a game widget's name (a string), got %s", what, C.describe(v)) end
+    if v == "" then bad("%s must not be empty", what) end
+    if #v > NAME_MAX then bad("%s is %d characters, at most %d", what, #v, NAME_MAX) end
+    if not v:match("^[A-Za-z_][A-Za-z0-9_]*$") then
+        bad("%s %s is not a widget name (letters, digits and _, not starting with a digit)", what, C.describe(v))
+    end
+    return v
+end
+
+local function validateInsert(intent)
+    local got = {}
+    for _, k in ipairs(POSITIONS) do if intent[k] ~= nil then got[#got + 1] = k end end
+    if intent.container == nil then bad("%s needs container = <game widget name>", table.concat(got, " and ")) end
+    for k in pairs(intent) do
+        if not INSERT_KEYS[k] then bad("%s is not allowed with container (valid keys: %s)", k, INSERT_KEY_NAMES) end
+    end
+    local host = intent.host
+    if host == nil then host = "hud" end
+    if type(host) ~= "string" or not HOSTS[host] then bad("unknown host %s (valid: %s)", C.describe(host), C.HOST_NAMES) end
+    if not C.gameScreen(host) then bad("container is not available on host '%s' (game screens only: %s)", host, C.GAME_SCREEN_NAMES) end
+    local out = { host = host, container = widgetName(intent.container, "container") }
+    if #got ~= 1 then
+        bad("container needs exactly one of after, before, index or at (got %s)", #got == 0 and "none" or table.concat(got, " and "))
+    end
+    local k = got[1]
+    if k == "after" or k == "before" then
+        out[k] = widgetName(intent[k], k)
+    elseif k == "index" then
+        local i = intent.index
+        if type(i) ~= "number" or not finite(i) or i ~= math.floor(i) then bad("index must be a whole number from 1 to %d, got %s", INDEX_MAX, C.describe(i)) end
+        if i < 1 or i > INDEX_MAX then bad("index %s is out of range (1 to %d)", C.describe(i), INDEX_MAX) end
+        out.index = math.tointeger(i)
+    else
+        if intent.at ~= "end" then bad("unknown at %s (valid: end)", C.describe(intent.at)) end
+        out.at = "end"
+    end
+    return out
+end
+
+-- Whether two normalized intents put an element at the same place in the same game container (story 32).
+function P.sameInsert(a, b)
+    return a.host == b.host and a.container == b.container and a.after == b.after and a.before == b.before
+        and a.index == b.index and a.at == b.at
+end
+
 -- Validates an intent and returns a normalized copy (plain values only). Raises nucleus.ui.place: <problem>.
 -- A container intent comes back as { panelEl = <the container element>, fill = <weight|nil> } (the caller checks the
 -- container's limits and the nesting rules).
@@ -167,6 +226,10 @@ function P.validate(intent)
             end
             return out
         end
+    end
+    -- Core story 32: a game container, validated before the corner / near / absolute kinds.
+    if intent.container ~= nil or intent.after ~= nil or intent.before ~= nil or intent.index ~= nil or intent.at ~= nil then
+        return validateInsert(intent)
     end
     local kinds = {}
     if intent.corner ~= nil then kinds[#kinds + 1] = "corner" end
@@ -380,6 +443,38 @@ function P.mapRect(i)
     local cx, cy = (aL + aR) / 2, (aT + aB) / 2
     local hw, hh = i.w0 * s / 2, i.h0 * s / 2
     return { l = { a = 0, o = cx - hw }, t = { a = 0, o = cy - hh }, r = { a = 0, o = cx + hw }, b = { a = 0, o = cy + hh } }, nil, s
+end
+
+-- Core story 32: the wanted order of a game container. gameNames: the game's children's names, in order; items: the
+-- elements in creation order, each { after = name } | { before = name } | { index = n } | { at = "end" }. Positions
+-- count the game's children only: after / before a named child, before the game's n-th child, or the end. Several
+-- items at one position keep their creation order. A missing anchor and an index past the end go to the end.
+-- Returns order (a list of { game = i } and { item = k }), missing (item numbers whose anchor isn't a game child) and
+-- pastEnd (item numbers whose index is past the game's last child).
+function P.insertOrder(gameNames, items)
+    local n = #gameNames
+    local pos = {}
+    for i, nm in ipairs(gameNames) do if pos[nm] == nil then pos[nm] = i end end
+    local gaps, missing, pastEnd = {}, {}, {}
+    for k, it in ipairs(items) do
+        local g = n + 1 -- before game child g; n + 1 is the end
+        if it.after ~= nil then
+            if pos[it.after] then g = pos[it.after] + 1 else missing[#missing + 1] = k end
+        elseif it.before ~= nil then
+            if pos[it.before] then g = pos[it.before] else missing[#missing + 1] = k end
+        elseif it.index ~= nil then
+            if it.index <= n then g = it.index else pastEnd[#pastEnd + 1] = k end
+        end
+        local list = gaps[g]
+        if not list then list = {}; gaps[g] = list end
+        list[#list + 1] = k
+    end
+    local order = {}
+    for g = 1, n + 1 do
+        for _, k in ipairs(gaps[g] or {}) do order[#order + 1] = { item = k } end
+        if g <= n then order[#order + 1] = { game = g } end
+    end
+    return order, missing, pastEnd
 end
 
 -- ---- reading regions (game thread). A context is one journal callback's view: the live Journal, the host canvas
