@@ -1483,9 +1483,9 @@ X._attachNow = attachNow
 
 -- ---------------------------------------------------------------- story 21: the menu host and the windows
 -- Like the Journal: every menu is new (each return from a match builds one), so its elements get new widgets on each
--- from the poll's opened, at most one 500 ms tick after the menu appears (never inside MainMenu_C:Construct, story
--- 34), and on lost only their handles are freed. While the menu is hidden (opacity 0 under Create Server, another
--- page) its elements are collapsed.
+-- from the poll's opened, within about a second (one or two 500 ms ticks) of the menu appearing (never inside
+-- MainMenu_C:Construct, story 34), and on lost only their handles are freed. While the menu is hidden (opacity 0
+-- under Create Server, another page) its elements are collapsed.
 
 -- Frees the handles of every element on a host (children included) and marks them detached; never touches widgets
 -- (they went with their host). keepPath: elements attached to this host object stay (a newer menu's).

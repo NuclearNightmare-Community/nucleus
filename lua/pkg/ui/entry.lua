@@ -23,13 +23,13 @@
 -- included: a method on a null object reads address 0x18 and crashes the game (research 9.1; OPTIONS's Text Style
 -- reads null and is copied as null, never dereferenced).
 --
--- When: every menu gets its entry from the poll's opened, at most one 500 ms tick after the menu appears. Nothing
--- runs inside MainMenu_C:Construct (story 34): mutating the menu's widget tree there, under the game's own
--- CreateWidget/AddToViewport right after a world teardown and GC, once read a freed object and crashed the game.
--- Each insertion is recorded per Lua state as menu path -> the entry widget's name; a menu with a record is skipped,
--- so repeated opened events never insert twice. The record goes with the menu. Clicks come through one RegisterHook per Lua state on
--- CommonButtonBase:HandleButtonClicked, filtered by the clicked widget's name against the live menu's record (never a
--- kept UObject); a match runs onClick(handle) under pcall, once per click.
+-- When: every menu gets its entry from the poll's opened, within about a second (one or two 500 ms ticks) of the
+-- menu appearing. Nothing runs inside MainMenu_C:Construct (story 34): mutating the menu's widget tree there, under
+-- the game's own CreateWidget/AddToViewport right after a world teardown and GC, once read a freed object and crashed
+-- the game. Each insertion is recorded per Lua state as menu path -> the entry widget's name; a menu with a record is
+-- skipped, so repeated opened events never insert twice. The record goes with the menu. Clicks come through one
+-- RegisterHook per Lua state on CommonButtonBase:HandleButtonClicked, filtered by the clicked widget's name against
+-- the live menu's record (never a kept UObject); a match runs onClick(handle) under pcall, once per click.
 local BASE = (...):gsub("%.ui%.entry$", "")
 local C = require(BASE .. ".ui.common")
 local M = require(BASE .. ".ui.menu")
@@ -308,7 +308,7 @@ local function findChild(vb, name)
     return nil
 end
 
--- A growth that couldn't be measured in Construct: measured from the laid-out entry on a later tick.
+-- A growth that couldn't be measured at the poll's insert: measured from the laid-out entry on a later tick.
 local function finishGrow(mm, r)
     if not r.growPending then return end
     local vb = prop(mm, COLUMN)
@@ -324,7 +324,8 @@ local function finishGrow(mm, r)
     if C.log then C.log.debug("ui menu entry '%s': column growth measured late, %.1f units", ent and ent.id or "?", d) end
 end
 
--- Inserts the entry into one menu. how: "poll" (the poll's opened) or "call" (entry() with a menu already open). Raises only on a broken invariant (callers pcall).
+-- Inserts the entry into one menu. how: "poll" (the poll's opened) or "call" (entry() with a menu already open).
+-- Raises only on a broken invariant (callers pcall).
 local function insert(mm, path, how)
     if not ent or records[path] then return false end
     local vb, opt, quit = prop(mm, COLUMN), prop(mm, OPTIONS), prop(mm, QUIT)

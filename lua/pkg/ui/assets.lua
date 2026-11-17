@@ -9,7 +9,7 @@
 -- research 8.1). Inside a hook (a Construct post-hook) only the cache is read: an asset load there is fatal.
 --
 -- Loads happen in a LoadMap post-hook of the dependent's own Lua state (registered once, at the first use of the menu,
--- the screen host, the game look or a texture), so they are cached before the next map's menu is constructed, and on
+-- the screen host, the game look or a texture), so they are cached before the next map's Journal is constructed, and on
 -- poll ticks. Fonts and materials are preloaded always; a texture only once an element of this state has used it. An
 -- asset that can't be loaded logs one WARN per asset per Lua state; the element using it falls back (plain look, or
 -- core's icon for the same meaning).

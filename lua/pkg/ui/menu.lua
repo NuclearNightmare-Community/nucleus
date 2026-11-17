@@ -21,10 +21,11 @@
 -- registered from a poll tick once a MainMenu_C exists, never at startup: both host launches of the mini-spike that
 -- registered hooks earlier crashed at the first menu (research 9.3; the cause was a GetFName on a null property, 9.1,
 -- but registering after the menu exists is the order proven in every VM launch). Every menu gets its entry and
--- elements from the poll's opened, at most one 500 ms tick after the menu appears. No user asks for Construct today
--- (story 34): widget work inside it, under the game's own CreateWidget/AddToViewport right after a world teardown and
--- GC, once read a freed object and crashed the game; the machinery stays as a tested opt-in. UE4SS keys a script hook by the function's name chain
--- (LuaMod.cpp, find_function_hook_data), so one registration also fires for the class reloaded after a match.
+-- elements from the poll's opened, within about a second (one or two 500 ms ticks) of the menu appearing. No user
+-- asks for Construct today (story 34): widget work inside it, under the game's own CreateWidget/AddToViewport right
+-- after a world teardown and GC, once read a freed object and crashed the game; the machinery stays as a tested
+-- opt-in. UE4SS keys a script hook by the function's name chain (LuaMod.cpp, find_function_hook_data), so one
+-- registration also fires for the class reloaded after a match.
 local BASE = (...):gsub("%.ui%.menu$", "")
 local C = require(BASE .. ".ui.common")
 local H = require(BASE .. ".ui.hud")
@@ -178,6 +179,8 @@ end
 
 -- ---- hooks, registered from the poll once a menu exists
 local construct = {}             -- internal fn(menu, path) run inside the Construct post-hook (no user today)
+-- Never ask for Construct to change a widget tree (story 34 crash: a freed object read inside the menu's Construct
+-- after a map change); attach and insert from the poll's opened instead.
 local wants = {}                 -- internal fn() -> needConstruct, needClick (text.lua, entry.lua)
 local clickers = {}              -- internal fn(widget) run inside the HandleButtonClicked hook (entry.lua)
 local HK = { construct = false, click = false, constructKey = nil, tries = 0 }
