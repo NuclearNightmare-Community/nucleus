@@ -1375,6 +1375,7 @@ namespace
 	 *   <Core>_OnHover()                                                        HoverCount += 1; the OnMouseEnter
 	 *                                                                           override calls it (core story 36: the
 	 *                                                                           focus band follows the mouse)
+	 * The row's event graph is CoreGen's: it is cleared and holds only that OnMouseEnter override (core story 36).
 	 */
 	UWidgetBlueprint* BuildRow(const FString& Dir, const FString& Core)
 	{

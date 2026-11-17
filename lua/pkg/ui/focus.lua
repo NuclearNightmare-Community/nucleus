@@ -39,8 +39,8 @@
 -- by full path, from the UI poll. A real pointer move into a row of this state's global top open window (a screen host,
 -- the row's own tag and live widget, a row with a focusable line) moves the model's current element to that row's
 -- focusable in the current column (clamped, as Up / Down), without scrolling; keys continue from there. Whichever input
--- moved last owns the band: the platform cursor position is recorded at every handled key, at F.focusWindow and at
--- every applied hover, and an enter at that position (content moving under a still pointer: a window opening, a list
+-- moved last owns the band: the platform cursor position is recorded at every handled key, at F.focusWindow, at
+-- every click on a window's focusable and at every hover into a row (applied, or the row already holding focus), and an enter at that position (content moving under a still pointer: a window opening, a list
 -- scrolling) is ignored; an unreadable position doesn't block. No focus steal: while a text box in the window or
 -- anything outside it holds keyboard focus a hover does nothing. The hook body runs with C.inDispatch and hookDepth
 -- raised (cached assets only: the tick completes a plain band or a missing face).
@@ -493,6 +493,7 @@ used = function(el)
     local rec = C.windows[host:sub(8)]
     if not (rec and rec.open) then return end
     rec.openFresh = false
+    rememberPointer() -- story 36: a click (and the scroll it can cause) under a still pointer keeps the band
     if rec.focusId == el.id and hasFocus(targetOf(el)) then return end
     -- Keyboard focus moves too: a choice's arrows and a slider's bar aren't focusable, so a click on them leaves Slate's
     -- focus where it was, and the next key would start from there.
@@ -618,14 +619,16 @@ local function hoverBody(ctx)
     if not li then return ignore() end -- no focusable in the row
     local cur = focusedIn(rec, lines)
     if cur == nil then return ignore() end -- a text box (or something outside the window) holds keyboard focus
-    if cur ~= "window" and F.find(lines, cur) == li then return ignore() end -- the row already holds focus
+    if cur ~= "window" and F.find(lines, cur) == li then -- the row already holds focus: the pointer owns it now
+        rememberPointer()
+        return ignore()
+    end
     local els = lines[li].els
     local to = els[math.min((rec.focusPos and rec.focusPos.ci) or 1, #els)]
+    if not focusEl(rec, to, lines, false, true) then return ignore() end -- no live target
     rec.openFresh = false
-    if focusEl(rec, to, lines, false, true) then
-        S.hovers = S.hovers + 1
-        rememberPointer()
-    end
+    S.hovers = S.hovers + 1
+    rememberPointer()
 end
 local function onHover(ctx)
     hookDepth = hookDepth + 1

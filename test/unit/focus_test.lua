@@ -1524,6 +1524,22 @@ do
     ok(T.key(wr, D.down, INV_ACT) and T.agree("r36g6"), "story 36 old pak: keys unchanged")
     T.fire(T.CLICK, T.tagged("r36g2"))
     ok(T.agree("r36g2") and T.strong("r36r2"), "story 36 old pak: clicks unchanged")
+    -- A click records the pointer: an enter at that position (the clicked row scrolled into view) is ignored
+    T.move()
+    T.fire(T.CLICK, T.tagged("r36g6"))
+    local ignC = T.ign()
+    T.hover(T.tagged("r36r3"))
+    ok(T.agree("r36g6") and T.strong("r36r6") and T.ign() == ignC + 1, "story 36 click: an enter at the click's pointer position is ignored", SC.stats().focus)
+    -- An enter into the focused row records the pointer: a following enter at that position is ignored
+    T.move()
+    T.hover(T.tagged("r36r6"))
+    T.hover(T.tagged("r36r2"))
+    ok(T.agree("r36g6") and T.strong("r36r6") and T.ign() == ignC + 3, "story 36 same row: the pointer is recorded, a following enter at it is ignored", SC.stats().focus)
+    -- The window widget itself holds focus: the hover moves focus to the hovered row's focusable
+    F.focus = T.screenOf("R36")
+    T.move()
+    T.hover(T.tagged("r36r4"))
+    ok(T.agree("r36g4") and T.strong("r36r4") and T.strip("r36r6") and rec.lookRowId == "r36r4", "story 36 window holds focus: the hover moves it to the row's focusable", SC.stats().focus)
     SC.close(R)
     ok(rec.lookRowId == nil, "story 36 window closed: nothing recorded")
 end
