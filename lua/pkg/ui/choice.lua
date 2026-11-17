@@ -273,7 +273,8 @@ local function newPicker(el, w)
     C.count(); m.DefaultOption = el.options[el.index]
     C.count()
     local slot = w.HBox:AddChild(m)
-    pcall(function() C.count(); slot:SetVerticalAlignment(2) end) -- centred in the row's height, like the game's
+    -- the picker fills its wrapper, as the game's fills its row's control slot (its ScaleBox then scales like the game's)
+    pcall(function() C.count(); slot:SetSize({ SizeRule = 1, Value = 1 }) end)
     el.itemsKey, el.appliedEnabled = optionsKey(el.options), nil
     return m
 end

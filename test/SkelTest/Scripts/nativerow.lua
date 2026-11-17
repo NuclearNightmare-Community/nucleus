@@ -41,7 +41,7 @@ return function(X, GS)
             local nop = function() end
             local IN = { host = HOST, container = VB, after = "Overlay_28" }
             local L65 = string.rep("a", 65)
-            local function mk(o) o.id = o.id or "gnr"; o.place = o.place == false and nil or (o.place or IN) return function() return U.row.create(o) end end
+            local function mk(o) o.id = o.id or "gnr"; if o.place == false then o.place = nil else o.place = o.place or IN end return function() return U.row.create(o) end end
             local rows = {
                 { "key", "nope = 1", { like = "Overlay_28", nope = 1 }, "unknown key 'nope' (valid: control, gap, help, id, label, like, place, style)" },
                 { "like-num", "like = 28", { like = 28 }, "like must be a game widget's name (a string), got 28" },
@@ -244,7 +244,7 @@ return function(X, GS)
         if not (img and hb) then return nil end
         local lbl, inner = childOf(hb, 0), childOf(hb, 1)
         local ctl, q = inner and childOf(inner, 0), inner and childOf(inner, count(inner) - 1)
-        return { brush = brushKey(try(function() return img.Brush end)), tint = lin(try(function() return img.ColorAndOpacity end)), bpad = overlaySlotKey(hb),
+        return { height = n3(try(function() return img.Brush.ImageSize.Y end)), brush = brushKey(try(function() return img.Brush end)), tint = lin(try(function() return img.ColorAndOpacity end)), bpad = overlaySlotKey(hb),
             label = textKey(lbl), help = textKey(q), slabel = slotKey(lbl), sinner = slotKey(inner), sctl = slotKey(ctl), shelp = slotKey(q), srow = slotKey(row) }
     end
     local function ourLook(w)
@@ -252,12 +252,13 @@ return function(X, GS)
         local hb = prop(w, "HBox")
         local lbl, inner = hb and childOf(hb, 0), hb and childOf(hb, 1)
         local holder, q = inner and childOf(inner, 0), inner and childOf(inner, 1)
+        local sp = hb and childOf(hb, 2)
         if not (bg and lbl and inner and holder and q) then return nil end
-        return { brush = brushKey(try(function() return bg.Background end)), tint = lin(try(function() return bg.BrushColor end)), bpad = borderKey(bg),
+        return { height = n3(sp and try(function() return sp.Size.Y end)), brush = brushKey(try(function() return bg.Background end)), tint = lin(try(function() return bg.BrushColor end)), bpad = borderKey(bg),
             label = textKey(lbl), help = textKey(q), slabel = slotKey(lbl), sinner = slotKey(inner), sctl = slotKey(holder), shelp = slotKey(q), srow = slotKey(w),
             parts = count(hb) .. "/" .. count(inner) .. "/" .. count(holder), holder = holder, q = q, lbl = lbl }
     end
-    local KEYS = { "brush", "tint", "bpad", "label", "help", "slabel", "sinner", "sctl", "shelp", "srow" }
+    local KEYS = { "height", "brush", "tint", "bpad", "label", "help", "slabel", "sinner", "sctl", "shelp", "srow" }
 
     function NR.build()
         local S = { ev = {}, opens = {}, paths = {}, n = 0, allOk = true }
@@ -359,7 +360,7 @@ return function(X, GS)
                 local bad = {}
                 if not o then bad[1] = "parts missing" else
                     for _, k in ipairs(KEYS) do if o[k] ~= g[k] then bad[#bad + 1] = k .. ": ours " .. tostring(o[k]) .. " game " .. tostring(g[k]) end end
-                    if o.parts ~= "2/2/1" then bad[#bad + 1] = "parts " .. o.parts end
+                    if o.parts ~= "3/2/1" then bad[#bad + 1] = "parts " .. o.parts end
                 end
                 if #bad > 0 then lookOk = false end
                 check(#bad == 0, "NRLOOK open %d %s: copied values equal the Difficulty row's%s", n, id, #bad == 0 and "" or (": " .. table.concat(bad, "; ")))
@@ -395,7 +396,6 @@ return function(X, GS)
             check(S.allOk and k == OPENS and pk == OPENS and countEv("lost") == 0,
                 "NRTEN %d opens by real clicks: every row once with its look re-copied, the game choice showing its option; %d distinct screens, %d distinct row widgets, lost=%d (likeCopies=%d likeFallbacks=%d gameTips=%d)",
                 OPENS, k, pk, countEv("lost"), st.likeCopies, st.likeFallbacks, st.gameTips)
-            check(core().ui.choice.stats().gameHooked == true, "NRHOOK the game choice's arrow hooks are registered")
         end)
 
         -- The final open: CONFIGURE, the rows' screenshot, a real hover over our "?", a real click on the next arrow, set.

@@ -681,6 +681,7 @@ local Q = { tips = 0 }            -- this part's own helpers and state
 -- UMG classes core constructs (StaticConstructObject) and the game classes it creates (WidgetBlueprintLibrary:Create)
 cls("/Script/UMG.TextBlock", "TextBlock")
 cls("/Script/UMG.HorizontalBox", "HorizontalBox")
+cls("/Script/UMG.Spacer", "Spacer")
 Q.MSBCLASS = cls("/Game/Graphics/MainMenu/Components/MultipleSelectBox.MultipleSelectBox_C")
 Q.TIPCLASS = cls("/Game/HexTree/Widgets/Elements/W_ToolTip3.W_ToolTip3_C")
 Q.TIPPATH = "/Game/HexTree/Widgets/Elements/W_ToolTip3.W_ToolTip3_C"
@@ -710,6 +711,12 @@ function StaticConstructObject(c, outer, name)
     Q.constructs = (Q.constructs or 0) + 1
     local path = "/Engine/Transient." .. tostring(name) .. "_" .. (F.addr + 0x100)
     if c.__isClass == "TextBlock" then return Q.textBlock(path, name) end
+    if c.__isClass == "Spacer" then
+        local sp = widget("Spacer", path)
+        sp.__name = name
+        function sp:SetSize(v) self.Size = { X = v.X, Y = v.Y } end
+        return sp
+    end
     if c.__isClass == "HorizontalBox" then
         local b = I.box("HorizontalBox", path, true)
         b.__name = name
@@ -833,7 +840,7 @@ end
 function Q.parts(w)
     local hb = w.HBox
     local inner = hb.children[2]
-    return { label = hb.children[1], inner = inner, holder = inner and inner.children[1], help = inner and inner.children[2], n = #hb.children }
+    return { label = hb.children[1], inner = inner, holder = inner and inner.children[1], help = inner and inner.children[2], height = hb.children[3], n = #hb.children }
 end
 function Q.sameSlot(sl, v)
     if not sl then return false end
@@ -990,7 +997,7 @@ do
     ok(g, "every game row keeps its order and slot values", why)
     local w = Q.ours(vb, "nr.r1")
     local p = Q.parts(w)
-    ok(p.n == 2 and #p.inner.children == 2 and p.holder.__class == "HorizontalBox" and p.help.__class == "TextBlock" and p.label.__class == "TextBlock",
+    ok(p.n == 3 and p.height.__class == "Spacer" and p.height.Size and p.height.Size.X == 0 and p.height.Size.Y == 44 and #p.inner.children == 2 and p.holder.__class == "HorizontalBox" and p.help.__class == "TextBlock" and p.label.__class == "TextBlock",
         "like row: native parts: label TextBlock, inner HorizontalBox [holder HorizontalBox, \"?\" TextBlock]")
     ok(p.label.text == "Enemy Damage" and p.help.text == "?", "like row: label and \"?\" texts")
     -- the look, copied from the live Difficulty row
@@ -1006,6 +1013,8 @@ do
     -- the control where the game's picker sits, before the "?"
     local wrap = p.holder.children[1]
     ok(#p.holder.children == 1 and I.nameOf(wrap) == "nr.c" and p.inner.children[2] == p.help, "the control in the holder, before the \"?\"")
+    ok(wrap.Slot.Size.SizeRule == 1 and wrap.HBox.children[1].Slot.Size.SizeRule == 1,
+        "the control fills the holder and the game's picker fills its wrapper (as the game's control fills its slot)")
     -- the tooltip
     local tip = p.help.ToolTipWidget
     ok(tip ~= nil and tip.__class == "W_ToolTip3_C" and tip.Description and tip.Description.s == HELP3, "help: the \"?\"'s tooltip is a W_ToolTip3_C with the help as its Description")
@@ -1026,7 +1035,7 @@ do
     -- the fallback
     local w3 = Q.ours(vb, "nr.r3")
     local p3 = Q.parts(w3)
-    ok(p3.n == 2 and p3.label.text == "Not Like" and p3.help.text == "?", "like missing: label and \"?\" present")
+    ok(p3.n == 3 and p3.label.text == "Not Like" and p3.help.text == "?", "like missing: label and \"?\" present")
     ok(w3.mat == Q.STRIP and w3.Background.Brush == nil, "like missing: core's worn strip (game look), nothing copied")
     ok(p3.label.Font and p3.label.Font.FontObject == Q.REGULAR and p3.label.Font.Size == 22 and p3.help.Font.FontObject == Q.REGULAR,
         "like missing: theme body font (Regular 22) on the label and the \"?\"")
@@ -1103,7 +1112,7 @@ do
             if I.count(vb, id) ~= 1 then allOne = false end
             local w = Q.ours(vb, id)
             local p = w and Q.parts(w)
-            if not p or p.n ~= 2 or #p.inner.children ~= 2 or #p.holder.children ~= (id == "nr.r3" and 0 or 1) then allOne = false end
+            if not p or p.n ~= 3 or #p.inner.children ~= 2 or #p.holder.children ~= (id == "nr.r3" and 0 or 1) then allOne = false end
             if w == prev[id] then allNew = false end
             prev[id] = w
         end

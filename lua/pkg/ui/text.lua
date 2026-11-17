@@ -614,14 +614,17 @@ local function applyGaps(p)
                 local left, right = pad, 0
                 if horiz and fixed then left, right = pad * 0.75, pad * 0.25 end
                 local inset = (not horiz and p.kind == "list") and theme.listInset or 0
-                local key = (isRow and (tostring(pad) .. "/" .. tostring(ch.fill)) or tostring(pad)) .. (fixed and "/k" or "") .. (inset > 0 and ("/i" .. inset) or "")
+                -- Core story 33: in a game-style row's holder (which takes the game control's Fill slot) a child with no
+                -- fill fills it too, as the game's control does (its picker's ScaleBox then scales like the game's).
+                local fill = ch.fill or (p.like and 1.0 or nil)
+                local key = (isRow and (tostring(pad) .. "/" .. tostring(fill)) or tostring(pad)) .. (fixed and "/k" or "") .. (inset > 0 and ("/i" .. inset) or "")
                 if ch.padKey ~= key then
                     local ok, err = pcall(function()
                         C.count()
                         w.Slot:SetPadding(horiz and { Left = left, Top = 0, Right = right, Bottom = 0 } or { Left = 0, Top = pad, Right = inset, Bottom = 0 })
                         if isRow then
                             C.count()
-                            w.Slot:SetSize({ SizeRule = ch.fill and SIZE_FILL or SIZE_AUTO, Value = ch.fill or 1.0 })
+                            w.Slot:SetSize({ SizeRule = fill and SIZE_FILL or SIZE_AUTO, Value = fill or 1.0 })
                         end
                         if fixed or ch.alignKept then
                             C.count()
@@ -1855,7 +1858,7 @@ end
 -- A row made with like = <game row name> (row.lua) is still core's tagged WBP_<Core>Row (Border "Background" ->
 -- HorizontalBox "HBox"), on a game screen only. Inside HBox core builds native UMG widgets (StaticConstructObject in the
 -- row's WidgetTree): a label TextBlock and an inner HorizontalBox holding the holder (a HorizontalBox, the row's
--- children box: the control goes there) and the "?" TextBlock. At every attach it reads the named game row on the open
+-- children box: the control goes there, filling it) and the "?" TextBlock, and a Spacer as tall as the game row's background image (a Border ignores its brush's size). At every attach it reads the named game row on the open
 -- screen and copies its look: the background Image's brush and tint to the Border (SetBrush, SetBrushColor), the
 -- game HorizontalBox's overlay slot to the Border's padding and content alignment, the label's and the "?"'s font,
 -- colour and justification, and every inner slot (label, inner box, the game control's slot to the holder, "?"); in
@@ -1866,8 +1869,8 @@ end
 -- one WARN naming it per Lua state. help goes on the "?" in the game's tooltip widget (W_ToolTip3_C, created with
 -- WidgetBlueprintLibrary:Create, its Description set), once per attach and per help or language change, never per
 -- hover; when that class can't be loaded, as plain tooltip text (assets.lua's one WARN).
-local LIKE_LABEL, LIKE_INNER, LIKE_HOLDER, LIKE_HELP = "NucleusLikeLabel", "NucleusLikeInner", "NucleusLikeHolder", "NucleusLikeHelp"
-local UMG_TEXT, UMG_HBOX = "/Script/UMG.TextBlock", "/Script/UMG.HorizontalBox"
+local LIKE_LABEL, LIKE_INNER, LIKE_HOLDER, LIKE_HELP, LIKE_HEIGHT = "NucleusLikeLabel", "NucleusLikeInner", "NucleusLikeHolder", "NucleusLikeHelp", "NucleusLikeHeight"
+local UMG_TEXT, UMG_HBOX, UMG_SPACER = "/Script/UMG.TextBlock", "/Script/UMG.HorizontalBox", "/Script/UMG.Spacer"
 local KSL_CDO = "/Script/Engine.Default__KismetSystemLibrary"
 local SIZE_RULE_AUTO, SIZE_RULE_FILL, VALIGN_CENTER = 0, 1, 2
 local likeSeq = 0
@@ -1883,7 +1886,8 @@ local function likeParts(w)
         if inner:GetChildrenCount() < 2 then return nil end
         local holder, q = inner:GetChildAt(0), inner:GetChildAt(1)
         if not (C.valid(holder) and C.valid(q)) then return nil end
-        return { hbox = hb, label = lbl, inner = inner, holder = holder, help = q }
+        local h = hb:GetChildrenCount() > 2 and hb:GetChildAt(2) or nil
+        return { hbox = hb, label = lbl, inner = inner, holder = holder, help = q, height = C.valid(h) and h or nil }
     end)
     return ok and r or nil
 end
@@ -1908,8 +1912,10 @@ local function buildLike(w)
     local inner = newUmg(UMG_HBOX, outer, LIKE_INNER)
     local holder = newUmg(UMG_HBOX, outer, LIKE_HOLDER)
     local q = newUmg(UMG_TEXT, outer, LIKE_HELP)
+    local height = newUmg(UMG_SPACER, outer, LIKE_HEIGHT)
     C.count(); hb:AddChild(lbl)
     C.count(); hb:AddChild(inner)
+    C.count(); hb:AddChild(height) -- no width; its height is the background image's (copyLook)
     C.count(); inner:AddChild(holder)
     C.count(); inner:AddChild(q)
     C.count(); lbl:SetVisibility(C.VIS.SelfHitTestInvisible)
@@ -1917,7 +1923,7 @@ local function buildLike(w)
     C.count(); holder:SetVisibility(C.VIS.SelfHitTestInvisible)
     C.count(); q:SetText(FText("?"))
     C.count(); q:SetVisibility(C.VIS.Hidden) -- shown (Visible, for the hover) once there is help; Hidden keeps its space
-    return { hbox = hb, label = lbl, inner = inner, holder = holder, help = q }
+    return { hbox = hb, label = lbl, inner = inner, holder = holder, help = q, height = height }
 end
 
 -- The parts of a game row src (valid only in this callback), or nil and why it isn't one (Design Note 3).
@@ -1978,6 +1984,12 @@ local function copyLook(el, w, parts, g)
     local bg = w.Background
     C.count(); bg:SetBrush(g.image.Brush)
     C.count(); bg:SetBrushColor(g.image.ColorAndOpacity)
+    -- A Border ignores its brush's size, an Image doesn't: the game row is as tall as its background image (the brush's
+    -- ImageSize), and its picker's ScaleBox scales to that height, so the row's spacer gets that height.
+    if parts.height then
+        local hy = tonumber(g.image.Brush.ImageSize.Y)
+        C.count(); parts.height:SetSize({ X = 0, Y = hy or 0 })
+    end
     local hs = saveSlot(g.hbox) or {}
     C.count(); bg:SetPadding(hs.pad or { Left = 0, Top = 0, Right = 0, Bottom = 0 })
     if hs.ha then C.count(); bg:SetHorizontalAlignment(hs.ha) end

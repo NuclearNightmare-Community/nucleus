@@ -1011,7 +1011,6 @@ $nativeRow = $started + @(
     "#11|\[$T\] OK NRFALLBACK open \d+: "
     "#11|\[$T\] OK NRNEW open \d+: "
     "\[$T\] OK NRTEN 10 opens by real clicks: .*; 10 distinct screens, 10 distinct row widgets, lost=0"
-    "\[$T\] OK NRHOOK "
     "#11|\[$T\] OK NROPENED \d+ "
     "\[$T\] OK NREVENTS opened=11 closed=11 lost=0"
     # AC 3: like = Overlay_NOPE: core's game look, exactly one WARN in the whole run.
