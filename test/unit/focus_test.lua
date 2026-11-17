@@ -1326,5 +1326,207 @@ do
     ok(FO.stats().faults == 0, "story 30: no fault in the focus path")
 end
 
+-- ---------------------------------------------------------------- core story 36: the focus band follows the mouse
+-- The platform cursor (WidgetLayoutLibrary:GetMousePositionOnPlatform): F.mouse = { x, y }; F.mouseFail "throw" or
+-- "nil". T.hover(w) moves nothing: it is the row's OnMouseEnter calling <Core>_OnHover (the hooks run).
+F.mouse = { x = 10, y = 10 }
+F.objects["/Script/UMG.Default__WidgetLayoutLibrary"].GetMousePositionOnPlatform = function()
+    if F.mouseFail == "throw" then error("GetMousePositionOnPlatform: boom") end
+    if F.mouseFail == "nil" then return nil end
+    return vec(F.mouse.x, F.mouse.y)
+end
+T.HOVER = "WBP_NucleusRow_C:Nucleus_OnHover"
+function T.hover(w) fireHook(T.HOVER, w) end
+function T.move(dx, dy) F.mouse = { x = F.mouse.x + (dx or 37), y = F.mouse.y + (dy or 41) } end
+function T.ign() return FO.stats().hoverIgnored end
+do
+    local AS = require("nucleus.ui.assets")
+    AS._reset()
+    local R = SC.open{ id = "R36" }
+    local wr = T.screenOf("R36")
+    local rec = C.windows["R36"]
+    local L = LS.create{ id = "r36l", place = { screen = R, corner = "top-left" }, size = { 600, 400 } }
+    local rows = {}
+    for i = 1, 6 do
+        rows[i] = RS.create{ id = "r36r" .. i, place = { list = L } }
+        X.create{ id = "r36n" .. i, text = "MOD " .. i, place = { row = rows[i], fill = 4 } }
+        B.create{ id = "r36g" .. i, place = { row = rows[i] }, icon = { icon = "gear" }, iconSize = 28, dimmed = true, onClick = T.rec("r36g" .. i) }
+    end
+    -- row 7: two focusables (a gear, a checkbox); row 8: text only (no focusable)
+    rows[7] = RS.create{ id = "r36r7", place = { list = L } }
+    B.create{ id = "r36g7", place = { row = rows[7] }, icon = { icon = "gear" }, iconSize = 28, dimmed = true, onClick = T.rec("r36g7") }
+    CK.create{ id = "r36c7", place = { row = rows[7] }, onChange = T.rec("r36c7") }
+    rows[8] = RS.create{ id = "r36r8", place = { list = L } }
+    X.create{ id = "r36n8", text = "NO CONTROL", place = { row = rows[8], fill = 4 } }
+    tick()
+    ok(hookCount("Nucleus_OnHover") == 1 and FO.stats().hoverHooked == true, "story 36: one hook on the row's <Core>_OnHover, registered from the poll", hookCount("Nucleus_OnHover"))
+    ok(T.agree("r36g1") and T.strong("r36r1"), "story 36 setup: r1's gear focused, r1 strong")
+    -- Hover a row: r4's gear takes keyboard focus and the focus look, r4 the band, r1 its own strip; no scroll, no load
+    local lw = T.tagged("r36l")
+    local scrolls, loads, gets, hovers = #lw.Scroll.into, AS.stats.loads, F.getAssets, FO.stats().hovers
+    T.move()
+    T.hover(T.tagged("r36r4"))
+    ok(T.agree("r36g4") and rec.focusId == "r36g4" and T.strong("r36r4") and T.strip("r36r1") and rec.lookRowId == "r36r4",
+        "story 36 hover: r4's gear holds focus, r4 the band, r1 its own strip", SC.stats().focus)
+    ok(T.gearFaced("r36g4") and T.gearOwn("r36g1"), "story 36 hover: the focus look moved with it")
+    ok(#lw.Scroll.into == scrolls and FO.stats().hovers == hovers + 1, "story 36 hover: the list is not scrolled", #lw.Scroll.into - scrolls)
+    ok(AS.stats.loads == loads and F.getAssets == gets, "story 36 hover: no asset load inside the hook", AS.stats.loads - loads)
+    ok(C.inDispatch == 0, "story 36 hover: the dispatch depth is back to 0", C.inDispatch)
+    -- Keys continue from there (the pointer moved a little inside r4 first: no enter)
+    T.move(3, 2)
+    ok(T.key(wr, D.down, INV_ACT) and T.agree("r36g5") and T.strong("r36r5") and T.strip("r36r4"), "story 36 keys continue: DOWN after the hover goes to r5")
+    -- Pointer still: an enter at the position of the last key (the list scrolled under the pointer) is ignored
+    local ign = T.ign()
+    T.hover(T.tagged("r36r2"))
+    ok(T.agree("r36g5") and T.strong("r36r5") and T.ign() == ign + 1, "story 36 pointer still: an enter at the key's pointer position is ignored")
+    -- Same row: nothing changes
+    local n5 = T.tagged("r36r5").bgMatCalls or 0
+    local moves = FO.stats().moves
+    T.move()
+    T.hover(T.tagged("r36r5"))
+    ok(T.agree("r36g5") and (T.tagged("r36r5").bgMatCalls or 0) == n5 and FO.stats().moves == moves and T.ign() == ign + 2,
+        "story 36 same row: nothing changes")
+    -- Typing: the slider's text box (not a model element) holds keyboard focus: the box keeps it
+    local box = { __alive = true }
+    local before = F.focus
+    F.focus = box
+    T.move()
+    T.hover(T.tagged("r36r2"))
+    ok(F.focus == box and rec.focusId == "r36g5" and T.strong("r36r5") and T.ign() == ign + 3, "story 36 typing: a text box keeps focus, nothing changes")
+    -- ... and keyboard focus outside the window: the same
+    F.focus = PC
+    T.move()
+    T.hover(T.tagged("r36r2"))
+    ok(rec.focusId == "r36g5" and T.ign() == ign + 4, "story 36 focus outside the window: nothing changes")
+    F.focus = before
+    ok(T.agree("r36g5"), "story 36 typing: focus back on r5's gear")
+    -- Not ours: another mod's row, a stale widget, a widget that isn't the row's live one, a row without a focusable,
+    -- a row of a non-screen host, a covered window's row, off the game thread
+    ign = T.ign()
+    T.move()
+    local other = tagged(widget("WBP_NucleusRow_C", "/Engine/Transient.WBP_NucleusRow_C_other"))
+    other.tag = "nucleus:OtherMod:r36r2"
+    T.hover(other)
+    local copy = tagged(widget("WBP_NucleusRow_C", "/Engine/Transient.WBP_NucleusRow_C_copy"))
+    copy.tag = "nucleus:TestMod:r36r2"
+    T.hover(copy)
+    kill(copy)
+    T.hover(copy)
+    local untagged = widget("WBP_NucleusRow_C", "/Engine/Transient.WBP_NucleusRow_C_untagged")
+    T.hover(untagged)
+    T.hover(T.tagged("r36r8"))
+    T.hover(T.tagged("r36n2")) -- a text's tag, not a row
+    local LM = LS.create{ id = "r36ml", place = { host = "menu", corner = "top-left" }, size = { 300, 200 } }
+    local rmenu = RS.create{ id = "r36mr", place = { list = LM } }
+    B.create{ id = "r36mg", label = "MENU", place = { row = rmenu }, onClick = T.rec("r36mg") }
+    tick()
+    T.hover(T.tagged("r36mr"))
+    ok(T.agree("r36g5") and T.strong("r36r5") and T.ign() == ign + 7 and FO.stats().faults == 0, "story 36 not ours: another mod's row, a copy, a stale or untagged widget, a row without a focusable, a text, a menu row: ignored", T.ign() - ign)
+    LS.remove(LM)
+    -- Another mod's window on top (the shared Z registry) while keyboard focus is still here: ignored
+    T.move()
+    local ZK = SC._OPEN_Z_KEY
+    local zBefore = ModRef:GetSharedVariable(ZK) or ""
+    ModRef:SetSharedVariable(ZK, zBefore .. "," .. (T.screenOf("R36").z + 100))
+    local ignZ = T.ign()
+    F.focus = T.btn("r36g5")
+    T.hover(T.tagged("r36r2"))
+    ok(rec.focusId == "r36g5" and F.focus == T.btn("r36g5") and T.ign() == ignZ + 1, "story 36 another mod's window on top: ignored")
+    ModRef:SetSharedVariable(ZK, zBefore)
+    tick()
+    ok(T.agree("r36g5"), "story 36 another mod's window gone: still on r5")
+    T.move()
+    local R2 = SC.open{ id = "R36b" }
+    local L2 = LS.create{ id = "r36bl", place = { screen = R2, corner = "top-left" }, size = { 300, 200 } }
+    local rb = RS.create{ id = "r36br", place = { list = L2 } }
+    B.create{ id = "r36bg", place = { row = rb }, icon = { icon = "gear" }, iconSize = 28, dimmed = true, onClick = T.rec("r36bg") }
+    local rb2 = RS.create{ id = "r36br2", place = { list = L2 } }
+    B.create{ id = "r36bg2", place = { row = rb2 }, icon = { icon = "gear" }, iconSize = 28, dimmed = true, onClick = T.rec("r36bg2") }
+    tick()
+    ok(T.agree("r36bg"), "story 36 covered: the top window holds focus")
+    -- the window opened under a still pointer: an enter on its second row at that position is ignored too
+    local ign2 = T.ign()
+    T.hover(T.tagged("r36br2"))
+    ok(T.ign() == ign2 + 1 and T.agree("r36bg"), "story 36 pointer still: a window opened under the pointer ignores the enter")
+    T.move()
+    T.hover(T.tagged("r36r2"))
+    ok(T.agree("r36bg") and rec.focusId == "r36g5" and T.ign() == ign2 + 2, "story 36 covered: a covered window's row is ignored")
+    local deref = Nucleus_Deref
+    Nucleus_Deref = function() error("Nucleus_Deref: called off the game thread") end
+    T.hover(T.tagged("r36br"))
+    Nucleus_Deref = deref
+    ok(T.agree("r36bg") and T.ign() == ign2 + 3, "story 36 off the game thread: ignored")
+    SC.close(R2)
+    ok(T.agree("r36g5") and T.strong("r36r5"), "story 36 covered: back on r5 after the close")
+    -- Column: focus in column 2 of a 2-focusable row; hover a 1-focusable row: its only focusable
+    T.move()
+    T.hover(T.tagged("r36r7"))
+    ok(T.agree("r36g7") and T.strong("r36r7"), "story 36 column: a hover lands on column 1 from column 1")
+    ok(T.key(wr, D.right, INV_ACT) and T.agree("r36c7"), "story 36 column: RIGHT to the checkbox (column 2)")
+    T.move()
+    T.hover(T.tagged("r36r6"))
+    ok(T.agree("r36g6") and T.strong("r36r6") and T.strip("r36r7"), "story 36 column: from column 2, a 1-focusable row gives its only focusable")
+    -- Inside the hook, no instance alive: the plain band now (the material is cached), no load; strong on the tick
+    kill(T.matOf("r36r6"))
+    loads, gets = AS.stats.loads, F.getAssets
+    local made = #F.mids
+    T.move()
+    T.hover(T.tagged("r36r3"))
+    ok(T.agree("r36g3") and T.selected("r36r3") and T.tintIs(T.tagged("r36r3").matTint, theme.game.rowTint) and #F.mids == made
+        and AS.stats.loads == loads and F.getAssets == gets, "story 36 in the hook, no instance: the plain band, nothing made or loaded", #F.mids - made)
+    tick()
+    ok(T.strong("r36r3") and #F.mids == made + 1, "story 36 in the hook: the tick makes the strong band", #F.mids - made)
+    -- ... and nothing cached at all (assets reset): no load in the hook, no band yet (r3 loses its band; its strip needs
+    -- the material too: a plain colour until it is re-styled); the tick completes the band and the face
+    AS._reset()
+    gets = F.getAssets
+    T.move()
+    T.hover(T.tagged("r36r4"))
+    ok(T.agree("r36g4") and F.getAssets == gets and not T.selected("r36r4") and not T.strong("r36r4") and not T.strong("r36r3") and not T.selected("r36r3"),
+        "story 36 in the hook, nothing cached: focus moves, no GetAsset, no band yet", F.getAssets - gets)
+    tick()
+    ok(T.strong("r36r4") and T.gearFaced("r36g4") and rec.lookRowId == "r36r4", "story 36 nothing cached: the tick completes the band and the face")
+    T.key(wr, D.up, INV_ACT)
+    -- Position unreadable (throws / returns nothing), now or at the key: the hover applies, even without a move
+    local steps = { throw = { "r36g2", "r36r4", "r36g3", "r36r5" }, ["nil"] = { "r36g4", "r36r6", "r36g5", "r36r1" } }
+    for _, mode in ipairs({ "throw", "nil" }) do
+        local s = steps[mode]
+        F.mouseFail = nil
+        T.key(wr, D.up, INV_ACT)
+        F.mouseFail = mode
+        T.hover(T.tagged(s[2]))
+        ok(SC.stats().focus == s[2]:gsub("r36r", "r36g") and T.strong(s[2]), "story 36 position unreadable now (" .. mode .. "): the hover applies", SC.stats().focus)
+        T.key(wr, D.up, INV_ACT)
+        ok(T.agree(s[3]), "story 36 position unreadable (" .. mode .. "): UP", SC.stats().focus)
+        T.hover(T.tagged(s[4]))
+        ok(SC.stats().focus == s[4]:gsub("r36r", "r36g") and T.strong(s[4]), "story 36 position unreadable at the key (" .. mode .. "): the hover applies", SC.stats().focus)
+    end
+    F.mouseFail = nil
+    -- Body fails: one WARN, counted, the depth counters back
+    local faults = FO.stats().faults
+    local nW = countLogs("hover handling failed")
+    FO._onHover({ get = function() error("ctx: boom") end })
+    FO._onHover({ get = function() error("ctx: boom") end })
+    ok(FO.stats().faults == faults + 2 and countLogs("hover handling failed") == nW + 1 and C.inDispatch == 0, "story 36 body fails: one WARN, each counted", FO.stats().faults - faults)
+    T.move()
+    T.hover(T.tagged("r36r5"))
+    ok(T.agree("r36g5") and T.strong("r36r5"), "story 36 body fails: the next hover works")
+    -- Old pak: no <Core>_OnHover on the row class: one WARN from RegisterHook, keys and clicks unchanged
+    local S36 = FO._S
+    local rh = RegisterHook
+    RegisterHook = function(p, f) if p:find("_OnHover", 1, true) then error("RegisterHook: function not found") end return rh(p, f) end
+    S36.hoverHooked = false
+    local nH, nWarn = hookCount("Nucleus_OnHover"), countLogs("window rows: RegisterHook")
+    tick(); tick()
+    RegisterHook = rh
+    ok(S36.hoverHooked == true and hookCount("Nucleus_OnHover") == nH and countLogs("window rows: RegisterHook") == nWarn + 1,
+        "story 36 old pak: one WARN, tried once", countLogs("window rows: RegisterHook") - nWarn)
+    ok(T.key(wr, D.down, INV_ACT) and T.agree("r36g6"), "story 36 old pak: keys unchanged")
+    T.fire(T.CLICK, T.tagged("r36g2"))
+    ok(T.agree("r36g2") and T.strong("r36r2"), "story 36 old pak: clicks unchanged")
+    SC.close(R)
+    ok(rec.lookRowId == nil, "story 36 window closed: nothing recorded")
+end
+
 print(string.format("focus_test: %d passed, %d failed", pass, failN))
 if failN > 0 then os.exit(1) end

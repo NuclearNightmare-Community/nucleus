@@ -836,8 +836,21 @@ $menuChecks = $started + @(
     "\[$T\] OK KLOOK row: the unfocused row kbm\.r1 shows its worn strip "
     "\[$T\] OK KLOOK face: the focused gear kbm\.g2 shows a focus face "
     "\[$T\] OK KLOOK face off: the unfocused gear kbm\.g1 has no face "
+    # Core story 36: the pointer moves onto row 4: focus, face and band there, row 2 its worn strip (its second OK line:
+    # the first is the opening step's); a DOWN key continues to row 5.
+    "\[$T\] OK KFOCUS KBM kbm\.g4 "
+    "\[$T\] OK KLOOK row: the focused row kbm\.r4 shows the strong selection "
+    "#2|\[$T\] OK KLOOK row: the unfocused row kbm\.r2 shows its worn strip "
+    "\[$T\] OK KLOOK face: the focused gear kbm\.g4 shows a focus face "
+    "#2|\[$T\] OK KLOOK face off: the unfocused gear kbm\.g2 has no face "
+    "\[$T\] OK KFOCUS KBM kbm\.g5 "
+    "\[$T\] OK KLOOK row: the focused row kbm\.r5 shows the strong selection "
+    "\[$T\] OK KLOOK row: the unfocused row kbm\.r4 shows its worn strip "
+    "\[$T\] OK KLOOK face: the focused gear kbm\.g5 shows a focus face "
+    "\[$T\] OK KLOOK face off: the unfocused gear kbm\.g4 has no face "
+    "\[$T\] OK KHOVER the band followed the mouse \(hooked true, hovers [1-9]"
     "\[$T\] OK KBEND every window closed"
-    "!\[$T\] WARN .*(window key|focus look|focus face|focus highlight|restoring its own|focus window|focus tick|focusing it failed|focused row|keyboard focus|input mode|clicked element|card|re-fit|BACK button|NavHandled)"
+    "!\[$T\] WARN .*(window key|focus look|focus face|focus highlight|restoring its own|focus window|focus tick|focusing it failed|focused row|keyboard focus|input mode|clicked element|card|re-fit|BACK button|NavHandled|window rows|hover handling)"
     "\[$T\] END result=PASS"
 )
 # Core story 24: the ic-* group, on window IC (menu3), and every new function off the game thread.
