@@ -740,6 +740,7 @@ do
     bad({ host = CSH, after = "Overlay_28" }, "after needs container = <game widget name>", "after without container")
     bad({ host = CSH, index = 1 }, "index needs container = <game widget name>", "index without container")
     bad({ host = CSH, corner = "top-left", at = "end" }, "at needs container = <game widget name>", "at with a corner, no container")
+    bad({ host = CSH, after = "A", before = "B" }, "after and before need container = <game widget name>", "two positions, no container")
     ok(C.els.badins == nil, "validate: the refused calls created nothing")
     -- inside a core container: refused by the container rules (core's containers keep { panel | list | row = handle })
     local PN = require("nucleus.ui.panel")
@@ -807,7 +808,7 @@ ok(X.isShown(xc) == false and C.els.xc.ref == nil and C.els.xc.attached == false
 ok(countLogs("WARN ui createServer: container 'VerticalBox_NOPE' is missing") == 1 and countLogs("'xc'") >= 1, "unknown container: one WARN naming it and the element")
 local xi = X.create{ id = "xi", text = "NOT A BOX", place = { host = CSH, container = "Image_5", at = "end" } }
 tick()
-ok(X.isShown(xi) == false and countLogs("WARN ui createServer: 'Image_5' is a Image, not VerticalBox, HorizontalBox or ScrollBox; 'xi' stay(s) pending") == 1,
+ok(X.isShown(xi) == false and countLogs("WARN ui createServer: 'Image_5' is a Image, not a VerticalBox, HorizontalBox or ScrollBox; 'xi' stay(s) pending") == 1,
     "a container that is not a box: one WARN saying what it is (not 'missing')")
 ok(countLogs("container 'Image_5' is missing") == 0, "a container that is not a box: not called missing")
 -- a HorizontalBox works too
@@ -941,6 +942,7 @@ do
     ok(I.indexOf(s.vb, "n1") == I.indexOf(s.vb, "k5") + 1 and I.indexOf(s.vb, "n3") == I.indexOf(s.vb, "n1") + 2 and X.isShown(n3) == true,
         "three creates while open: in place after the knobs, creation order", I.list(s.vb))
     ok(s.pickers.Overlay_27.sel == 5 and s.pickers.Overlay_27.sets == sets + 1, "three creates while open: Lobby Time still shows the player's value (put back once)")
+    ok(X.stats().pickerRestores >= 1, "stats: pickerRestores counts the restores")
     local g, why = I.gameOk(s.vb)
     ok(g, "three creates while open: game rows' order and slot values kept", why)
     tick(); tick()

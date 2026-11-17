@@ -146,7 +146,26 @@ return function(X, GS)
         local w = try(function() return tostring(s.VerticalAlignment) end) or "?"
         return "pad=" .. p .. " size=" .. z .. " ha=" .. h .. " va=" .. w
     end
-    -- The list's children: { name (id for ours), ours, path, slot }.
+    -- The game pickers (MultipleSelectBox_C) inside a game row, as "name=option;..." (a bounded walk; user widgets not entered).
+    local function picksOf(row)
+        local out, stack, seen = {}, { row }, 0
+        while #stack > 0 and seen < 64 do
+            local w = table.remove(stack)
+            seen = seen + 1
+            local cls = try(function() return w:GetClass():GetFName():ToString() end)
+            if cls == "MultipleSelectBox_C" then
+                out[#out + 1] = fname(w) .. "=" .. tostring(str(try(function() return w.SelectedOption end)))
+            else
+                local n = try(function() return w:GetChildrenCount() end) or 0
+                for i = n - 1, 0, -1 do
+                    local c = try(function() return w:GetChildAt(i) end)
+                    if v(c) then stack[#stack + 1] = c end
+                end
+            end
+        end
+        return table.concat(out, ";")
+    end
+    -- The list's children: { name (id for ours), ours, path, slot, picks }.
     local function listOf(vb)
         local out = {}
         local n = try(function() return vb:GetChildrenCount() end) or 0
@@ -154,7 +173,7 @@ return function(X, GS)
             local c = try(function() return vb:GetChildAt(i) end)
             if v(c) then
                 local id = idOf(c)
-                out[#out + 1] = { name = id or fname(c), ours = id ~= nil, path = pathOf(c), slot = id and "" or slotKey(c) }
+                out[#out + 1] = { name = id or fname(c), ours = id ~= nil, path = pathOf(c), slot = id and "" or slotKey(c), picks = id and "" or picksOf(c) }
             end
         end
         return out
@@ -197,7 +216,9 @@ return function(X, GS)
             return table.concat(t, ",")
         end
         -- The game rows' order and slot values against the snapshot; one widget per element.
-        local function verify(label)
+        -- pickWant (row name -> "name=option;..."): when given, every game row's pickers must show those options after
+        -- the rebuild (core puts them back; one GIPICKS line).
+        local function verify(label, pickWant)
             local vb = vbOf()
             if not check(vb ~= nil, "GILIST %s %s found", label, VB) then return false end
             local l = listOf(vb)
@@ -222,6 +243,15 @@ return function(X, GS)
                 label, tostring(kIdx), orderOk and "" or (": got " .. got))
             check(slotsOk, "GISLOTS %s: %d game rows in their order with the snapshot's slot values%s", label, #games, slotsOk and "" or (": " .. tostring(bad)))
             check(one and seen["gi-xc"] == nil, "GIONE %s: one widget per element (%d ids), none for the unknown container's", label, #S.ids)
+            if pickWant then
+                local pOk, pBad, np = true, nil, 0
+                for _, g in ipairs(games) do
+                    local want = pickWant[g.name]
+                    if g.picks ~= "" then np = np + select(2, g.picks:gsub("=", "")) end
+                    if want ~= nil and g.picks ~= want then pOk, pBad = false, string.format("%s %s (want %s)", g.name, g.picks, want) break end
+                end
+                check(pOk and np > 0, "GIPICKS %s: %d game pickers in the rebuilt list show their options from before the rebuild%s", label, np, pOk and "" or (": " .. tostring(pBad)))
+            end
             S.lastList = got
             return orderOk and slotsOk and one, l
         end
@@ -289,7 +319,8 @@ return function(X, GS)
             for _, e in ipairs(S.snap) do has[e.name] = true end
             check(ours == 0 and #S.snap >= 3 and has.Overlay_28 and has.Overlay_27 and has.Overlay_738 and S.snap[2].name == "Overlay_28",
                 "GISNAP %s before any container element: %d game rows, none of ours (%d), Overlay_28 second, Overlay_27 and Overlay_738 present", VB, #S.snap, ours)
-            for i, e in ipairs(S.snap) do say("GISNAPROW %d %s %s", i - 1, e.name, e.slot) end
+            S.snapPicks = {}
+            for i, e in ipairs(S.snap) do S.snapPicks[e.name] = e.picks; say("GISNAPROW %d %s %s %s", i - 1, e.name, e.slot, e.picks) end
         end)
         step("gi: create while open", function()
             if S.abort then return end
@@ -332,7 +363,7 @@ return function(X, GS)
         end)
         step("gi: created check", function()
             if S.abort then return end
-            verify("created")
+            verify("created", S.snapPicks)
         end)
         backOnce("menu1", 1)
 
@@ -341,7 +372,7 @@ return function(X, GS)
             openOnce("menu1", n)
             step("gi: open check " .. n, function()
                 if S.abort then return end
-                local okV = verify("open " .. n)
+                local okV = verify("open " .. n, S.snapPicks)
                 local d = rebuilds() - S.r0
                 check(d == 1, "GIREBUILD open %d: %s rebuilt %d time(s) for two anchors (expected 1)", n, VB, d)
                 local T = core().ui.text
@@ -371,7 +402,7 @@ return function(X, GS)
         -- The game's own controls after the rebuild: CONFIGURE, the Difficulty and Lobby Time pickers, a preset.
         local FINAL = OPENS + 2
         openOnce("menu1", FINAL)
-        step("gi: final check", function() if S.abort then return end verify("final") end)
+        step("gi: final check", function() if S.abort then return end verify("final", S.snapPicks) end)
         clickAt("CONFIGURE", function() return prop(screen(), "Button_216") end)
         settle("configure", 1.5)
         step("gi: configure check", function()
@@ -495,6 +526,10 @@ return function(X, GS)
             if S.abort then return end
             S.lobbyL = optionOf("MultipleSelectBox_5")
             S.rl = rebuilds()
+            S.pr0 = core().ui.text.stats().pickerRestores
+            S.latePicks = {}
+            local vb0 = vbOf()
+            for _, e in ipairs(vb0 and listOf(vb0) or {}) do if not e.ours then S.latePicks[e.name] = e.picks end end
             local T = core().ui.text
             for i = 1, 2 do
                 S.late[i] = T.create{ id = "gi-n" .. i, text = "SKEL LATE " .. i, place = { host = HOST, container = VB, after = "Overlay_28" } }
@@ -512,7 +547,10 @@ return function(X, GS)
             if S.abort then return end
             local now = optionOf("MultipleSelectBox_5")
             local d = rebuilds() - S.rl
-            local okV = verify("after the late creates")
+            local okV = verify("after the late creates", S.latePicks)
+            local pr = core().ui.text.stats().pickerRestores
+            check(type(pr) == "number" and type(S.pr0) == "number" and pr > S.pr0,
+                "GIRESTORE core put back %d game picker option(s) in the late rebuild (ui.text.stats().pickerRestores %s -> %s)", (pr or 0) - (S.pr0 or 0), tostring(S.pr0), tostring(pr))
             check(S.lobbyL ~= nil and S.lobbyL ~= S.lobby0, "GILATELOBBY Lobby Time at a non-default value before the creates (%s; %s at open)", tostring(S.lobbyL), tostring(S.lobby0))
             check(S.lateInCall and okV and d == 1, "GILATE two texts made while open: not attached in the call (%s), in place after the knobs on the next tick, %d rebuild(s) for both",
                 tostring(S.lateInCall), d)

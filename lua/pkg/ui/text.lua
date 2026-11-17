@@ -1621,7 +1621,6 @@ X._ensureMenu = function() ensureMenu() end
 -- of the Lua state.
 local INSERT_CLASSES = { VerticalBox = true, HorizontalBox = true, ScrollBox = true }
 local INSERT_CLASS_NAMES = "a VerticalBox, HorizontalBox or ScrollBox"
-local INSERT_CLASS_LIST = "VerticalBox, HorizontalBox or ScrollBox"
 local WALK_MAX, WALK_DEPTH = 4096, 32
 -- The pickers inside one game row: at most PICK_WALK widgets and PICK_DEPTH levels are looked at.
 local PICKER_CLASS = "MultipleSelectBox_C"
@@ -1935,7 +1934,7 @@ local function insertPass(host, s, only, reason)
             if why.notBox then
                 C.warnOnce("insert container " .. host .. "|" .. nm,
                     "ui %s: '%s' is a %s, not %s; %s stay(s) pending until the next open",
-                    host, nm, why.notBox, INSERT_CLASS_LIST, idsOf(els))
+                    host, nm, why.notBox, INSERT_CLASS_NAMES, idsOf(els))
             else
                 C.warnOnce("insert container " .. host .. "|" .. nm,
                     "ui %s: container '%s' is missing (%s; it must be %s, by name); %s stay(s) pending until the next open",
@@ -1988,7 +1987,8 @@ ensureGame = function(host)
         end
     end)
     G._ticker(host, function(s)
-        runQueued(host, s)
+        local okQ, errQ = pcall(runQueued, host, s)
+        if not okQ then C.warnOnce("insert queue " .. host, "ui %s: the queued insert pass failed: %s", host, firstLineOf(errQ)) end
         X._tickHost(host, s)
     end)
 end
@@ -2356,7 +2356,8 @@ function X.stats()
     return { elements = n, uobjectCalls = C.stats.uobjectCalls, attachCreated = C.stats.attachCreated,
         attachReused = C.stats.attachReused, handlesFreed = C.stats.handlesFreed, findAllCalls = C.stats.findAllCalls,
         overlapScheduled = C.stats.overlapScheduled, overlapChecks = C.stats.overlapChecks,
-        panelRebuilds = C.stats.panelRebuilds or 0, containerRebuilds = C.stats.containerRebuilds or 0 }
+        panelRebuilds = C.stats.panelRebuilds or 0, containerRebuilds = C.stats.containerRebuilds or 0,
+        pickerRestores = C.stats.pickerRestores or 0 }
 end
 
 -- The tag a widget of this mod's element carries (for tests and diagnostics).

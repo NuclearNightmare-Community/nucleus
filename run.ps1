@@ -37,7 +37,7 @@ param(
     [Parameter(Mandatory)] [string] $Instance,
     [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'createserver', 'gameinsert', 'soak')]
     [string] $Scenario = 'skeleton',
-    [int] $TimeoutSec = 0, # 0: 420 s, 900 s for ui (it travels four times and waits for layout), menu (about 40 requests and three map loads) createserver (about 30 clicks, a hosted session, a minute in it) and gameinsert (about 35 clicks, twelve opens), 1200 s for journal (24 key presses, a revive, a map change), 1000 s for soak (10 min idle); x1.5 in the VM
+    [int] $TimeoutSec = 0, # 0: 420 s, 900 s for ui (it travels four times and waits for layout), menu (about 40 requests and three map loads), createserver (about 30 clicks, a hosted session, a minute in it) and gameinsert (about 35 clicks, twelve opens), 1200 s for journal (24 key presses, a revive, a map change), 1000 s for soak (10 min idle); x1.5 in the VM
     [ValidateSet('host', 'vm')] [string] $Target = 'host',
     [switch] $AllowOtherDrivers # run even when another runner's test mod is enabled in the copy (tools/run-guard)
 )
