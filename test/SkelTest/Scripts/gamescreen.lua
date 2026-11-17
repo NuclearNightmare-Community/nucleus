@@ -4,7 +4,7 @@
 --                       the control calls); in bad-input (menu1, match1) and in createserver (menu1)
 --   offThread(P)        every core.ui.game function off the game thread (inside a LoopAsync block)
 --   offThreadStep(phase) offThread on its own LoopAsync, as one step (createserver; bad-input uses main.lua's block)
---   preConnect()        the game functions called before connect (recorded during main.lua in createserver)
+--   preConnect()        the game functions called before connect (recorded during main.lua in bad-input and createserver)
 --   build()             the createserver scenario, written for the VM at 1280x720 (run.ps1 -Target vm): a watcher, a
 --                       text and a checkbox on host createServer before any key; ten times a real click on START GAME,
 --                       opened and the text in the screen's root canvas (a new widget each open), a real click on Back,
@@ -288,7 +288,15 @@ return function(X)
         step("create: click Create", function()
             S.preCreate, S.createPath = #S.ev, S.opens[OPENS + 1]
             if S.abort then check(false, "CSCREATE Create not clicked: the screen is not Friends-Only (a public session is never made)") return end
-            local r = X.absR(prop(screen(), "Create"))
+            -- the screen clicked is read again right before the click: never Create unless it says Friends-Only now
+            local s = screen()
+            local fo = try(function() return s.FriendsOnly end)
+            if fo ~= true then
+                check(false, "CSCREATE Create not clicked: the screen reads FriendsOnly=%s right before the click (a public session is never made)", tostring(fo))
+                S.abort = true
+                return
+            end
+            local r = X.absR(prop(s, "Create"))
             if not check(r ~= nil and r.r > r.l, "CSPOINT Create has a screen rectangle") then S.abort = true return end
             local x, y = center(r)
             say("CSCLICKREQ Create at (%d,%d)", x, y)

@@ -91,9 +91,9 @@ if SCENARIO == "bad-input" then
     try("pre-panel-move", "ui.panel.move({}, {}, 1) [before connect]", "panel", "move", {}, {}, 1)
     try("pre-button-create", "ui.button.create{ id = 'early' } [before connect]", "button", "create", { id = "early" })
 end
--- Core story 31: the game-screen functions before connect (createserver; reported by gamescreen.lua). In a field of
--- PRE_CONNECT: main.lua is at the 200-locals limit.
-if SCENARIO == "createserver" then
+-- Core story 31: the game-screen functions before connect (bad-input and createserver; reported by gamescreen.lua).
+-- In a field of PRE_CONNECT: main.lua is at the 200-locals limit.
+if SCENARIO == "bad-input" or SCENARIO == "createserver" then
     PRE_CONNECT.game = {}
     local okM, m = pcall(require, CORE:lower() .. ".ui.game")
     for _, c in ipairs({ { "pre-game-watch", "watch", "createServer", function() end }, { "pre-game-unwatch", "unwatch", 1 }, { "pre-game-isopen", "isOpen", "createServer" } }) do
@@ -2062,6 +2062,7 @@ end
 
 local function buildBadInput()
     preConnectCases()
+    SETS.GAME.preConnect() -- core story 31
     waitWorld("menu1", "NewMainMenu", 120)
     waitHud("menu1", 60)
     step("menu1: widget to destroy", function() return createWidget("menu1") end)

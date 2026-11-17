@@ -78,7 +78,13 @@ local HOST = {
 -- Core story 31: the game screens (createServer): the open screen of the local player and its root CanvasPanel.
 for host in pairs(C.GAME_SCREENS) do
     HOST[host] = {
-        poll = function() local s = G._poll(host) return s, s ~= nil end,
+        -- only a screen the poll has decided opened: an element made between the screen appearing and that tick waits for
+        -- opened, so the closed or lost that follows always frees what was attached
+        poll = function()
+            if not G._openNow(host) then return nil end
+            local s = G._poll(host)
+            return s, s ~= nil
+        end,
         canvas = function(s) return G._canvasOf(host, s) end,
     }
 end

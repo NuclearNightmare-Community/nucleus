@@ -436,6 +436,56 @@ T.calls = function() return C.stats.uobjectCalls end
 -- ---------------------------------------------------------------- story 31: the create-server screen and the modules
 local CK = require("nucleus.ui.checkbox")
 local G = require("nucleus.ui.game")
+-- the controls' widgets (controls_test.lua's fakes): a slider on the screen
+T.SL = require("nucleus.ui.slider")
+T.BN = require("nucleus.ui.button")
+T.CHOICECLASS = cls("/Game/Mods/Nucleus/WBP_NucleusChoice.WBP_NucleusChoice_C")
+T.SLIDERCLASS = cls("/Game/Mods/Nucleus/WBP_NucleusSlider.WBP_NucleusSlider_C")
+F.assets["/Game/Graphics/MainMenu/SettingsMenu.SettingsMenu_C"] = obj({ __asset = "SettingsMenu_C" }, "/Game/Graphics/MainMenu/SettingsMenu.SettingsMenu_C")
+T.TPATH = "/Game/Graphics/MainMenu/SettingsMenu.SettingsMenu_C:WidgetTree.Slider"
+T.TEMPLATE = obj({ __asset = "Slider" }, T.TPATH)
+function T.newChoiceW()
+    local w = widget("WBP_NucleusChoice_C", "/Engine/Transient.WBP_NucleusChoice_C_" .. (F.addr + 0x100), 40)
+    tagged(w)
+    w.Frame, w.Background = T.inner(4), T.inner(4)
+    w.valueSets = 0
+    function w:SetValueText(t) self.value = t; self.valueSets = self.valueSets + 1 end
+    function w:SetArrows(p, n, ...) self.arrows = { p, n, ... } end
+    function w:SetValueLook(f, size, ...) self.look = { f, size, ... } end
+    function w:SetRenderOpacity(o) self.opacity = o end
+    return w
+end
+function T.newSliderW()
+    local w = widget("WBP_NucleusSlider_C", "/Engine/Transient.WBP_NucleusSlider_C_" .. (F.addr + 0x100), 40)
+    tagged(w)
+    w.Frame = T.inner(4)
+    w.barValue, w.text, w.hint, w.sets = 0, "", "", 0
+    w.Bar = { GetValue = function() return w.barValue end }
+    w.Box = { GetText = function() return { ToString = function() return w.text end } end }
+    function w:SetRange(a, b, s, d) self.range = { a, b, s, d } end
+    function w:SetSliderValue(v)
+        self.barValue = v; self.sets = self.sets + 1
+        local d = self.range and self.range[4] or 0
+        self.text = string.format("%." .. d .. "f", v)
+    end
+    function w:SetSliderEmpty(v) self.barValue = v; self.text = ""; self.sets = self.sets + 1 end
+    function w:SetHint(h) self.hint = h end
+    function w:SetBoxWidth(v) self.boxW = v end
+    function w:SetEnabledState(e) self.enabled = e end
+    function w:SetBoxLook(f, size) self.look = { f, size } end
+    function w:CopySliderStyle(t) self.copied = t; self.copies = (self.copies or 0) + 1 end
+    function w:SetRenderOpacity(o) self.opacity = o end
+    return w
+end
+do
+    local WBL = F.objects["/Script/UMG.Default__WidgetBlueprintLibrary"]
+    local base = WBL.Create
+    WBL.Create = function(self, world, c, owner)
+        if c == T.CHOICECLASS then return T.newChoiceW() end
+        if c == T.SLIDERCLASS then return T.newSliderW() end
+        return base(self, world, c, owner)
+    end
+end
 T.CLICK = "WBP_NucleusButton_C:Nucleus_OnClicked"
 function T.fire(sub, w) clock = clock + 300000; fireHook(sub, w) end
 cls("/Game/Graphics/MainMenu/CreateServer.CreateServer_C")
@@ -614,6 +664,80 @@ do
     ok(n == 10 and okNew, "ten more opens: ten distinct paths, a new text widget each time", n)
 end
 ok(#G._ST.createServer.paths <= G._MAX_PATHS, "MAX_PATHS: at most 8 screens tracked", #G._ST.createServer.paths)
+ok(C.stats.gameFindAllCalls == 1, "seed: one FindAllOf(CreateServer_C) per Lua state, however many opens", C.stats.gameFindAllCalls)
+
+-- ---- an element made while a screen is in the viewport but before the poll decided opened waits for opened; a Back
+-- before that tick leaves nothing attached (no handle that a closed would have to free)
+do
+    local s = T.open(60)
+    local pre = X.create{ id = "cspre", text = "EARLY", place = { host = CSH, corner = "top-left" } }
+    ok(X.isShown(pre) == false and T.inCanvas(s, "cspre") == nil, "before opened: an element made now is not attached")
+    s:RemoveFromParent()
+    tick()
+    ok(X.isShown(pre) == false and C.els.cspre.ref == nil and T.inCanvas(s, "cspre") == nil, "Back before opened: nothing attached, no handle")
+    local s2 = T.open(61)
+    tick()
+    ok(X.isShown(pre) == true and T.inCanvas(s2, "cspre") ~= nil, "the next open: the element attached at opened")
+    s2:RemoveFromParent()
+    tick()
+    ok(X.isShown(pre) == false and C.els.cspre.ref == nil, "its closed: the handle freed")
+    X.remove(pre)
+end
+
+-- ---- corner stacking settles on the screen's ticks: two elements in one corner, attached unmeasured (height 0)
+do
+    local a = X.create{ id = "csa", text = "A", place = { host = CSH, corner = "top-left" } }
+    local b = X.create{ id = "csb", text = "B", place = { host = CSH, corner = "top-left" } }
+    F.unmeasured = true
+    local s = T.open(62)
+    tick()
+    local wa, wb = T.inCanvas(s, "csa"), T.inCanvas(s, "csb")
+    ok(wa ~= nil and wb ~= nil and wb.Slot.position.Y == wa.Slot.position.Y + P._GAP.normal, "stack unmeasured: the second one gap below the first (height 0)",
+        wb and wa and (wa.Slot.position.Y .. "/" .. wb.Slot.position.Y))
+    F.unmeasured = false
+    for _ = 1, 4 do tick() end
+    local gap = P._GAP.normal
+    ok(wa and wb and wb.Slot.position.Y == wa.Slot.position.Y + wa.h + gap, "stack settles on the screen's ticks: the second below the first by its height plus the gap",
+        wb and wa and (wa.Slot.position.Y .. "/" .. wb.Slot.position.Y))
+    s:RemoveFromParent()
+    tick()
+    X.remove(a); X.remove(b)
+end
+
+-- ---- an absolute text, a button and a slider on createServer: a new widget each in the screen's canvas on every open
+do
+    local at = X.create{ id = "csabs", text = "ABS", place = { host = CSH, absolute = { anchor = "center", x = 0, y = 100 } } }
+    local bt = T.BN.create{ id = "csbtn", label = "GO", place = { host = CSH, corner = "bottom-left" }, onClick = function() end }
+    local sl = T.SL.create{ id = "cssl", place = { host = CSH, corner = "bottom-right" }, min = 0, max = 10, step = 1, onChange = function() end }
+    local prev = {}
+    for i = 1, 2 do
+        local s = T.open(62 + i * 2)
+        tick()
+        for _, id in ipairs({ "csabs", "csbtn", "cssl" }) do
+            local w = T.inCanvas(s, id)
+            ok(w ~= nil and w ~= prev[id] and T.countIn(s, id) == 1, "open " .. i .. ": '" .. id .. "' has a new widget in the screen's canvas")
+            prev[id] = w
+        end
+        ok(prev.csabs and prev.csabs.Slot.anchors.Minimum.X == 0.5 and prev.csabs.Slot.anchors.Minimum.Y == 0.5, "open " .. i .. ": the absolute text anchored at the centre")
+        s:RemoveFromParent()
+        tick()
+    end
+    X.remove(at); T.BN.remove(bt); T.SL.remove(sl)
+end
+
+-- ---- NotifyOnNewObject failing: one WARN naming the host and the error
+do
+    local st, saved = G._ST.createServer, NotifyOnNewObject
+    local savedN, savedOk, savedErr = st.notified, st.okNotify, st.errNotify
+    st.notified = false
+    NotifyOnNewObject = function() error("no such class", 0) end
+    G.watch(CSH, function() end)
+    G.watch(CSH, function() end)
+    ok(countLogs("WARN game createServer: NotifyOnNewObject(/Game/Graphics/MainMenu/CreateServer.CreateServer_C) failed: no such class") == 1,
+        "notify failure: one WARN naming the host and the error")
+    NotifyOnNewObject = saved
+    st.notified, st.okNotify, st.errNotify = savedN, savedOk, savedErr
+end
 
 -- ---- a screen replaced by a newer one: lost now, opened next tick (one event per tick)
 local s20 = T.open(20)

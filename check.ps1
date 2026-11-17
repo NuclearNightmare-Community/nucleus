@@ -230,8 +230,9 @@ foreach ($p in 'menu1', 'match1') {
         $badInput += "\[$T\] OK CASE $p\.off-ui-$id "
     }
 }
-foreach ($id in 'pre-create', 'pre-watch', 'pre-find', 'pre-elements', 'pre-overlaps', 'pre-journal-watch', 'pre-journal-isopen', 'pre-panel-create', 'pre-panel-move', 'pre-button-create') { $badInput += "\[$T\] OK CASE $id " }
+foreach ($id in 'pre-create', 'pre-watch', 'pre-find', 'pre-elements', 'pre-overlaps', 'pre-journal-watch', 'pre-journal-isopen', 'pre-panel-create', 'pre-panel-move', 'pre-button-create', 'pre-game-watch', 'pre-game-unwatch', 'pre-game-isopen') { $badInput += "\[$T\] OK CASE $id " }
 $badInput += "\[$T\] OK CASES before-connect recorded=10"
+$badInput += "\[$T\] OK CASES game before-connect recorded=3"   # core story 31
 # Story 18: versioning. connect's bad needs (AC 5), the compatibility rule on this core (AC 1-3), core.has and
 # core.features (AC 4) and the deprecated op (AC 8), in both worlds.
 foreach ($p in 'menu1', 'match1') {
