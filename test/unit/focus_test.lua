@@ -1282,10 +1282,36 @@ do
         SC.close(W)
     end
     F.midFail = nil
+    -- Inside core's control dispatch (C.inDispatch), outside onNav / F.used, with none alive: the plain selection, nothing
+    -- made; outside it the tick makes one
+    AS._reset()
+    do
+        local W = SC.open{ id = "R30d" }
+        local Ld = LS.create{ id = "r30dl", place = { screen = W, corner = "top-left" }, size = { 300, 200 } }
+        local gd = {}
+        for i = 1, 2 do
+            local r = RS.create{ id = "r30dr" .. i, place = { list = Ld } }
+            gd[i] = B.create{ id = "r30dg" .. i, place = { row = r }, icon = { icon = "gear" }, iconSize = 28, dimmed = true, onClick = T.rec("r30dg" .. i) }
+        end
+        tick()
+        ok(T.agree("r30dg1") and T.strong("r30dr1"), "story 30 dispatch: row 1 strong first")
+        kill(T.matOf("r30dr1"))
+        local made = #F.mids
+        C.inDispatch = 1
+        B.remove(gd[1])
+        C.inDispatch = 0
+        ok(T.agree("r30dg2") and T.selected("r30dr2") and T.tintIs(T.tagged("r30dr2").matTint, g.rowTint) and #F.mids == made,
+            "story 30 dispatch, no instance: the recovered row gets the plain selection, nothing made", #F.mids - made)
+        tick()
+        ok(T.strong("r30dr2") and #F.mids == made + 1, "story 30 dispatch: the tick makes one and upgrades the row", #F.mids - made)
+        SC.close(W)
+    end
     -- Material missing: no row highlight (0.12.1 behaviour), assets.lua's WARN, no instance
     AS._reset()
     local SELP = "/Game/Graphics/MainMenu/Styles/Remaster/M_NN_CinematicSelection.M_NN_CinematicSelection"
     F.missing[SELP] = true
+    C.forgetWarning("asset:mat:selection")
+    local nW = countLogs("could not be loaded")
     local made = #F.mids
     local M2 = SC.open{ id = "R30m" }
     local Lm = LS.create{ id = "r30ml", place = { screen = M2, corner = "top-left" }, size = { 300, 200 } }
@@ -1293,6 +1319,7 @@ do
     B.create{ id = "r30mg", place = { row = rm }, icon = { icon = "gear" }, iconSize = 28, dimmed = true, onClick = T.rec("r30mg") }
     tick()
     ok(T.agree("r30mg") and T.strip("r30mr") and C.windows["R30m"].lookRowId == nil and #F.mids == made, "story 30 material missing: no row highlight, no instance")
+    ok(countLogs("could not be loaded") == nW + 1, "story 30 material missing: assets.lua's one WARN", countLogs("could not be loaded") - nW)
     SC.close(M2)
     F.missing[SELP] = nil
     AS._reset()
