@@ -15,8 +15,17 @@
 -- In the game look (the default on menu and screen) the value and the arrows are AlumniSans in the menu's text colours
 -- on the worn strip; in the plain look the engine font on a dark box.
 --
--- widget = "game" (the game's own MultipleSelectBox_C, for game-screen hosts) is not available yet and raises; the key
--- is accepted with "core" so that later addition stays add-only.
+-- Core story 33 (0.15.0): widget = "game" is the game's own picker (MultipleSelectBox_C), on game-screen hosts only
+-- (directly, or in a row, panel or list there; with no place it starts on createServer's canvas, for a game-style
+-- row's control = <handle> to move it into the row). Its element is an internal kind (gchoice): a core-tagged
+-- WBP_<Core>Row wrapper with no background holding one picker made with WidgetBlueprintLibrary:Create (a tag on the
+-- picker itself would show as its tooltip). The options must be distinct (the picker selects by text); the shown
+-- option is the picker's DefaultOption (which its PreConstruct shows again on every re-add or rebuild) and
+-- SetSelectedOption once it is in the wrapper. tooltip is refused (help belongs on the row's "?"). enabled = false
+-- disables the picker (SetIsEnabled, the disabled opacity) and the hook ignores it. Dispatch: one post-hook per Lua
+-- state on each of the picker's two arrow handlers, registered from the UI poll once a game choice exists (re-registered
+-- when the class is loaded again), filtered to this state's live pickers; a real change runs onChange once in pcall,
+-- with the same debounce and throw rules as the core choice (a click it drops puts the picker back on its option).
 --
 -- Dispatch: each dependent's Lua state registers one post-hook on <class>:<Core>_OnPrev and one on <Core>_OnNext, by
 -- full path, from the UI poll once a choice exists (never inside a hook). The hook ignores other mods' widgets in silence
@@ -32,6 +41,7 @@ local X = require(BASE .. ".ui.text")
 local A = require(BASE .. ".ui.assets")
 local St = require(BASE .. ".ui.strings")
 local theme = require(BASE .. ".ui.theme")
+local G = require(BASE .. ".ui.game") -- core story 33: the game choice's hook check on the game screens' ticks
 
 local CH = {}
 local MAX_OPTIONS, MAX_OPTION_BYTES = 64, 64
@@ -219,6 +229,186 @@ H._host{ poll = function() end, reset = function() end, dispatch = function()
     return nil
 end }
 
+-- ---------------------------------------------------------------- core story 33: the game's picker (widget = "game")
+local GS = { clicks = 0, dropped = 0, debounced = 0, ignored = 0, throws = 0, hookKey = nil, hookChecks = 0, needCheck = false, ticking = {} }
+local WBL = "/Script/UMG.Default__WidgetBlueprintLibrary"
+
+local function classNameOf(w)
+    local ok, n = pcall(function() return w:GetClass():GetFName():ToString() end)
+    return ok and n or nil
+end
+local function msbOf(el)
+    if not el.msbRef then return nil end
+    local ok, o = pcall(C.deref, el.msbRef)
+    return ok and o or nil
+end
+local function optionsKey(opts) return table.concat(opts, "\0") end
+local function selectedOf(m)
+    local ok, i = pcall(function() return m:GetSelectedIndex() end)
+    return ok and math.tointeger(tonumber(i)) or nil
+end
+
+-- The picker shows el.index: DefaultOption (what PreConstruct shows on every re-add) and the selection now.
+local function gShow(el, m)
+    C.count(); m.DefaultOption = el.options[el.index]
+    if selectedOf(m) ~= el.index - 1 then C.count(); m:SetSelectedOption(el.index - 1) end
+    el.shownIndex = el.index
+end
+local function gEnabled(el, m)
+    if el.appliedEnabled == el.enabled then return end
+    C.count(); m:SetIsEnabled(el.enabled)
+    C.count(); m:SetRenderOpacity(el.enabled and 1 or theme.disabledOpacity)
+    el.appliedEnabled = el.enabled
+end
+
+-- A new picker with el's options into the wrapper w's HBox (raises).
+local function newPicker(el, w)
+    local cls, why = A.get("cls:msb")
+    if not cls then return nil, why end -- assets.lua warned once (missing); the choice shows nothing
+    local s = X._attachHostObj()
+    C.count()
+    local m = StaticFindObject(WBL):Create(s or w, cls, X._ownerFor(w))
+    if not C.valid(m) then error("creating " .. C.MSB_SHORT .. " failed", 0) end
+    for _, o in ipairs(el.options) do C.count(); m:AddOption(o, {}) end
+    C.count(); m.DefaultOption = el.options[el.index]
+    C.count()
+    local slot = w.HBox:AddChild(m)
+    -- the picker fills its wrapper, as the game's fills its row's control slot (its ScaleBox then scales like the game's)
+    pcall(function() C.count(); slot:SetSize({ SizeRule = 1, Value = 1 }) end)
+    el.itemsKey, el.appliedEnabled = optionsKey(el.options), nil
+    return m
+end
+
+-- The wrapper's picker (its HBox's first child), or nil.
+local function pickerIn(w)
+    local ok, m = pcall(function()
+        local hb = w.HBox
+        if hb:GetChildrenCount() < 1 then return nil end
+        return hb:GetChildAt(0)
+    end)
+    if ok and C.valid(m) and classNameOf(m) == C.MSB_SHORT then return m end
+    return nil
+end
+
+local function keepRef(el, m)
+    local cur = msbOf(el)
+    if cur and cur:GetAddress() == m:GetAddress() then return end
+    if el.msbRef then pcall(C.free, el.msbRef); el.msbRef = nil end
+    local ok, h = pcall(C.ref, m)
+    if ok then el.msbRef = h end
+end
+
+X.KIND.gchoice = {
+    pkg = C.ROW_PKG, short = C.ROW_SHORT, cls = C.ROW_CLASS,
+    content = function(el, w, fresh)
+        if fresh then el.appliedEnabled, el.itemsKey = nil, nil end
+        local m = not fresh and pickerIn(w) or nil
+        if m and el.itemsKey ~= optionsKey(el.options) then -- new options (a create with the same id): a new picker
+            pcall(function() C.count(); m:RemoveFromParent() end)
+            m = nil
+        end
+        if not m then
+            m = newPicker(el, w)
+            if not m then return end
+        end
+        keepRef(el, m)
+        gShow(el, m)
+        gEnabled(el, m)
+        GS.needCheck = true
+    end,
+    style = function() end, -- the wrapper has no background; the picker draws itself
+}
+
+local function gRefresh(el)
+    local w = X._liveWidget(el)
+    if not w then return end
+    local ok, err = pcall(X.KIND.gchoice.content, el, w, false)
+    if not ok then C.warnOnce("choice:" .. el.id, "choice '%s': update failed: %s", el.id, firstLine(err)) end
+end
+
+-- A click on one of a picker's arrows (post-hook: the picker already moved). delta: +1 next, -1 previous.
+local function gStep(ctx, delta)
+    local m = ctx:get()
+    if not C.valid(m) then return end
+    local a = m:GetAddress()
+    local el = nil
+    for _, e in ipairs(C.order) do
+        if e.kind == "gchoice" and not e.removed and e.msbRef then
+            local cur = msbOf(e)
+            if cur and cur:GetAddress() == a then el = e break end
+        end
+    end
+    if not el then GS.ignored = GS.ignored + 1 return end -- the game's own picker, another mod's, or a stale one
+    local i = selectedOf(m)
+    local new = i and i + 1
+    local function back()
+        pcall(function() C.count(); m.DefaultOption = el.options[el.index]; C.count(); m:SetSelectedOption(el.index - 1) end)
+    end
+    if not new or new == el.index then GS.dropped = GS.dropped + 1 return end
+    if not el.enabled or not chainVisible(el) or new < 1 or new > #el.options then back(); GS.dropped = GS.dropped + 1 return end
+    local now = C.micros()
+    el.lastStep = el.lastStep or {}
+    local last = el.lastStep[delta]
+    if last and now - last < DEBOUNCE_US then back(); GS.debounced = GS.debounced + 1 return end
+    el.lastStep[delta] = now
+    el.index, el.shownIndex = new, new
+    pcall(function() C.count(); m.DefaultOption = el.options[new] end)
+    GS.clicks = GS.clicks + 1
+    C.used(el)
+    if C.debugOn() then C.log.debug("ui game choice '%s' -> %d", el.id, new) end
+    C.inDispatch = C.inDispatch + 1
+    local ok, err = pcall(el.onChange, el.handle, new, el.options[new])
+    C.inDispatch = C.inDispatch - 1
+    if not ok then
+        GS.throws = GS.throws + 1
+        if not el.warnedChange then
+            el.warnedChange = true
+            C.log.warn("choice '%s' onChange: %s", el.id, firstLine(err))
+        end
+    end
+end
+local function onGNext(ctx)
+    local ok, err = pcall(gStep, ctx, 1)
+    if not ok then C.warnOnce("game choice dispatch", "game choice click handling failed: %s (further failures not logged)", firstLine(err)) end
+end
+local function onGPrev(ctx)
+    local ok, err = pcall(gStep, ctx, -1)
+    if not ok then C.warnOnce("game choice dispatch", "game choice click handling failed: %s (further failures not logged)", firstLine(err)) end
+end
+
+-- From the poll (a game screen's opened and ticks; never inside a hook), once a game choice exists: the picker's class
+-- loaded (GetAsset), its arrow handlers hooked, again when the class was loaded anew (keyed by the next handler's address).
+local function anyGameChoice()
+    for _, el in ipairs(C.order) do if el.kind == "gchoice" and not el.removed then return true end end
+    return false
+end
+local function ensureGameHooks()
+    if X._inHook() or not anyGameChoice() then return end
+    GS.hookChecks = GS.hookChecks + 1
+    local cls = A.get("cls:msb")
+    if not cls then return end
+    local fn = C.found(C.MSB_NEXT_FN)
+    if not fn then return end
+    local okK, key = pcall(C.addr, fn)
+    if not okK or key == GS.hookKey then return end
+    local okN, errN = pcall(RegisterHook, C.MSB_NEXT_FN, onGNext)
+    local okP, errP = pcall(RegisterHook, C.MSB_PREV_FN, onGPrev)
+    GS.hookKey = key -- a half-registered pair is not tried again (it would double one arrow); one WARN instead
+    if okN and okP then C.log.debug("ui game choice hooks registered on %s's arrows", C.MSB_SHORT)
+    else C.warnOnce("game choice hook", "game choice arrows: RegisterHook failed: %s", firstLine(okN and errP or errN)) end
+end
+local function watchGame(host)
+    if GS.ticking[host] then return end
+    GS.ticking[host] = true
+    G._watch(host, function(_, info) if info.event == "opened" then GS.needCheck = true; pcall(ensureGameHooks) end end)
+    G._ticker(host, function()
+        if not GS.needCheck then return end
+        GS.needCheck = false
+        local ok, err = pcall(ensureGameHooks)
+        if not ok then C.warnOnce("game choice hook check", "game choice arrows: the hook check failed: %s", firstLine(err)) end
+    end)
+end
+
 -- ---------------------------------------------------------------- validation
 
 local function validOptions(v, pre)
@@ -266,21 +456,45 @@ function CH.create(opts, ...)
         if not CREATE_KEYS[k] then C.fail("%s: unknown key %s (valid: %s)", pre, C.describe(k), keyList(CREATE_KEYS)) end
     end
     local id = X._validId(opts.id, "choice.create")
+    local game = false
     if opts.widget ~= nil then
-        if opts.widget == "game" then C.fail("%s: widget 'game' is not available yet (the game's picker comes with game-screen hosts); use 'core' or leave it out", pre) end
-        if opts.widget ~= "core" then C.fail("%s: unknown widget %s (valid: core)", pre, C.describe(opts.widget)) end
+        if opts.widget == "game" then game = true
+        elseif opts.widget ~= "core" then C.fail("%s: unknown widget %s (valid: core)", pre, C.describe(opts.widget)) end
     end
     local options = validOptions(opts.options, pre)
+    if game then
+        -- core story 33: the game's picker selects by text, so its options must be distinct
+        local seen = {}
+        for i, o in ipairs(options) do
+            if seen[o] then C.fail("%s: options[%d] %s repeats options[%d] (widget 'game' needs distinct options: the game's picker selects by text)", pre, i, C.describe(o), seen[o]) end
+            seen[o] = i
+        end
+        if opts.tooltip ~= nil then C.fail("%s: tooltip is not available with widget 'game' (put the help on its game-style row: row.create{ help = ... })", pre) end
+    end
     local index = opts.selected == nil and 1 or validIndex(opts.selected, #options, pre, "selected")
     if type(opts.onChange) ~= "function" then C.fail("%s: onChange must be a function, got %s", pre, C.describe(opts.onChange)) end
     local enabled = validBool(opts.enabled, pre, "enabled", true)
     local tooltip = St.validateTooltip(opts.tooltip, pre)
     if opts.place ~= nil and type(opts.place) ~= "table" then C.fail("%s: place must be a table or nil, got %s", pre, C.describe(opts.place)) end
-    local intent = opts.place or { corner = "top-right" }
+    -- core story 33: a game choice with no place starts on the first game screen's canvas (a game-style row's control
+    -- moves it into the row)
+    local intent = opts.place or (game and { host = "createServer", corner = "top-right" } or { corner = "top-right" })
     local place = P.validate(intent)
+    if game then X._checkGameOnly(nil, place, "choice.create", false, "gchoice") end
     if not place.panelEl then X.checkHost("choice", place.host, "choice.create") end
     X._checkTipHost("choice", place.panelEl and C.hostOf(place.panelEl) or place.host, tooltip ~= nil)
-    local el = X._existing(id, "choice", "choice.create")
+    local kind = game and "gchoice" or "choice"
+    local prior = C.els[id]
+    if prior and not prior.removed and (prior.kind == "choice" or prior.kind == "gchoice") and prior.kind ~= kind then
+        C.fail("%s: id '%s' is already a choice with widget '%s'; remove it first to change its widget", pre, id, prior.kind == "gchoice" and "game" or "core")
+    end
+    local el = X._existing(id, kind, "choice.create")
+    if el and game then
+        el.options, el.index, el.onChange, el.enabled = options, index, opts.onChange, enabled
+        gRefresh(el)
+        P.place(el.handle, intent)
+        return el.handle
+    end
     if el then
         -- Same id: the new options, selection, callback, enabled state, tooltip and intent; visibility unchanged.
         el.options, el.index, el.onChange, el.enabled, el.tooltip = options, index, opts.onChange, enabled, tooltip
@@ -295,8 +509,12 @@ function CH.create(opts, ...)
     end
     if place.panelEl then X._checkJoin(place.panelEl, "choice", "choice.create", nil, tooltip ~= nil) end
     A.ensureLoadMapHook()
-    el = X._new("choice", id, { options = options, index = index, onChange = opts.onChange, enabled = enabled, tooltip = tooltip,
+    el = X._new(kind, id, { options = options, index = index, onChange = opts.onChange, enabled = enabled, tooltip = tooltip,
         style = X.resolveStyle(nil, "choice") }, place)
+    if game then
+        watchGame(C.hostOf(el))
+        GS.needCheck = true
+    end
     return el.handle
 end
 
@@ -314,7 +532,7 @@ function CH.set(h, index, ...)
     validIndex(index, #el.options, C.UI .. ".choice.set", "index")
     if index == el.index then return end -- no UObject call
     el.index = index
-    refresh(el)
+    if el.kind == "gchoice" then gRefresh(el) else refresh(el) end
 end
 
 function CH.setEnabled(h, enabled)
@@ -323,7 +541,7 @@ function CH.setEnabled(h, enabled)
     if type(enabled) ~= "boolean" then C.fail("%s.choice.setEnabled: enabled must be a boolean, got %s", C.UI, C.describe(enabled)) end
     if enabled == el.enabled then return end
     el.enabled = enabled
-    refresh(el)
+    if el.kind == "gchoice" then gRefresh(el) else refresh(el) end
     X._hostChanged(C.hostOf(el)) -- core story 27: a disabled focused element hands keyboard focus on
 end
 
@@ -347,7 +565,20 @@ function CH.isShown(h)
     return X._shown(el)
 end
 
-function CH.setTooltip(h, ...) return X._setTooltipOf("choice", h, (...), 1 + select("#", ...)) end
+function CH.setTooltip(h, ...)
+    -- core story 33: a game choice has no tooltip of its own (its game-style row's "?" has the help)
+    local gel = type(h) == "table" and C.handleOf[h] or nil
+    if gel and gel.kind == "gchoice" then
+        C.enter("choice.setTooltip")
+        local n = 1 + select("#", ...)
+        if n > 2 then C.fail("%s.choice.setTooltip: expected 2 arguments (handle, tooltip), got %d", C.UI, n) end
+        if (...) ~= nil then
+            C.fail("%s.choice.setTooltip: choice '%s' has widget 'game', which takes no tooltip (put the help on its game-style row: row.setHelp)", C.UI, gel.id)
+        end
+        return
+    end
+    return X._setTooltipOf("choice", h, (...), 1 + select("#", ...))
+end
 
 -- ---------------------------------------------------------------- range
 
@@ -412,6 +643,12 @@ function CH.range(opts, ...)
     return out
 end
 
-function CH.stats() return { clicks = S.clicks, dropped = S.dropped, debounced = S.debounced, ignored = S.ignored, throws = S.throws, hooked = S.hooked } end
+function CH.stats()
+    return { clicks = S.clicks, dropped = S.dropped, debounced = S.debounced, ignored = S.ignored, throws = S.throws, hooked = S.hooked,
+        -- core story 33: the game choices' arrow clicks
+        gameClicks = GS.clicks, gameDropped = GS.dropped, gameDebounced = GS.debounced, gameIgnored = GS.ignored, gameThrows = GS.throws,
+        gameHooked = GS.hookKey ~= nil }
+end
 CH._prev, CH._next, CH._S, CH._ensureHooks = onPrev, onNext, S, ensureHooks -- unit tests
+CH._gNext, CH._gPrev, CH._GS, CH._ensureGameHooks = onGNext, onGPrev, GS, ensureGameHooks -- unit tests (core story 33)
 return CH

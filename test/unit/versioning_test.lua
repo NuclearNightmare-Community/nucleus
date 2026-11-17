@@ -109,7 +109,7 @@ local want = { "call", "clock", "deref", "free", "map.setup",
     -- Mod Manager story 4 (0.10.0): the controls, every function hand-named
     "ui.checkbox", "ui.checkbox.create", "ui.checkbox.get", "ui.checkbox.isShown", "ui.checkbox.remove", "ui.checkbox.set", "ui.checkbox.setEnabled",
     "ui.checkbox.setTooltip", "ui.checkbox.setVisible",
-    "ui.choice", "ui.choice.create", "ui.choice.get", "ui.choice.isShown", "ui.choice.range", "ui.choice.remove", "ui.choice.set", "ui.choice.setEnabled",
+    "ui.choice", "ui.choice.create", "ui.choice.game", "ui.choice.get", "ui.choice.isShown", "ui.choice.range", "ui.choice.remove", "ui.choice.set", "ui.choice.setEnabled",
     "ui.choice.setTooltip", "ui.choice.setVisible",
     "ui.debug", "ui.elements",
     -- core story 31 (0.13.0): the game screens as hosts (ui.game by the rule, its first host hand-named)
@@ -119,13 +119,26 @@ local want = { "call", "clock", "deref", "free", "map.setup",
     "ui.journal", "ui.journal.regions", "ui.list", "ui.look", "ui.menu", "ui.overflow", "ui.panel", "ui.place",
     -- core story 32 (0.14.0): game containers
     "ui.place.container",
-    "ui.row", "ui.screen",
+    "ui.row",
+    -- core story 33 (0.15.0): game-style rows and the game's picker (ui.choice.game above)
+    "ui.row.like", "ui.row.setHelp", "ui.row.setLabel",
+    "ui.screen",
     -- core story 27 (0.12.0): the window card, keys and focus
     "ui.screen.focus", "ui.screen.panel",
     "ui.slider", "ui.slider.create", "ui.slider.get", "ui.slider.isShown", "ui.slider.remove", "ui.slider.set", "ui.slider.setDefault", "ui.slider.setEnabled",
     "ui.slider.setTooltip", "ui.slider.setVisible",
     "ui.text", "ui.text.setTooltip" }
-eq(table.concat(declared, ","), table.concat(want, ","), "declared(): the 0.14.0 feature list (map.setup, ui.journal.regions, ui.look, story 24's, story 4's, story 22's, story 23's, story 27's, story 31's and story 32's names hand-named; settings, net), sorted")
+eq(table.concat(declared, ","), table.concat(want, ","), "declared(): the 0.15.0 feature list (map.setup, ui.journal.regions, ui.look, story 24's, story 4's, story 22's, story 23's, story 27's, story 31's, story 32's and story 33's names hand-named; settings, net), sorted")
+-- Core story 33: a 0.14.x core's list answers false for the game-style rows and the game picker; this one true.
+do
+    local new = { ["ui.row.like"] = true, ["ui.row.setLabel"] = true, ["ui.row.setHelp"] = true, ["ui.choice.game"] = true }
+    local old = {}
+    for _, n in ipairs(want) do if not new[n] then old[#old + 1] = n end end
+    for n in pairs(new) do
+        ok(F.set(old)[n] == nil, "a 0.14.x core: core.has('" .. n .. "') is false")
+        ok(F.set(declared)[n] == true, "0.15.0: " .. n .. " is a feature")
+    end
+end
 -- Core story 32: a 0.13.x core's list answers false for ui.place.container; this one true.
 do
     local old = {}

@@ -1982,6 +1982,7 @@ local function badInputCases(phase)
     SETS.PRES.badInput(phase) -- core story 23
     SETS.GAME.cases(phase) -- core story 31
     SETS.INS.cases(phase) -- core story 32
+    SETS.NR.cases(phase) -- core story 33
     offThreadCases(phase)
 end
 
@@ -4644,7 +4645,7 @@ local function buildMenu()
             ccase("ch-sel-7", "ui.choice.create{ selected = 7 } [6 options]", ch({ selected = 7 }), E.err(HC .. "selected must be an integer from 1 to 6, got 7"))
             ccase("ch-sel-0", "ui.choice.create{ selected = 0 }", ch({ selected = 0 }), E.err(HC .. "selected must be an integer from 1 to 6, got 0"))
             ccase("ch-onchange", "ui.choice.create{ no onChange }", ch({ onChange = false }), E.err(HC .. "onChange must be a function, got nil"))
-            ccase("ch-game", "ui.choice.create{ widget = 'game' }", ch({ widget = "game" }), E.err(HC .. "widget 'game' is not available yet"))
+            ccase("ch-game", "ui.choice.create{ widget = 'game' } [off a game screen]", ch({ widget = "game" }), E.err(HC .. "widget 'game' needs a game screen host (createServer), got '"))
             ccase("ch-widget", "ui.choice.create{ widget = 'fancy' }", ch({ widget = "fancy" }), E.err(HC .. "unknown widget 'fancy' (valid: core)"))
             ccase("ch-hud", "ui.choice.create{ place = <hud corner> }", ch({ place = HUD }), E.err(HC .. "choices need a host with a cursor (journal, menu, screen)"))
             ccase("ch-enabled", "ui.choice.create{ enabled = 'no' }", ch({ enabled = "no" }), E.err(HC .. "enabled must be a boolean or nil, got 'no'"))
@@ -5364,6 +5365,9 @@ SETS.GAME = dofile(scriptDir .. "\\gamescreen.lua")({ case = case, E = E, step =
 -- Core story 32: the game-container bad-input cases and the gameinsert scenario (gameinsert.lua; gamescreen.lua's helpers).
 SETS.INS = dofile(scriptDir .. "\\gameinsert.lua")({ case = case, E = E, step = step, check = check, say = say, CORE = CORE,
     core = function() return core end, absR = absR, request = request, waitWorld = waitWorld, worldName = worldName, taggedIn = taggedIn, tagOfWidget = tagOfWidget }, SETS.GAME)
+-- Core story 33: the game-style rows' bad-input cases and the nativerow scenario (nativerow.lua; gamescreen.lua's helpers).
+SETS.NR = dofile(scriptDir .. "\\nativerow.lua")({ case = case, E = E, step = step, check = check, say = say, CORE = CORE,
+    core = function() return core end, absR = absR, request = request, waitWorld = waitWorld }, SETS.GAME)
 
 -- ---------------------------------------------------------------- runner (game thread, every 250 ms)
 local idx, waiting, busy, finished = 0, nil, false, false
@@ -5569,6 +5573,9 @@ client.connect{
         elseif SCENARIO == "gameinsert" then
             -- Core story 32: elements inside the create-server screen's settings list (its insert cases in menu1)
             SETS.INS.build()
+        elseif SCENARIO == "nativerow" then
+            -- Core story 33: game-style rows and the game's picker in the create-server screen's list (its cases in menu1)
+            SETS.NR.build()
         elseif SCENARIO == "journal" then
             core.log.debugEnabled = true -- the journal attach lines (cost per open) are DEBUG; no profiler: real costs
             buildJournal()

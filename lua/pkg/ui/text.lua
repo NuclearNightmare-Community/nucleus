@@ -296,10 +296,13 @@ local KIND = {
         end,
         style = backgroundStyle,
     },
+    -- Core story 33: a game-style row (el.like) builds its native parts and copies its look (below, with the insert pass).
     row = {
         pkg = C.ROW_PKG, short = C.ROW_SHORT, cls = C.ROW_CLASS,
-        content = function() end,
-        style = backgroundStyle,
+        content = function(el, w, fresh) if el.like then X._likeContent(el, w, fresh) end end,
+        style = function(el, w, fresh)
+            if el.like then X._likeStyle(el, w, fresh) else backgroundStyle(el, w, fresh) end
+        end,
     },
 }
 X.KIND = KIND -- button.lua adds the button kind
@@ -428,6 +431,7 @@ end
 -- ---------------------------------------------------------------- handles
 
 local function newHandle(id, kind)
+    kind = C.publicKind(kind) -- core story 33: a game choice's handle is a choice's
     return setmetatable({}, {
         __index = { id = id },
         __newindex = function() error(C.UI .. "." .. kind .. ": element handles are read-only", 2) end,
@@ -543,6 +547,13 @@ local function freeRef(el)
     end
     el.ref, el.path = nil, nil
 end
+-- Core story 33: what went with an element's widget (detached, removed, its host gone): a game choice's picker (a weak
+-- handle too) and a game-style row's applied label and help.
+local function dropParts(el)
+    if el.msbRef then pcall(C.free, el.msbRef); el.msbRef = nil end
+    el.appliedLabel, el.appliedHelp, el.shownIndex = nil, nil, nil
+end
+X._dropParts = dropParts
 
 local function removeWidget(w)
     pcall(function() C.count(); w:RemoveFromParent() end)
@@ -556,6 +567,11 @@ local function liveWidget(el) return el.ref and C.deref(el.ref) or nil end
 -- ScrollBox, a row's HBox), and, for a panel, the other one (other: a list or a row has none).
 local function boxOf(p, w, other)
     local ok, b
+    -- Core story 33: a game-style row's children go into its holder (between the label and the "?").
+    if p.like and not other then
+        local parts = X._likeParts(w)
+        if parts then return parts.holder end
+    end
     if p.kind == "list" or p.kind == "row" then
         if other then return nil end
         ok, b = pcall(function() if p.kind == "row" then return w.HBox end return w.VBox end)
@@ -598,14 +614,17 @@ local function applyGaps(p)
                 local left, right = pad, 0
                 if horiz and fixed then left, right = pad * 0.75, pad * 0.25 end
                 local inset = (not horiz and p.kind == "list") and theme.listInset or 0
-                local key = (isRow and (tostring(pad) .. "/" .. tostring(ch.fill)) or tostring(pad)) .. (fixed and "/k" or "") .. (inset > 0 and ("/i" .. inset) or "")
+                -- Core story 33: in a game-style row's holder (which takes the game control's Fill slot) a child with no
+                -- fill fills it too, as the game's control does (its picker's ScaleBox then scales like the game's).
+                local fill = ch.fill or (p.like and 1.0 or nil)
+                local key = (isRow and (tostring(pad) .. "/" .. tostring(fill)) or tostring(pad)) .. (fixed and "/k" or "") .. (inset > 0 and ("/i" .. inset) or "")
                 if ch.padKey ~= key then
                     local ok, err = pcall(function()
                         C.count()
                         w.Slot:SetPadding(horiz and { Left = left, Top = 0, Right = right, Bottom = 0 } or { Left = 0, Top = pad, Right = inset, Bottom = 0 })
                         if isRow then
                             C.count()
-                            w.Slot:SetSize({ SizeRule = ch.fill and SIZE_FILL or SIZE_AUTO, Value = ch.fill or 1.0 })
+                            w.Slot:SetSize({ SizeRule = fill and SIZE_FILL or SIZE_AUTO, Value = fill or 1.0 })
                         end
                         if fixed or ch.alignKept then
                             C.count()
@@ -698,7 +717,21 @@ end
 -- placement and visibility follow in placeAll (children: in attachChildren). A panel then attaches its children.
 -- steps (optional): per-element timing { id, us, create, panel } appended after each element. Raises on failure
 -- (callers pcall).
+local attachOneBody -- below
+-- Core story 33: the host object of the attach running now (the open game screen for a game-style row and a game
+-- choice: where the like row is read, and the world and owner of the widgets they create), or nil outside an attach.
+-- Valid only during that attach; never kept.
+local curHostObj = nil
+function X._attachHostObj() return curHostObj end
 local function attachOne(el, hostObj, container, byId, reason, report, steps)
+    local prev = curHostObj
+    curHostObj = hostObj
+    local ok, res = pcall(attachOneBody, el, hostObj, container, byId, reason, report, steps)
+    curHostObj = prev
+    if not ok then error(res, 0) end
+    return res
+end
+attachOneBody = function(el, hostObj, container, byId, reason, report, steps)
     local tStep = steps and C.micros()
     local tCreate = 0
     local t = C.pt()
@@ -1030,7 +1063,7 @@ local function onHud(hud, info)
                 local okD, w = pcall(C.deref, el.ref)
                 if okD and w == nil then
                     freed[#freed + 1] = string.format("'%s' %s", el.id, tostring(el.ref))
-                    freeRef(el)
+                    freeRef(el); dropParts(el)
                 end
             end
         end)
@@ -1292,7 +1325,7 @@ local function onJournal(j, info)
         forHost("journal", function(el)
             if newer and el.jpath == newer and el.ref then return end
             if el.ref then freed = freed + 1 end
-            freeRef(el)
+            freeRef(el); dropParts(el)
             el.attached, el.slotKey, el.appliedVis, el.stackHeight, el.padKey = false, nil, nil, nil, nil
             el.nearRect, el.jpath = nil, nil
         end)
@@ -1530,7 +1563,7 @@ local function releaseHost(host, keepPath)
     forHost(host, function(el)
         if keepPath and el.jpath == keepPath and el.ref then return end
         if el.ref then freed = freed + 1 end
-        freeRef(el)
+        freeRef(el); dropParts(el)
         el.attached, el.slotKey, el.appliedVis, el.stackHeight, el.padKey = false, nil, nil, nil, nil
         el.nearRect, el.jpath, el.sizeKey, el.matBg, el.gameText = nil, nil, nil, nil, nil
         el.selBg, el.faceOn = nil, nil -- core story 28: the focus highlight and face went with the widget
@@ -1675,19 +1708,46 @@ local function dropBoxes(host)
     local bc = boxCache[host]
     if not bc then return end
     for _, r in pairs(bc.refs) do pcall(C.free, r) end
+    for _, r in pairs(bc.like) do pcall(C.free, r) end -- core story 33
     boxCache[host] = nil
+end
+
+-- The cache of the open screen s (a new one per screen). Core story 33: like rows (name -> weak handle) and like names
+-- not found (name -> true) are kept there too, until the next open.
+local function cacheOf(host, s)
+    local sp = C.pathOf(s)
+    local bc = boxCache[host]
+    if not bc or bc.path ~= sp then
+        dropBoxes(host)
+        bc = { path = sp, refs = {}, missing = {}, like = {}, likeMissing = {} }
+        boxCache[host] = bc
+    end
+    return bc
+end
+
+-- Core story 33: the widget named name on the open screen s (any class; valid only in this callback), or nil. Found
+-- once per open (the bounded walk) and kept as a weak handle; a name not found is not looked for again in that open.
+local function namedOf(host, s, name)
+    local bc = cacheOf(host, s)
+    local r = bc.like[name]
+    if r then
+        local okD, w = pcall(C.deref, r)
+        if okD and w then return w end
+        pcall(C.free, r); bc.like[name] = nil
+    end
+    if bc.likeMissing[name] then return nil end
+    local root = G._rootOf(host, s)
+    local w = root and findNamed(root, { [name] = true }, 1)[name] or nil
+    if not w then bc.likeMissing[name] = true return nil end
+    local okR, h = pcall(C.ref, w)
+    if okR then bc.like[name] = h end
+    return w
 end
 
 -- The boxes of names (a list) on the open screen s: name -> box (valid only in this callback). Found once per open
 -- and kept as weak handles; a name not found (or not a box) is remembered as missing until the next open.
 local function boxesOf(host, s, names)
-    local sp = C.pathOf(s)
-    local bc = boxCache[host]
-    if not bc or bc.path ~= sp then
-        dropBoxes(host)
-        bc = { path = sp, refs = {}, missing = {} }
-        boxCache[host] = bc
-    end
+    local bc = cacheOf(host, s)
     local out, want, left = {}, {}, 0
     for _, nm in ipairs(names) do
         local r = bc.refs[nm]
@@ -1794,6 +1854,302 @@ local function coreTagOf(c)
     return nil
 end
 
+-- ---------------------------------------------------------------- core story 33: game-style rows
+-- A row made with like = <game row name> (row.lua) is still core's tagged WBP_<Core>Row (Border "Background" ->
+-- HorizontalBox "HBox"), on a game screen only. Inside HBox core builds native UMG widgets (StaticConstructObject in the
+-- row's WidgetTree): a label TextBlock and an inner HorizontalBox holding the holder (a HorizontalBox, the row's
+-- children box: the control goes there, filling it) and the "?" TextBlock, and a Spacer as tall as the game row's background image (a Border ignores its brush's size). At every attach it reads the named game row on the open
+-- screen and copies its look: the background Image's brush and tint to the Border (SetBrush, SetBrushColor), the
+-- game HorizontalBox's overlay slot to the Border's padding and content alignment, the label's and the "?"'s font,
+-- colour and justification, and every inner slot (label, inner box, the game control's slot to the holder, "?"); in
+-- a game container, the row's own slot gets the like row's slot values (the insert pass). Nothing is kept between
+-- ticks but plain values; no game widget is changed. A like name that isn't a game row (an Overlay holding an Image and
+-- a HorizontalBox; in that, a TextBlock then a HorizontalBox, whose first non-TextBlock child is the control and last
+-- TextBlock the "?") gives core's game look instead (the worn strip, the body font in the menu's text colour), with
+-- one WARN naming it per Lua state. help goes on the "?" in the game's tooltip widget (W_ToolTip3_C, created with
+-- WidgetBlueprintLibrary:Create, its Description set), once per attach and per help or language change, never per
+-- hover; when that class can't be loaded, as plain tooltip text (assets.lua's one WARN).
+local LIKE_LABEL, LIKE_INNER, LIKE_HOLDER, LIKE_HELP, LIKE_HEIGHT = "NucleusLikeLabel", "NucleusLikeInner", "NucleusLikeHolder", "NucleusLikeHelp", "NucleusLikeHeight"
+local UMG_TEXT, UMG_HBOX, UMG_SPACER = "/Script/UMG.TextBlock", "/Script/UMG.HorizontalBox", "/Script/UMG.Spacer"
+local KSL_CDO = "/Script/Engine.Default__KismetSystemLibrary"
+local SIZE_RULE_AUTO, SIZE_RULE_FILL, VALIGN_CENTER = 0, 1, 2
+local likeSeq = 0
+
+-- Our row's parts { hbox, label, inner, holder, help } (valid only in this callback), or nil when not built.
+local function likeParts(w)
+    local ok, r = pcall(function()
+        local hb = w.HBox
+        if not C.valid(hb) or hb:GetChildrenCount() < 2 then return nil end
+        local lbl, inner = hb:GetChildAt(0), hb:GetChildAt(1)
+        if not (C.valid(lbl) and C.valid(inner)) then return nil end
+        if not (widgetNameOf(lbl) or ""):find("^" .. LIKE_LABEL) then return nil end
+        if inner:GetChildrenCount() < 2 then return nil end
+        local holder, q = inner:GetChildAt(0), inner:GetChildAt(1)
+        if not (C.valid(holder) and C.valid(q)) then return nil end
+        local h = hb:GetChildrenCount() > 2 and hb:GetChildAt(2) or nil
+        return { hbox = hb, label = lbl, inner = inner, holder = holder, help = q, height = C.valid(h) and h or nil }
+    end)
+    return ok and r or nil
+end
+X._likeParts = likeParts
+
+local function newUmg(path, outer, base)
+    local cls = C.found(path)
+    if not cls then error(path .. " is not there", 0) end
+    likeSeq = likeSeq + 1
+    C.count()
+    local o = StaticConstructObject(cls, outer, FName(base .. "_" .. likeSeq))
+    if not C.valid(o) then error("constructing " .. path .. " failed", 0) end
+    return o
+end
+
+-- Builds the parts into a row widget's HBox (a fresh widget holds none).
+local function buildLike(w)
+    local okT, tree = pcall(C.prop, w, "WidgetTree")
+    local outer = (okT and C.valid(tree)) and tree or w
+    local hb = w.HBox
+    local lbl = newUmg(UMG_TEXT, outer, LIKE_LABEL)
+    local inner = newUmg(UMG_HBOX, outer, LIKE_INNER)
+    local holder = newUmg(UMG_HBOX, outer, LIKE_HOLDER)
+    local q = newUmg(UMG_TEXT, outer, LIKE_HELP)
+    local height = newUmg(UMG_SPACER, outer, LIKE_HEIGHT)
+    C.count(); hb:AddChild(lbl)
+    C.count(); hb:AddChild(inner)
+    C.count(); hb:AddChild(height) -- no width; its height is the background image's (copyLook)
+    C.count(); inner:AddChild(holder)
+    C.count(); inner:AddChild(q)
+    C.count(); lbl:SetVisibility(C.VIS.SelfHitTestInvisible)
+    C.count(); inner:SetVisibility(C.VIS.SelfHitTestInvisible)
+    C.count(); holder:SetVisibility(C.VIS.SelfHitTestInvisible)
+    C.count(); q:SetText(FText("?"))
+    C.count(); q:SetVisibility(C.VIS.Hidden) -- shown (Visible, for the hover) once there is help; Hidden keeps its space
+    return { hbox = hb, label = lbl, inner = inner, holder = holder, help = q, height = height }
+end
+
+-- The parts of a game row src (valid only in this callback), or nil and why it isn't one (Design Note 3).
+local function gameRowParts(src)
+    local cls = classNameOf(src)
+    if cls ~= "Overlay" then return nil, "it is a " .. tostring(cls) .. ", not an Overlay" end
+    local img, hb
+    for i = 0, childCountOf(src) - 1 do
+        local c = childAt(src, i)
+        local cn = c and classNameOf(c)
+        if cn == "Image" and not img then img = c elseif cn == "HorizontalBox" and not hb then hb = c end
+    end
+    if not (img and hb) then return nil, "it holds no Image and HorizontalBox" end
+    local lbl, inner
+    for i = 0, childCountOf(hb) - 1 do
+        local c = childAt(hb, i)
+        local cn = c and classNameOf(c)
+        if not lbl then
+            if cn == "TextBlock" then lbl = c end
+        elseif cn == "HorizontalBox" then inner = c break end
+    end
+    if not (lbl and inner) then return nil, "its HorizontalBox holds no label TextBlock followed by a HorizontalBox" end
+    local ctl, q
+    for i = 0, childCountOf(inner) - 1 do
+        local c = childAt(inner, i)
+        local cn = c and classNameOf(c)
+        if cn == "TextBlock" then q = c elseif c and not ctl then ctl = c end
+    end
+    if not (ctl and q) then return nil, "its inner HorizontalBox holds no control and \"?\" TextBlock" end
+    return { row = src, image = img, hbox = hb, label = lbl, inner = inner, control = ctl, help = q }
+end
+X._gameRowParts = gameRowParts
+
+-- One slot's values onto a widget's slot (plain values from saveSlot); what names it in the WARN.
+local function copySlot(w, v, el, what)
+    if not v then return end
+    local okS, s = pcall(C.prop, w, "Slot")
+    if not (okS and s ~= nil) then return end
+    local function set(fn, arg)
+        if arg == nil then return end
+        local ok, err = pcall(function() C.count(); s[fn](s, arg) end)
+        if not ok then C.warnOnce("like slot " .. el.id .. what .. fn, "row '%s': copying the like row's %s %s failed: %s", el.id, what, fn, firstLineOf(err)) end
+    end
+    set("SetPadding", v.pad)
+    set("SetSize", v.size)
+    set("SetHorizontalAlignment", v.ha)
+    set("SetVerticalAlignment", v.va)
+end
+
+local function copyText(dst, src)
+    C.count(); dst:SetFont(src.Font)
+    C.count(); dst:SetColorAndOpacity(src.ColorAndOpacity)
+    C.count(); dst:SetJustification(src.Justification)
+end
+
+-- The like row's look onto our row (raises; the caller falls back).
+local function copyLook(el, w, parts, g)
+    local bg = w.Background
+    C.count(); bg:SetBrush(g.image.Brush)
+    C.count(); bg:SetBrushColor(g.image.ColorAndOpacity)
+    -- A Border ignores its brush's size, an Image doesn't: the game row is as tall as its background image (the brush's
+    -- ImageSize), and its picker's ScaleBox scales to that height, so the row's spacer gets that height.
+    if parts.height then
+        local hy = tonumber(g.image.Brush.ImageSize.Y)
+        C.count(); parts.height:SetSize({ X = 0, Y = hy or 0 })
+    end
+    local hs = saveSlot(g.hbox) or {}
+    C.count(); bg:SetPadding(hs.pad or { Left = 0, Top = 0, Right = 0, Bottom = 0 })
+    if hs.ha then C.count(); bg:SetHorizontalAlignment(hs.ha) end
+    if hs.va then C.count(); bg:SetVerticalAlignment(hs.va) end
+    copyText(parts.label, g.label)
+    copyText(parts.help, g.help)
+    copySlot(parts.label, saveSlot(g.label), el, "label")
+    copySlot(parts.inner, saveSlot(g.inner), el, "inner box")
+    copySlot(parts.holder, saveSlot(g.control), el, "control")
+    copySlot(parts.help, saveSlot(g.help), el, "\"?\"")
+end
+
+-- Core's game look for a row whose like isn't a game row (Design Note 4).
+local function fallbackLook(el, w, parts, fresh)
+    backgroundStyle(el, w, fresh) -- the worn strip (rowTint), as every game-look row
+    local f = theme.game.textFonts.body
+    local font = gameAsset("font:" .. f.font)
+    local c = theme.game.text
+    for _, t in ipairs({ parts.label, parts.help }) do
+        if font then C.count(); t:SetFont({ FontObject = font, Size = f.size, TypefaceFontName = FName("Default"), LetterSpacing = 0 }) end
+        C.count(); t:SetColorAndOpacity({ SpecifiedColor = { R = c.r, G = c.g, B = c.b, A = c.a }, ColorUseRule = 0 })
+    end
+    local lf = theme.game.likeFallback
+    local function m(p) return { Left = p.l, Top = p.t, Right = p.r, Bottom = p.b } end
+    local zero = { Left = 0, Top = 0, Right = 0, Bottom = 0 }
+    copySlot(parts.label, { pad = m(lf.labelPad), size = { SizeRule = SIZE_RULE_FILL, Value = 1 }, va = VALIGN_CENTER }, el, "label")
+    copySlot(parts.inner, { pad = zero, size = { SizeRule = SIZE_RULE_AUTO, Value = 1 }, va = VALIGN_CENTER }, el, "inner box")
+    copySlot(parts.holder, { pad = zero, size = { SizeRule = SIZE_RULE_AUTO, Value = 1 }, va = VALIGN_CENTER }, el, "control")
+    copySlot(parts.help, { pad = m(lf.helpPad), size = { SizeRule = SIZE_RULE_AUTO, Value = 1 }, va = VALIGN_CENTER }, el, "\"?\"")
+end
+
+-- The open screen a game-style row reads its like row from: the attach's host object, else the live host.
+local function screenFor(el)
+    if curHostObj then return curHostObj end
+    local s = liveHost(C.hostOf(el))
+    return s
+end
+
+-- The like row's parts on the open screen, or nil and why.
+local function likeSource(el, s)
+    local host = C.hostOf(el)
+    s = s or screenFor(el)
+    if not s then return nil, "the screen is not open" end
+    local src = namedOf(host, s, el.like)
+    if not src then return nil, "no widget of that name is in the open screen" end
+    return gameRowParts(src)
+end
+
+X._likeStyle = function(el, w, fresh)
+    el.selBg = nil
+    local parts = likeParts(w)
+    if not parts then backgroundStyle(el, w, fresh) return end -- not built (likeContent warned): the plain row look
+    local host = C.hostOf(el)
+    local g, why = likeSource(el)
+    if g then
+        local ok, err = pcall(copyLook, el, w, parts, g)
+        if ok then
+            el.matBg, el.likeLook = nil, "copied"
+            C.stats.likeCopies = (C.stats.likeCopies or 0) + 1
+            if C.debugOn() then C.log.debug("ui %s: row '%s' copied its look from '%s'", host, el.id, el.like) end
+            return
+        end
+        why = "copying its look failed: " .. firstLineOf(err)
+    end
+    C.warnOnce("like " .. host .. "|" .. el.like,
+        "ui %s: row '%s' is like '%s', which is not a game row on the open screen (%s); it is drawn in %s's game look",
+        host, el.id, el.like, tostring(why), C.NAME)
+    C.stats.likeFallbacks = (C.stats.likeFallbacks or 0) + 1
+    el.likeLook = "fallback"
+    local ok, err = pcall(fallbackLook, el, w, parts, fresh)
+    if not ok then warnFirst("like fallback:" .. el.id, "row '%s': core's game look was not applied: %s", err, el.id) end
+end
+
+-- The owning player for a widget core creates inside a row (the tooltip widget): the screen's, else player 0's.
+local function ownerFor(w)
+    local s = curHostObj
+    if s then
+        local okO, o = pcall(function() return s:GetOwningPlayer() end)
+        if okO and C.valid(o) then return o end
+    end
+    local okP, pc = pcall(function() return StaticFindObject("/Script/Engine.Default__GameplayStatics"):GetPlayerController(w:GetWorld(), 0) end)
+    return okP and C.valid(pc) and pc or nil
+end
+X._ownerFor = ownerFor
+
+-- The "?"'s help: the game's tooltip widget with the help as its Description (Design Note 7), else plain tooltip text.
+local function applyHelp(el, w, parts)
+    local s = el.help and S.pick(el.help) or nil
+    if s == el.appliedHelp then return end
+    local q = parts.help
+    if not s then
+        C.count(); q:SetVisibility(C.VIS.Hidden)
+        el.appliedHelp = nil
+        return
+    end
+    local tip = nil
+    local cls = A.get("cls:tooltip3")
+    if cls then
+        local ok, err = pcall(function()
+            C.count()
+            local t = StaticFindObject("/Script/UMG.Default__WidgetBlueprintLibrary"):Create(w, cls, ownerFor(w))
+            if not C.valid(t) then error("creating " .. theme.game.tooltipWidget.name .. " failed", 0) end
+            local okK = pcall(function() C.count(); C.found(KSL_CDO):SetTextPropertyByName(t, FName("Description"), FText(s)) end)
+            if not okK then C.count(); t.Description = FText(s) end
+            C.count(); q:SetToolTip(t)
+            tip = t
+        end)
+        if ok then
+            C.stats.gameTips = (C.stats.gameTips or 0) + 1
+        else
+            tip = nil
+            warnFirst("like tip:" .. el.id, "row '%s': the game's tooltip widget could not be made (%s); its help shows as a plain tooltip", err, el.id)
+        end
+    end
+    local ok, err = pcall(function()
+        if not tip then C.count(); q:SetToolTipText(FText(s)) end
+        C.count(); q:SetVisibility(C.VIS.Visible)
+    end)
+    if ok then el.appliedHelp = s
+    else warnFirst("like help:" .. el.id, "row '%s': its help was not applied: %s", err, el.id) end
+end
+
+X._likeContent = function(el, w, fresh)
+    if fresh then el.appliedLabel, el.appliedHelp = nil, nil end
+    local parts = likeParts(w)
+    if not parts then
+        local ok, res = pcall(buildLike, w)
+        if not ok then warnFirst("like build:" .. el.id, "row '%s': building its game-style parts failed (its children go in its box): %s", res, el.id) return end
+        parts = res
+        el.appliedLabel, el.appliedHelp = nil, nil
+    end
+    local label = el.label and S.pick(el.label) or ""
+    if label ~= el.appliedLabel then
+        local ok, err = pcall(function() C.count(); parts.label:SetText(FText(label)) end)
+        if ok then el.appliedLabel = label else warnFirst("like label:" .. el.id, "row '%s': its label was not applied: %s", err, el.id) end
+    end
+    applyHelp(el, w, parts)
+end
+
+-- setLabel / setHelp on a live row (row.lua): the label and the help again, no look copy.
+function X._likeRefresh(el)
+    local w = liveWidget(el)
+    if not w then return end
+    local parts = likeParts(w)
+    if not parts then return end
+    local ok, err = pcall(function()
+        local label = el.label and S.pick(el.label) or ""
+        if label ~= el.appliedLabel then C.count(); parts.label:SetText(FText(label)); el.appliedLabel = label end
+        applyHelp(el, w, parts)
+    end)
+    if not ok then warnFirst("like label:" .. el.id, "row '%s': its label or help was not applied: %s", err, el.id) end
+end
+
+-- In a game container: the row's own slot gets the like row's slot values (after it joined the box).
+local function likeRowSlot(el, w, s)
+    local g = likeSource(el, s)
+    if not g then return end
+    copySlot(w, saveSlot(g.row), el, "row slot")
+end
+
 local function idsOf(els)
     local ids = {}
     for i, el in ipairs(els) do
@@ -1871,7 +2227,8 @@ local function insertBox(host, s, name, box, els, reason)
         for i = k, #cur do
             local c = cur[i]
             local a = c:GetAddress()
-            if not ours[a] then saved[a] = saveSlot(c); picks[a] = pickersOf(c) end
+            -- core story 33: another mod's core widgets (a game-style row with a game choice) restore themselves
+            if not ours[a] then saved[a] = saveSlot(c); if not coreTagOf(c) then picks[a] = pickersOf(c) end end
             local ok, err = pcall(function() C.count(); return box:RemoveChild(c) end)
             if ok then removed = removed + 1
             else C.warnOnce("insert remove " .. host .. "|" .. name, "ui %s: taking a child out of '%s' failed: %s", host, name, firstLineOf(err)) end
@@ -1892,6 +2249,7 @@ local function insertBox(host, s, name, box, els, reason)
     end
     for _, el in ipairs(done) do
         local w = liveWidget(el)
+        if w and el.like then likeRowSlot(el, w, s) end -- core story 33: the like row's slot values
         if w then
             el.appliedVis = nil
             local ok, err = pcall(P.applyVisibility, el, w)
@@ -1927,7 +2285,7 @@ local function insertPass(host, s, only, reason)
             for _, el in ipairs(els) do
                 local w = liveWidget(el)
                 if w then removeWidget(w) end
-                freeRef(el)
+                freeRef(el); dropParts(el)
                 el.attached = false
             end
             local why = missing[nm] or {}
@@ -2032,6 +2390,32 @@ local function checkJoin(p, kind, fn, el, hasTip)
 end
 X._checkJoin = checkJoin
 
+-- Core story 33: a game-style row sits directly on a game screen (its canvas or one of its game containers), never in
+-- a core panel, list or row; a game choice (and so a container holding one) only on a game screen, directly or in a
+-- row, panel or list there. pl: a validated intent; fn: the error prefix ("row.create", "place", ...). Raises.
+local function holdsGameChoice(el)
+    for _, ch in ipairs(el.children or {}) do
+        if not ch.removed and (ch.kind == "gchoice" or holdsGameChoice(ch)) then return true end
+    end
+    return false
+end
+function X._checkGameOnly(el, pl, fn, isLike, kind)
+    local host = pl.panelEl and C.hostOf(pl.panelEl) or pl.host
+    if isLike or (el and el.like) then
+        if pl.panelEl then
+            C.fail("%s.%s: a row with like can't go inside a panel, list or row (place it on a game screen: %s)", C.UI, fn, C.GAME_SCREEN_NAMES)
+        end
+        if not C.gameScreen(host) then
+            C.fail("%s.%s: like needs a game screen host (%s), got '%s'", C.UI, fn, C.GAME_SCREEN_NAMES, tostring(host))
+        end
+    end
+    if (kind or (el and el.kind)) == "gchoice" or (el and holdsGameChoice(el)) then
+        if not C.gameScreen(host) then
+            C.fail("%s.%s: widget 'game' needs a game screen host (%s), got '%s'", C.UI, fn, C.GAME_SCREEN_NAMES, tostring(host))
+        end
+    end
+end
+
 -- A new element of a kind: registered, in creation order. place is a validated intent ({ panelEl = ... } for a panel).
 function X._new(kind, id, fields, place)
     C.seq = C.seq + 1
@@ -2070,7 +2454,7 @@ local function detach(el)
     local wasHost = C.hostOf(el)
     local w = liveWidget(el)
     if w then removeWidget(w) end
-    freeRef(el)
+    freeRef(el); dropParts(el)
     el.attached, el.slotKey, el.appliedVis, el.nearAbsent, el.retryAt, el.padKey = false, nil, nil, false, nil, nil
     if el.panel then
         local p = el.panel
@@ -2088,13 +2472,13 @@ local function removeEl(el, underRemovedPanel)
     local wasHost = C.hostOf(el)
     local w = liveWidget(el)
     if w and not underRemovedPanel then removeWidget(w) end -- a child goes with its panel's widget
-    freeRef(el)
+    freeRef(el); dropParts(el)
     el.removed, el.attached = true, false
     C.els[el.id] = nil
     for i, e in ipairs(C.order) do if e == el then table.remove(C.order, i) break end end
     C.handleOf[el.handle] = nil
     C.removedHandle[el.handle] = el.id
-    C.removedKind[el.handle] = el.kind
+    C.removedKind[el.handle] = C.publicKind(el.kind)
     if el.children then
         local kids = el.children
         el.children = {}
@@ -2288,6 +2672,7 @@ P.place = function(h, intent)
     if after ~= before then hostChanged(after) end
 end
 placeImpl = function(el, pl)
+    X._checkGameOnly(el, pl, "place") -- core story 33
     if pl.panelEl then
         local p = pl.panelEl
         if p == el.panel then
@@ -2357,7 +2742,9 @@ function X.stats()
         attachReused = C.stats.attachReused, handlesFreed = C.stats.handlesFreed, findAllCalls = C.stats.findAllCalls,
         overlapScheduled = C.stats.overlapScheduled, overlapChecks = C.stats.overlapChecks,
         panelRebuilds = C.stats.panelRebuilds or 0, containerRebuilds = C.stats.containerRebuilds or 0,
-        pickerRestores = C.stats.pickerRestores or 0 }
+        pickerRestores = C.stats.pickerRestores or 0,
+        -- core story 33: game-style rows' look copies and fallbacks, and the game tooltip widgets made for their help
+        likeCopies = C.stats.likeCopies or 0, likeFallbacks = C.stats.likeFallbacks or 0, gameTips = C.stats.gameTips or 0 }
 end
 
 -- The tag a widget of this mod's element carries (for tests and diagnostics).

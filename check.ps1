@@ -22,7 +22,7 @@
 param(
     [string] $Instance,
     [string] $Log,
-    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'createserver', 'gameinsert', 'soak', 'manual', 'net-host', 'net-client', 'net-vanilla-host',
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'createserver', 'gameinsert', 'nativerow', 'soak', 'manual', 'net-host', 'net-client', 'net-vanilla-host',
                  'presence-host', 'presence-client', 'presence-vanilla-host')]
     [string] $Scenario = 'skeleton',
     [ValidateSet('host', 'vm')] [string] $Target = 'host'
@@ -894,6 +894,18 @@ $insCaseIds = @('cont-num', 'cont-empty', 'cont-65', 'cont-path', 'cont-digit', 
 foreach ($p in 'menu1', 'match1') {
     foreach ($id in $insCaseIds) { $badInput += "\[$T\] OK CASE $p\.ui-ins-$id " }
 }
+# Core story 33 (UI-15, core 0.15.0): game-style rows' and the game choice's bad-input group (nativerow.lua), in both worlds.
+$nrCaseIds = @('key', 'like-num', 'like-empty', 'like-65', 'like-space', 'like-digit', 'like-table', 'label-nolike', 'help-nolike', 'two-nolike',
+               'label-num', 'label-empty', 'label-65', 'label-nl', 'label-noen', 'label-lang', 'help-num', 'help-513', 'help-9', 'help-de9', 'help-tab',
+               'help-noen', 'host-menu', 'host-journal', 'host-hud', 'ctl-num', 'ctl-forged', 'in-list', 'in-panel', 'ctl-text', 'ctl-list', 'ctl-removed',
+               'ctl-nolike', 'setlabel-plain', 'sethelp-plain', 'setlabel-num', 'setlabel-nil', 'setlabel-65', 'setlabel-none', 'setlabel-three',
+               'sethelp-9', 'sethelp-513', 'sethelp-none', 'setlabel-text', 'sethelp-forged', 'place-menu', 'place-list', 'same-id', 'ok', 'setlabel-ok',
+               'sethelp-ok', 'sethelp-nil', 'isshown', 'remove', 'setlabel-removed', 'gc-menu', 'gc-hud', 'gc-tooltip', 'gc-dup', 'gc-widget', 'gc-list',
+               'gc-settooltip', 'gc-settooltip-nil', 'gc-sameid', 'gc-place-menu', 'gc-place-row', 'gc-get', 'gc-set', 'gc-ctl',
+               'has-row-like', 'has-row-setLabel', 'has-row-setHelp', 'has-choice-game')
+foreach ($p in 'menu1', 'match1') {
+    foreach ($id in $nrCaseIds) { $badInput += "\[$T\] OK CASE $p\.ui-nr-$id " }
+}
 # Core story 31: the create-server screen as a host, one launch written for the VM at 1280x720 (run.ps1 -Scenario
 # createserver -Target vm). END result=PASS already means every check the test made passed; these name the ones the
 # acceptance criteria rest on.
@@ -984,6 +996,38 @@ $gameInsert = $started + @(
     "\[$T\] END result=PASS"
 )
 foreach ($id in $insCaseIds) { $gameInsert += "\[$T\] OK CASE menu1\.ui-ins-$id " }
+# Core story 33: game-style rows and the game's picker in the create-server screen's settings list, one launch written
+# for the VM at 1280x720 (run.ps1 -Scenario nativerow -Target vm). END result=PASS already means every check the test
+# made passed; these name the ones the acceptance criteria rest on. No session is made (Create is never clicked).
+$nativeRow = $started + @(
+    "\[$T\] SCENARIO nativerow "
+    "\[$T\] OK NRSETUP "
+    # AC 1-2: on every open each like row's copied values (background brush and tint, the Border's padding and alignment,
+    # label and "?" font, colour and justification, every inner slot, the row's own slot) equal the live Difficulty
+    # row's; one widget and one set of parts per row; the game choice shows its option; a new widget each open.
+    "#22|\[$T\] OK NRLOOK open \d+ nr-r[12]: copied values equal the Difficulty row's"
+    "#11|\[$T\] OK NRONE open \d+: one widget per row \(r1 at child 2, right after Overlay_28\)"
+    "#11|\[$T\] OK NRPICK open \d+: the game choice shows its option \(Low; selected Low, default Low\)"
+    "#11|\[$T\] OK NRFALLBACK open \d+: "
+    "#11|\[$T\] OK NRNEW open \d+: "
+    "\[$T\] OK NRTEN 10 opens by real clicks: .*; 10 distinct screens, 10 distinct row widgets, lost=0"
+    "#11|\[$T\] OK NROPENED \d+ "
+    "\[$T\] OK NREVENTS opened=11 closed=11 lost=0"
+    # AC 3: like = Overlay_NOPE: core's game look, exactly one WARN in the whole run.
+    "#1|\[$T\] WARN ui createServer: row 'nr-r3' is like 'Overlay_NOPE', which is not a game row on the open screen"
+    # AC 1 (the tooltip) and AC 4 (the arrow): the game's tooltip widget with three lines; a real click, onChange once.
+    "\[$T\] OK NRCONFIG "
+    "\[$T\] OK NRTIP the .\?.'s ToolTipWidget is a W_ToolTip3_C whose Description has 3 lines \(Visible true\)"
+    "\[$T\] OK NRARROW a real click on the game choice's next arrow ran onChange once with 4 \(Medium; 1 call\(s\); the picker shows Medium\)"
+    "#1|\[$T\] NRCHANGE 4 Medium"
+    "\[$T\] OK NRSET set\(h, 2\) shows Off with no callback \(0 call\(s\)\)"
+    # Poll-first (story 34): no hook on the screen's class; the picker's arrows are the only new hooks.
+    "!Registered script hook .*CreateServer_C"
+    "!\[$T\] WARN (?!$slowWarnOk|ui createServer: row 'nr-r3' is like 'Overlay_NOPE', )"
+    "!\[$T\] ERROR"
+    "\[$T\] END result=PASS"
+)
+foreach ($id in $nrCaseIds) { $nativeRow += "\[$T\] OK CASE menu1\.ui-nr-$id " }
 $manual = @(
     "\[$T\] SCENARIO manual "
     "\[$T\] CONNECT ok $N $Ver "
@@ -1109,6 +1153,7 @@ $expect = @{
     'menu'      = $menuChecks
     'createserver' = $createServer
     'gameinsert' = $gameInsert
+    'nativerow' = $nativeRow
     'soak'      = $soak
     'manual'    = $manual
     'bad-input' = $badInput

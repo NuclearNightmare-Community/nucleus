@@ -46,6 +46,16 @@ do
     SPEC["cls:settings"] = { pkg = t.pkg, name = t.name, lazy = true, what = "the game's Settings menu class " .. t.name,
         after = "sliders keep " .. C.NAME .. "'s copy of the game's slider style" }
 end
+-- Core story 33 (0.15.0): the game's tooltip widget (a game-style row's "?" shows its help in it) and the game's picker
+-- (choice widget = "game"). Loaded only once used (a game-style row with help, a game choice).
+do
+    local t = theme.game.tooltipWidget
+    SPEC["cls:tooltip3"] = { pkg = t.pkg, name = t.name, lazy = true, what = "the game's tooltip widget " .. t.name,
+        after = "game-style rows show their help as a plain tooltip" }
+    local p = theme.game.pickerWidget
+    SPEC["cls:msb"] = { pkg = p.pkg, name = p.name, lazy = true, what = "the game's picker " .. p.name,
+        after = "game choices (widget = 'game') stay empty" }
+end
 A.SPEC = SPEC
 
 local refs = {}                  -- key -> weak handle

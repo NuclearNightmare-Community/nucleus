@@ -242,8 +242,18 @@ end
 function C.isContainer(el) return el.children ~= nil end
 
 local ARTICLE = { text = "a text element", panel = "a panel", button = "a button", list = "a list", row = "a row", image = "an image",
-    checkbox = "a checkbox", choice = "a choice", slider = "a slider" } -- Mod Manager story 4: the controls
+    checkbox = "a checkbox", choice = "a choice", slider = "a slider", -- Mod Manager story 4: the controls
+    gchoice = "a choice" } -- core story 33: a choice with widget = "game" (an internal kind; public functions call it a choice)
 C.ARTICLE = ARTICLE
+-- Core story 33 (0.15.0): the kind a public function and an error name for an element's kind (internal kinds by the
+-- public one they belong to).
+local PUBLIC_KIND = { gchoice = "choice" }
+function C.publicKind(kind) return PUBLIC_KIND[kind] or kind end
+-- Core story 33: the game's picker (MultipleSelectBox_C) a game choice holds, and its two arrow handlers (next, prev).
+C.MSB_CLASS = "/Game/Graphics/MainMenu/Components/MultipleSelectBox.MultipleSelectBox_C"
+C.MSB_SHORT = "MultipleSelectBox_C"
+C.MSB_NEXT_FN = C.MSB_CLASS .. ":BndEvt__MultipleSelectBox_Button_K2Node_ComponentBoundEvent_0_OnButtonClickedEvent__DelegateSignature"
+C.MSB_PREV_FN = C.MSB_CLASS .. ":BndEvt__MultipleSelectBox_Button_60_K2Node_ComponentBoundEvent_1_OnButtonClickedEvent__DelegateSignature"
 -- Story 21: functions that take a panel also take a list or a row (setStyle, setVisible, remove, isShown).
 local CONTAINER = { panel = true, list = true, row = true }
 
@@ -260,7 +270,7 @@ function C.element(h, fn, kind)
         if kind == nil or kind == "text" then C.fail("%s.%s: not an element handle (use the handle that text.create returned)", C.UI, fn) end
         C.fail("%s.%s: not %s handle (use the handle that %s.create returned)", C.UI, fn, ARTICLE[kind], kind)
     end
-    if kind and el.kind ~= kind and not (kind == "panel" and CONTAINER[el.kind]) then
+    if kind and el.kind ~= kind and not (kind == "panel" and CONTAINER[el.kind]) and not (kind == "choice" and el.kind == "gchoice") then
         C.fail("%s.%s: not %s handle ('%s' is %s)", C.UI, fn, ARTICLE[kind], el.id, ARTICLE[el.kind])
     end
     return el

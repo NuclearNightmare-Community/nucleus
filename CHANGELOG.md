@@ -2,6 +2,26 @@
 
 All notable changes to Nucleus are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). From 0.5.0 a dependent's `need` and `dependsOn` are minimum versions (`>=0.5.0`), so a newer Nucleus never asks dependents to raise them. Up to 0.3.0, below 1.0.0 a dependent connected only to the same minor version (`need = "0.3.0"` accepted 0.3.x).
 
+## [0.15.0] - 2026-11-17
+
+Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
+
+For players: nothing changes on its own. A mod's own setting rows on the create-server screen can now look like the game's rows (the same background, fonts and spacing, a "?" with the game's own tooltip) and use the game's own "< value >" picker.
+
+### Added
+
+- Game-style rows (core story 33, UI-15): `core.ui.row.create` takes four new optional keys. `like = "<game row name>"` (a widget name in the open game screen, for example `Overlay_28`, the Difficulty row) makes the row copy that game row's look at every attach: the background image's brush, tint and height, the label's and the "?"'s font, colour and justification, every inner slot (label, inner box, control, "?"), and, in a game container, the row's own slot. The row stays core's tagged row widget; core builds native UMG widgets inside it (a label, a holder for the control, a "?"). A row with `like` sits directly on a game screen (its canvas or a game container: `place = { host = "createServer", container = "VerticalBox_202", after = "Overlay_28" }`), never inside a core panel, list or row. `label` (a string or a table of strings by language, 1 to 64 bytes each) is its label; `help` (a string or a language table, 1 to 512 bytes and at most 8 lines each) shows when the player hovers the "?", in the game's own tooltip widget (`W_ToolTip3_C`, its `Description`; one widget per attach and per change, never per hover); `control` (a checkbox, choice, slider or button handle of this mod) is placed into the row where the game row's control sits, the same as `place(control, { row = h })`. `label`, `help` and `control` need `like`.
+- `core.ui.row.setLabel(h, label)` and `core.ui.row.setHelp(h, help | nil)` for rows made with `like` (nil hides the "?").
+- `core.ui.choice.create{ widget = "game" }` now works on game-screen hosts (directly, or in a row, panel or list there): the game's own picker (`MultipleSelectBox_C`) inside a core-tagged wrapper. Its options must be distinct (the picker selects by text); with no `place` it starts on the createServer screen's canvas, so a row's `control = <handle>` moves it into the row. It shows its option from its first frame and after every rebuild of the list (the picker's `DefaultOption`). A real click on its arrows runs `onChange` once (post-hooks on the picker's two arrow handlers, registered from the UI poll and filtered to this mod's live pickers; the same 250 ms repeat rule as core's choice); `set` shows the option with no callback; `enabled = false` disables it. `tooltip` is refused (help belongs on the row's "?").
+- Fallbacks: a `like` name that isn't a game row on the open screen (missing, or not an Overlay holding an Image and a HorizontalBox with a label, an inner box, a control and a "?") gives core's game look (the worn strip, the body font in the menu's text colour), with one `WARN` naming it per Lua state; when the tooltip widget's class can't be loaded the "?" gets plain tooltip text (one `WARN`).
+- `core.ui.text.stats()` counts `likeCopies`, `likeFallbacks` and `gameTips`; `core.ui.choice.stats()` counts the game choices' clicks (`gameClicks`, `gameDropped`, `gameDebounced`, `gameIgnored`, `gameThrows`, `gameHooked`). Features `ui.row.like`, `ui.row.setLabel`, `ui.row.setHelp` and `ui.choice.game` (`core.has`).
+
+### Changed
+
+- `row.create`'s unknown-key error lists the new keys: `valid: control, gap, help, id, label, like, place, style`.
+- `choice.create{ widget = "game" }` no longer raises "not available yet"; off a game-screen host it raises `nucleus.ui.choice.create: widget 'game' needs a game screen host (createServer), got '<host>'`. The unknown-widget text is unchanged (`valid: core`). No other text changes.
+- The insert pass (0.14.0) no longer reads or restores the pickers inside another mod's core widgets in a game box (a game-style row's game choice restores itself).
+
 ## [0.14.0] - 2026-11-17
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
