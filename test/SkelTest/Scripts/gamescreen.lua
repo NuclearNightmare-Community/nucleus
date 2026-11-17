@@ -83,7 +83,7 @@ return function(X)
             case(P .. "place-near", "ui.text.create{ place = { host = 'createServer', near = 'crosshair' } }",
                 f(U.text.create, { id = "gnear", place = { host = HOST, near = "crosshair" } }), E.err(LOWER .. ".ui.place: near is not available on host 'createServer' (corner or absolute)"))
             case(P .. "place-region", "ui.text.create{ place = { host = 'createServer', corner, region = 'map' } }",
-                f(U.text.create, { id = "gnear", place = { host = HOST, corner = "top-left", region = "map" } }), E.err(LOWER .. ".ui.place: region is not available on host 'createServer' (journal only)"))
+                f(U.text.create, { id = "gregion", place = { host = HOST, corner = "top-left", region = "map" } }), E.err(LOWER .. ".ui.place: region is not available on host 'createServer' (journal only)"))
             case(P .. "elements", "ui.elements('createServer')", f(U.elements, HOST),
                 E.ret("an empty table", function(r) return type(r[1]) == "table" and next(r[1]) == nil end))
             -- controls: isOpen (no screen open here), a watch and its unwatch (twice), core.has

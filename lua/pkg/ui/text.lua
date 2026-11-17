@@ -79,10 +79,13 @@ local HOST = {
 for host in pairs(C.GAME_SCREENS) do
     HOST[host] = {
         -- only a screen the poll has decided opened: an element made between the screen appearing and that tick waits for
-        -- opened, so the closed or lost that follows always frees what was attached
+        -- opened, so the closed or lost that follows always frees what was attached (a newer screen that replaced it
+        -- waits for its own opened too)
         poll = function()
-            if not G._openNow(host) then return nil end
-            local s = G._poll(host)
+            local open = G._openNow(host)
+            if not open then return nil end
+            local s, p = G._poll(host)
+            if p ~= open then return nil end
             return s, s ~= nil
         end,
         canvas = function(s) return G._canvasOf(host, s) end,
