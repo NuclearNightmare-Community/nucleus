@@ -23,10 +23,11 @@
 -- included: a method on a null object reads address 0x18 and crashes the game (research 9.1; OPTIONS's Text Style
 -- reads null and is copied as null, never dereferenced).
 --
--- When: the first menu after the press-any-key screen gets its entry late, from the poll's opened (no hook exists
--- before a menu does, menu.lua); every later menu gets it inside the MainMenu_C:Construct post-hook. Each insertion is
--- recorded per Lua state as menu path -> the entry widget's name; a menu with a record is skipped, so the poll and
--- the hook never insert twice. The record goes with the menu. Clicks come through one RegisterHook per Lua state on
+-- When: every menu gets its entry from the poll's opened, at most one 500 ms tick after the menu appears. Nothing
+-- runs inside MainMenu_C:Construct (story 34): mutating the menu's widget tree there, under the game's own
+-- CreateWidget/AddToViewport right after a world teardown and GC, once read a freed object and crashed the game.
+-- Each insertion is recorded per Lua state as menu path -> the entry widget's name; a menu with a record is skipped,
+-- so repeated opened events never insert twice. The record goes with the menu. Clicks come through one RegisterHook per Lua state on
 -- CommonButtonBase:HandleButtonClicked, filtered by the clicked widget's name against the live menu's record (never a
 -- kept UObject); a match runs onClick(handle) under pcall, once per click.
 local BASE = (...):gsub("%.ui%.entry$", "")
@@ -323,8 +324,7 @@ local function finishGrow(mm, r)
     if C.log then C.log.debug("ui menu entry '%s': column growth measured late, %.1f units", ent and ent.id or "?", d) end
 end
 
--- Inserts the entry into one menu. how: "construct" (inside the Construct post-hook), "poll" (the poll's opened) or
--- "call" (entry() with a menu already open). Raises only on a broken invariant (callers pcall).
+-- Inserts the entry into one menu. how: "poll" (the poll's opened) or "call" (entry() with a menu already open). Raises only on a broken invariant (callers pcall).
 local function insert(mm, path, how)
     if not ent or records[path] then return false end
     local vb, opt, quit = prop(mm, COLUMN), prop(mm, OPTIONS), prop(mm, QUIT)
@@ -407,10 +407,8 @@ end
 
 -- ---------------------------------------------------------------- hooks and events (menu.lua drives them)
 
-M._wants(function() return ent ~= nil, ent ~= nil end)
-M._onConstruct(function(mm, path)
-    if ent then insert(mm, path, "construct") end
-end)
+-- No Construct hook: the entry arrives from the poll's opened on every menu (story 34).
+M._wants(function() return false, ent ~= nil end)
 M._onClick(function(w)
     if not ent then return end
     local path = M._openNow()

@@ -2,6 +2,16 @@
 
 All notable changes to Nucleus are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). From 0.5.0 a dependent's `need` and `dependsOn` are minimum versions (`>=0.5.0`), so a newer Nucleus never asks dependents to raise them. Up to 0.3.0, below 1.0.0 a dependent connected only to the same minor version (`need = "0.3.0"` accepted 0.3.x).
 
+## [0.12.3] - 2026-11-17
+
+Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
+
+For players: fixes a rare crash on the return to the title menu after a match, with a mod that adds a menu entry (Mod Manager's MANAGE MODS) or menu elements.
+
+### Fixed
+
+- The menu entry and menu elements are no longer added inside `MainMenu_C:Construct`; fixes a rare crash on the return to the menu after a match (core story 34, Lua only, no pak change). Since 0.7.0 every menu after the first got its entry (and its menu elements) inside the menu's `Construct` post-hook, changing the menu's widget tree while the game was still creating it, right after a world teardown and a garbage collection; about one return in six or fewer, a property read there returned a freed object and the game crashed (`EXCEPTION_ACCESS_VIOLATION` in UE4SS's `IsA`). Now every menu gets them the way the first menu always did, from the 500 ms poll's `opened`, at most one tick after the menu appears, and core no longer registers a hook on `MainMenu_C:Construct` at all. The entry's look, position, backing growth and clicks are unchanged; the Journal's Construct hooks are unchanged.
+
 ## [0.12.2] - 2026-11-17
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.

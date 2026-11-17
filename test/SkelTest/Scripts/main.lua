@@ -3619,7 +3619,7 @@ end
 -- button); A's button opens B; clicks on A while B is up reach nothing; B closed; the wheel scrolls A's list; a row
 -- button reaches only its row; Enter while A is open starts nothing; A's Close; OPTIONS (Settings) and START GAME
 -- (Create Server: the menu hidden, the corner text collapsed); a click where the entry was; a round trip to Tower
--- Island (the entry inserted in Construct on the new menu); a window open across a reload (lost). Never keeps a UObject:
+-- Island (the entry inserted from the poll on the new menu); a window open across a reload (lost). Never keeps a UObject:
 -- every step finds what it needs again, and calls a method on an object read from a property only after valid()
 -- (the 0x18 crash, docs/mod-manager-research.md section 9).
 local function buildMenu()
@@ -4188,7 +4188,7 @@ local function buildMenu()
     clickAt("entry's last rect", function() if MM.entryR then return center(MM.entryR) end end)
     step("menu1: last rect", function() check(MM.clicks == MM.clicksBefore, "MLASTRECT a click where the entry was calls no onClick (%d)", MM.clicks) end)
 
-    -- ---- Tower Island and back: the new menu gets its entry inside Construct
+    -- ---- Tower Island and back: the new menu gets its entry from the poll's opened (story 34)
     step("menu1: before travel", function() MM.lost0 = mevCount("lost") MM.open0 = mevCount("opened") end)
     travel("match", MATCH_MAP, "listen")
     waitWorld("match", "SmallMap", 150)
