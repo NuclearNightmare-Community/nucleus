@@ -1061,6 +1061,15 @@ do
     local calls = T.tagged("r28r2").bgMatCalls
     tick()
     ok(T.tagged("r28r2").bgMatCalls == calls, "story 28 tick: nothing re-styled, no widget call for the row")
+    -- ... and with focus inside the window (as in the game): the tick's own branch, not a refocus
+    local hfd = wr.HasFocusedDescendants
+    wr.HasFocusedDescendants = function() return true end
+    local refocus = FO.stats().refocus
+    RS.setStyle(rows[2], {})
+    ok(T.strip("r28r2"), "story 28 re-style inside: the row shows its own strip at once")
+    tick()
+    ok(T.selected("r28r2") and rec.lookRowId == "r28r2" and FO.stats().refocus == refocus, "story 28 re-style inside: the tick puts the highlight back without a refocus")
+    wr.HasFocusedDescendants = hfd
     -- Focused element removed while its row stays: the recovered element is in another row, the highlight follows
     B.remove(gears[2])
     ok(T.agree("r28g3") and T.selected("r28r3") and T.strip("r28r2") and rec.lookRowId == "r28r3", "story 28 removed: focus to the next row, the old row loses the highlight", SC.stats().focus)
@@ -1128,6 +1137,19 @@ do
     -- Window closed: nothing stays recorded
     SC.close(R)
     ok(rec.lookRowId == nil and rec.lookId == nil, "story 28 window closed: nothing recorded")
+    -- The last focusable removed (close = false: no BACK): the window widget takes focus, the row loses the highlight
+    local K2 = SC.open{ id = "R28k", close = false }
+    local Lk = LS.create{ id = "r28kl", place = { screen = K2, corner = "top-left" }, size = { 300, 200 } }
+    local rk = RS.create{ id = "r28kr", place = { list = Lk } }
+    local gk = B.create{ id = "r28kg", place = { row = rk }, icon = { icon = "gear" }, iconSize = 28, dimmed = true, onClick = T.rec("r28kg") }
+    tick()
+    local reck = C.windows["R28k"]
+    ok(T.agree("r28kg") and T.selected("r28kr") and reck.lookRowId == "r28kr", "story 28 window widget: the gear focused, its row highlighted")
+    B.remove(gk)
+    ok(F.focus == T.screenOf("R28k") and T.strip("r28kr") and reck.lookRowId == nil, "story 28 window widget: the row's own strip, nothing recorded")
+    tick()
+    ok(T.strip("r28kr") and reck.lookRowId == nil, "story 28 window widget: still after a tick")
+    SC.close(K2)
     -- Material missing: no highlight or face; assets.lua's one WARN; focus still moves
     require("nucleus.ui.assets")._reset()
     local SELP = "/Game/Graphics/MainMenu/Styles/Remaster/M_NN_CinematicSelection.M_NN_CinematicSelection"
