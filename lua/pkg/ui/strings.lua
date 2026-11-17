@@ -121,19 +121,66 @@ local function tipString(v, pre, what)
     end
     return v
 end
-function S.validateTooltip(tip, pre)
+-- Core story 33 (0.15.0): what names the value in the errors ("tooltip" when nil; "help" for a game-style row's "?").
+function S.validateTooltip(tip, pre, what)
+    what = what or "tooltip"
     if tip == nil then return nil end
-    if type(tip) == "string" then return { en = tipString(tip, pre, "tooltip") } end
+    if type(tip) == "string" then return { en = tipString(tip, pre, what) } end
     if type(tip) ~= "table" then
-        C.fail("%s: tooltip must be a string or a table of strings by language, like { en = \"...\" }, got %s", pre, C.describe(tip))
+        C.fail("%s: %s must be a string or a table of strings by language, like { en = \"...\" }, got %s", pre, what, C.describe(tip))
     end
     local n, out = 0, {}
     for k, v in pairs(tip) do
         n = n + 1
-        checkLangs(tip, pre, "tooltip", n, k)
-        out[k] = tipString(v, pre, "tooltip." .. k)
+        checkLangs(tip, pre, what, n, k)
+        out[k] = tipString(v, pre, what .. "." .. k)
     end
-    if out.en == nil then C.fail("%s: tooltip needs an en string (the fallback)", pre) end
+    if out.en == nil then C.fail("%s: %s needs an en string (the fallback)", pre, what) end
+    return out
+end
+
+-- Core story 33 (0.15.0): a game-style row's help (the "?"'s tooltip, in the game's own tooltip widget): a tooltip as
+-- above, of at most 8 lines per string.
+S.MAX_HELP_LINES = 8
+function S.validateHelp(help, pre)
+    local out = S.validateTooltip(help, pre, "help")
+    if out == nil then return nil end
+    local keys = {}
+    for k in pairs(out) do keys[#keys + 1] = k end
+    table.sort(keys)
+    for _, k in ipairs(keys) do
+        local _, nl = out[k]:gsub("\n", "")
+        if nl + 1 > S.MAX_HELP_LINES then
+            C.fail("%s: %s has %d lines, at most %d", pre, type(help) == "string" and "help" or ("help." .. k), nl + 1, S.MAX_HELP_LINES)
+        end
+    end
+    return out
+end
+
+-- Core story 33 (0.15.0): a game-style row's label: a string or a per-language table (en required, the language tag
+-- rules above), each string 1 to 64 bytes of plain text on one line (no byte below 0x20). No upper-case rule: the
+-- create-server screen's own row labels are in mixed case. Returns a per-language copy ({ en = s } for a string).
+local function labelString(v, pre, what)
+    if type(v) ~= "string" or #v < 1 or #v > S.MAX_BYTES then
+        local got = type(v) == "string" and string.format("%d bytes", #v) or C.describe(v)
+        C.fail("%s: %s must be a string of 1 to %d bytes, got %s", pre, what, S.MAX_BYTES, got)
+    end
+    local bad = v:find("[\0-\31]")
+    if bad then C.fail("%s: %s has the control byte 0x%02X at byte %d (plain text on one line)", pre, what, v:byte(bad), bad) end
+    return v
+end
+function S.validateRowLabel(label, pre)
+    if type(label) == "string" then return { en = labelString(label, pre, "label") } end
+    if type(label) ~= "table" then
+        C.fail("%s: label must be a string or a table of strings by language, like { en = \"Enemy Damage\" }, got %s", pre, C.describe(label))
+    end
+    local n, out = 0, {}
+    for k, v in pairs(label) do
+        n = n + 1
+        checkLangs(label, pre, "label", n, k)
+        out[k] = labelString(v, pre, "label." .. k)
+    end
+    if out.en == nil then C.fail("%s: label needs an en string (the fallback)", pre) end
     return out
 end
 

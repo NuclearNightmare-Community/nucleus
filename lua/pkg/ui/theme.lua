@@ -89,6 +89,14 @@ M.game = {
     controlFont = { font = "Regular", size = 22 },
     controlTint = { r = 1, g = 1, b = 1, a = 0.52 },       -- M_NN_WornStrip behind a choice and a slider's number box
     sliderTemplate = { pkg = "/Game/Graphics/MainMenu/SettingsMenu", name = "SettingsMenu_C", sub = "WidgetTree.Slider" },
+    -- Core story 33 (0.15.0): game-style rows. The game's tooltip widget (the create-server screen's "?" tooltips; its
+    -- Description FText is shown, wrapped at 400) and the game's picker (choice widget = "game"); and the look a
+    -- game-style row falls back to when its like row isn't a game row: the worn strip (rowTint), the body font in the
+    -- menu's text colour, these slots (HorizontalBoxSlot padding l, t, r, b; size Fill 1 for the label, Auto otherwise;
+    -- vertical alignment Center).
+    tooltipWidget = { pkg = "/Game/HexTree/Widgets/Elements/W_ToolTip3", name = "W_ToolTip3_C" },
+    pickerWidget = { pkg = "/Game/Graphics/MainMenu/Components/MultipleSelectBox", name = "MultipleSelectBox_C" },
+    likeFallback = { labelPad = { l = 12, t = 4, r = 12, b = 4 }, helpPad = { l = 8, t = 0, r = 12, b = 0 } },
 }
 
 -- Story 24 (core 0.8.0, Mod Manager CAP-2): images and icons. Core's own icons are white on transparent 128x128

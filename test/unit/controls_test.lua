@@ -812,7 +812,7 @@ T.bad(T.cho({ selected = 7 }), T.HC .. "selected must be an integer from 1 to 6,
 T.bad(T.cho({ selected = 0 }), T.HC .. "selected must be an integer from 1 to 6, got 0", "choice selected 0")
 T.bad(T.cho({ selected = 1.5 }), T.HC .. "selected must be an integer from 1 to 6, got 1.5", "choice selected 1.5")
 T.bad(T.cho({ onChange = false }), T.HC .. "onChange must be a function, got nil", "choice no onChange")
-T.bad(T.cho({ widget = "game" }), T.HC .. "widget 'game' is not available yet", "choice widget game")
+T.bad(T.cho({ widget = "game" }), T.HC .. "widget 'game' needs a game screen host (createServer), got 'screen#W'", "choice widget game off a game screen (core story 33)")
 T.bad(T.cho({ widget = "fancy" }), T.HC .. "unknown widget 'fancy' (valid: core)", "choice widget fancy")
 T.bad(T.cho({ place = { host = "hud", corner = "top-left" } }), "nucleus.ui.choice.create: choices need a host with a cursor (journal, menu, screen)", "choice on the HUD")
 ok(pcall(CH.create, { id = "c2", options = T.OPTS, onChange = T.nop, place = T.rp, widget = "core" }), "choice widget = 'core' accepted")

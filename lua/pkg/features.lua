@@ -44,6 +44,9 @@ M.HAND = {
     "ui.game.createServer",
     -- core story 32 (0.14.0, UI-14): an intent inside a game container (container, after, before, index, at)
     "ui.place.container",
+    -- core story 33 (0.15.0, UI-15): game-style rows (row.create's like, label, help, control; ui.row is a module, so
+    -- its new functions by hand) and the game's own picker (choice.create's widget = "game")
+    "ui.row.like", "ui.row.setLabel", "ui.row.setHelp", "ui.choice.game",
 }
 
 -- The UI part of the api table: path -> { module, function } (client.lua builds api.ui from this).
@@ -75,6 +78,7 @@ M.UI = {
     { "list.remove", "list", "remove" }, { "list.isShown", "list", "isShown" },
     { "row.create", "row", "create" }, { "row.setStyle", "row", "setStyle" }, { "row.setVisible", "row", "setVisible" },
     { "row.remove", "row", "remove" }, { "row.isShown", "row", "isShown" },
+    { "row.setLabel", "row", "setLabel" }, { "row.setHelp", "row", "setHelp" }, -- core story 33 (0.15.0): game-style rows
     -- story 24 (core 0.8.0, Mod Manager CAP-2): images and icons
     { "image.create", "image", "create" }, { "image.set", "image", "set" }, { "image.setVisible", "image", "setVisible" },
     { "image.remove", "image", "remove" }, { "image.isShown", "image", "isShown" }, { "image.setTooltip", "image", "setTooltip" },
