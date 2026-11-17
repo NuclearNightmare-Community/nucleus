@@ -34,6 +34,16 @@
 -- own key and click handling, control dispatch or a Construct hook, so there, with none alive (after a map change or a
 -- garbage collection), the row gets the plain selection and the UI tick upgrades it; off: 0.12.1's look.
 -- A focused row inside a list is scrolled into view.
+-- Core story 36 (0.15.1): the band follows the mouse. WBP_<Core>Row overrides OnMouseEnter and calls its hookable
+-- counter <Core>_OnHover (its Background is hit-testable, so the whole row counts). Each Lua state post-hooks it once,
+-- by full path, from the UI poll. A real pointer move into a row of this state's global top open window (a screen host,
+-- the row's own tag and live widget, a row with a focusable line) moves the model's current element to that row's
+-- focusable in the current column (clamped, as Up / Down), without scrolling; keys continue from there. Whichever input
+-- moved last owns the band: the platform cursor position is recorded at every handled key, at F.focusWindow and at
+-- every applied hover, and an enter at that position (content moving under a still pointer: a window opening, a list
+-- scrolling) is ignored; an unreadable position doesn't block. No focus steal: while a text box in the window or
+-- anything outside it holds keyboard focus a hover does nothing. The hook body runs with C.inDispatch and hookDepth
+-- raised (cached assets only: the tick completes a plain band or a missing face).
 -- Each window remembers its last-focused element (by id): after a close the next window down gets it back.
 local BASE = (...):gsub("%.ui%.focus$", "")
 local C = require(BASE .. ".ui.common")
@@ -52,7 +62,8 @@ F.NAV_FN = C.SCREEN_CLASS .. ":" .. C.NAME .. "_OnNav"
 local FOCUSABLE = { button = true, checkbox = true, choice = true, slider = true }
 local INPUT_DO_NOT_LOCK = 0
 local S = { navs = 0, handled = 0, ignored = 0, moves = 0, steps = 0, closes = 0, refocus = 0, recovered = 0,
-    scrolls = 0, faults = 0, hooked = false, hookTries = 0, rowLooks = 0, faces = 0 }
+    scrolls = 0, faults = 0, hooked = false, hookTries = 0, rowLooks = 0, faces = 0,
+    hovers = 0, hoverIgnored = 0, hoverHooked = false, hoverTries = 0 } -- story 36
 
 local function firstLine(e) return (tostring(e):match("^[^\n]*")) end
 
@@ -301,8 +312,9 @@ local function backIdOf(rec) return "#close:" .. rec.id end
 F._backIdOf = backIdOf
 
 -- Moves keyboard focus to el (an element of rec's window): the target gets keyboard focus (and, with mode, the UI input
--- mode), the old look goes, el's look comes, rec remembers el. False when el has no live target.
-local function focusEl(rec, el, lines, mode)
+-- mode), the old look goes, el's look comes, rec remembers el. False when el has no live target. noScroll (story 36: a
+-- hover): the list is not scrolled.
+local function focusEl(rec, el, lines, mode, noScroll)
     local t = targetOf(el)
     if not t then return false end
     if mode then
@@ -326,7 +338,7 @@ local function focusEl(rec, el, lines, mode)
     rec.focusId = el.id
     local li, ci = F.find(lines, el)
     rec.focusPos = li and { li = li, ci = ci, owner = lines[li].owner } or rec.focusPos
-    scrollIntoView(el)
+    if not noScroll then scrollIntoView(el) end
     S.moves = S.moves + 1
     return true
 end
@@ -382,9 +394,29 @@ local function focusedIn(rec, lines)
 end
 F._focusedIn = focusedIn
 
+-- Core story 36: the platform cursor position when the keys or a window last took the band ({ x, y } | nil: unknown). A
+-- hover at that position is content moving under a still pointer, not a pointer move.
+local pointerAt = nil
+local function pointerNow()
+    local ok, x, y = pcall(function()
+        local p = StaticFindObject("/Script/UMG.Default__WidgetLayoutLibrary"):GetMousePositionOnPlatform()
+        return p.X, p.Y
+    end)
+    if ok and type(x) == "number" and type(y) == "number" and x == x and y == y then return { x = x, y = y } end
+    return nil
+end
+local function rememberPointer() pointerAt = pointerNow() end
+local function samePointer()
+    if not pointerAt then return false end
+    local p = pointerNow()
+    if not p then return false end -- unreadable: never blocks a hover
+    return math.abs(p.x - pointerAt.x) < 1 and math.abs(p.y - pointerAt.y) < 1
+end
+
 -- Focus on open (fresh: its first focusable), and back on a window after the one above it closed (its remembered
 -- element, else its first focusable); else the window widget. With the UI input mode.
 function F.focusWindow(rec, fresh)
+    rememberPointer() -- story 36: a window opening under a still pointer doesn't take the band
     local lines = F.lines(C.windowHost(rec.id), backIdOf(rec))
     if fresh then rec.focusId, rec.focusPos, rec.lookId, rec.lookRowId = nil, nil, nil, nil end
     -- A dependent opens a window, then builds it: until the next UI tick (or the first key or click) focus follows the
@@ -542,6 +574,7 @@ local function navBody(ctx)
     if not okV then S.ignored = S.ignored + 1 return end
     if F.nav(rec, dir, act) then
         S.handled = S.handled + 1
+        rememberPointer() -- story 36: the keys own the band until the pointer really moves
         local okH, errH = pcall(function() w.NavHandled = true end)
         if not okH then C.warnOnce("nav handled", "window keys: setting NavHandled failed: %s", firstLine(errH)) end
     end
@@ -557,6 +590,56 @@ local function onNav(ctx)
 end
 F._onNav, F._navBody = onNav, navBody
 
+-- Core story 36: the post-hook on WBP_<Core>Row's <Core>_OnHover (its OnMouseEnter). Silent (counted) for another mod's
+-- row, a stale widget, a row of a non-screen host, a closed or covered window, a row without a focusable line, an enter
+-- under a still pointer and the row already holding focus; nothing changes while focus is on a text box of the window
+-- or outside it.
+local function hoverBody(ctx)
+    local function ignore() S.hoverIgnored = S.hoverIgnored + 1 end
+    if C.offGameThread() then return ignore() end
+    local w = ctx:get()
+    if not C.valid(w) then return ignore() end
+    local okT, tag = pcall(function() return w.CoreTag:ToString() end)
+    if not (okT and type(tag) == "string") then return ignore() end
+    local mine = C.LOWER .. ":" .. C.modTag .. ":"
+    if tag:sub(1, #mine) ~= mine then return ignore() end -- another mod's row
+    local row = C.els[tag:sub(#mine + 1)]
+    if not (row and not row.removed and row.kind == "row") then return ignore() end
+    local live = widgetOf(row)
+    if not live or live:GetAddress() ~= w:GetAddress() then return ignore() end -- not its live widget
+    local host = C.hostOf(row)
+    if type(host) ~= "string" or C.hostKind(host) ~= "screen" then return ignore() end
+    local rec = C.windows[host:sub(8)]
+    if not (rec and rec.open) or not globalTop(rec) then return ignore() end
+    if samePointer() then return ignore() end -- content moved under a still pointer
+    local lines = F.lines(host, backIdOf(rec))
+    local li = nil
+    for i, l in ipairs(lines) do if l.owner == row.id then li = i break end end
+    if not li then return ignore() end -- no focusable in the row
+    local cur = focusedIn(rec, lines)
+    if cur == nil then return ignore() end -- a text box (or something outside the window) holds keyboard focus
+    if cur ~= "window" and F.find(lines, cur) == li then return ignore() end -- the row already holds focus
+    local els = lines[li].els
+    local to = els[math.min((rec.focusPos and rec.focusPos.ci) or 1, #els)]
+    rec.openFresh = false
+    if focusEl(rec, to, lines, false, true) then
+        S.hovers = S.hovers + 1
+        rememberPointer()
+    end
+end
+local function onHover(ctx)
+    hookDepth = hookDepth + 1
+    C.inDispatch = C.inDispatch + 1 -- cached assets only, no hook registration (story 37's rule)
+    local ok, err = pcall(hoverBody, ctx)
+    C.inDispatch = C.inDispatch - 1
+    hookDepth = hookDepth - 1
+    if not ok then
+        S.faults = S.faults + 1
+        C.warnOnce("hover dispatch", "window row hover handling failed: %s (further failures not logged)", firstLine(err))
+    end
+end
+F._onHover = onHover
+
 -- From the UI poll (never inside a hook), once this mod has a window and the window class is loaded.
 local function ensureHook()
     if S.hooked or X._inHook() then return S.hooked end
@@ -569,9 +652,22 @@ local function ensureHook()
     return true
 end
 F._ensureHook = ensureHook
+-- Story 36: the same for the row's hover counter, once the row class is loaded.
+local function ensureHoverHook()
+    if S.hoverHooked or X._inHook() then return S.hoverHooked end
+    if not X._classOf("row") then return false end
+    S.hoverTries = S.hoverTries + 1
+    local ok, err = pcall(RegisterHook, C.HOVER_FN, onHover)
+    S.hoverHooked = true -- once only (a retry could double the hook)
+    if ok then C.log.debug("ui window row hover hook registered on %s", C.HOVER_FN)
+    else C.warnOnce("hover hook", "window rows: RegisterHook(%s) failed (is %s's pak current?): %s; the focus band follows keys and clicks only", C.HOVER_FN, C.NAME, firstLine(err)) end
+    return true
+end
+F._ensureHoverHook = ensureHoverHook
 H._host{ poll = function() end, reset = function() end, dispatch = function()
-    if S.hooked or not next(C.windows) then return nil end
+    if (S.hooked and S.hoverHooked) or not next(C.windows) then return nil end
     ensureHook()
+    ensureHoverHook()
     return nil
 end }
 

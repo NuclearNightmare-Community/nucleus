@@ -2,6 +2,16 @@
 
 All notable changes to Nucleus are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). From 0.5.0 a dependent's `need` and `dependsOn` are minimum versions (`>=0.5.0`), so a newer Nucleus never asks dependents to raise them. Up to 0.3.0, below 1.0.0 a dependent connected only to the same minor version (`need = "0.3.0"` accepted 0.3.x).
 
+## [0.15.1] - 2026-11-17
+
+Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
+
+For players: in a mod's window (Mod Manager's list, for example) the focus band now follows the mouse: moving the pointer onto a row moves the highlight and keyboard focus there, and the arrow keys or the gamepad continue from that row.
+
+### Changed
+
+- The full-row focus band of core's windows (0.12.1, 0.12.2) follows the mouse (core story 36). `WBP_NucleusRow` overrides `OnMouseEnter` and calls its new hookable counter `Nucleus_OnHover`; the row's `Background` is now hit-testable (`Visible`, it answers no click or wheel), so the whole row counts. Each dependent's Lua state post-hooks it once, by full path, from the UI poll. A real pointer move into a row of its top open window moves focus, the focus look and the band to that row's focusable in the current column (clamped, as Up and Down do), without scrolling the list; keys continue from there. Whichever input moved last owns the band: an enter at the cursor position recorded at the last handled key, window focus or hover (a window opening or a list scrolling under a still pointer) is ignored. A hover does nothing while a text box of the window (the slider's number box) or anything outside the window holds keyboard focus, and ignores another mod's rows, covered windows, rows without a focusable, lone controls, BACK and rows outside windows. Inside the hook only cached assets are used; the 500 ms UI tick completes the strong band or a focus face. The internal focus stats (`focus.lua`) gain `hovers` and `hoverIgnored`. An older pak without `Nucleus_OnHover`: one `WARN`, keys and clicks unchanged. No public API change. Needs the new pak (`LogicMods/Nucleus.pak`).
+
 ## [0.15.0] - 2026-11-17
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.

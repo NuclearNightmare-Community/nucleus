@@ -41,6 +41,8 @@ C.LIST_CLASS = C.LIST_PKG .. "." .. C.LIST_SHORT
 C.ROW_PKG = "/Game/Mods/" .. C.NAME .. "/WBP_" .. C.NAME .. "Row"
 C.ROW_SHORT = "WBP_" .. C.NAME .. "Row_C"
 C.ROW_CLASS = C.ROW_PKG .. "." .. C.ROW_SHORT
+-- Core story 36 (0.15.1): the row's OnMouseEnter override calls <Core>_OnHover on itself (focus.lua hooks it).
+C.HOVER_FN = C.ROW_CLASS .. ":" .. C.NAME .. "_OnHover"
 C.SCREEN_PKG = "/Game/Mods/" .. C.NAME .. "/WBP_" .. C.NAME .. "Screen"
 C.SCREEN_SHORT = "WBP_" .. C.NAME .. "Screen_C"
 C.SCREEN_CLASS = C.SCREEN_PKG .. "." .. C.SCREEN_SHORT

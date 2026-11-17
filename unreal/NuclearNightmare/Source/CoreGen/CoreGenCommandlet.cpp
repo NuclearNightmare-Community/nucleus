@@ -1366,19 +1366,26 @@ namespace
 
 	/**
 	 * WBP_<Core>Row (story 2): Border "Background" -> HorizontalBox "HBox". Lua puts the row's children into HBox (Fill
-	 * slots with a weight line up as columns, Auto otherwise). Both self-hit-test-invisible. Functions:
+	 * slots with a weight line up as columns, Auto otherwise). HBox is self-hit-test-invisible; Background is Visible
+	 * (core story 36: OnMouseEnter fires only on widgets in the hit path, and a Border answers no click or wheel, so those
+	 * still reach the controls and the list). Functions:
 	 *   SetBackground(R, G, B, A), SetBackgroundPadding(Padding)                as on the text widget
 	 *   SetBackgroundMaterial(Material, R, G, B, A, Padding), SetBackgroundSolid() as on the text widget
 	 *   SetTag(NewTag: String)                                                  CoreTag = NewTag
+	 *   <Core>_OnHover()                                                        HoverCount += 1; the OnMouseEnter
+	 *                                                                           override calls it (core story 36: the
+	 *                                                                           focus band follows the mouse)
 	 */
 	UWidgetBlueprint* BuildRow(const FString& Dir, const FString& Core)
 	{
 		UWidgetBlueprint* WBP = CastChecked<UWidgetBlueprint>(NewBlueprint(Dir / FString::Printf(TEXT("WBP_%sRow"), *Core),
 			UUserWidget::StaticClass(), UWidgetBlueprint::StaticClass(), UWidgetBlueprintGeneratedClass::StaticClass()));
-		CheckNames({TEXT("SetBackground"), TEXT("SetBackgroundPadding"), TEXT("SetBackgroundMaterial"), TEXT("SetBackgroundSolid"), TEXT("SetTag")});
+		const FString HoverFn = Core + TEXT("_OnHover");
+		CheckNames({TEXT("SetBackground"), TEXT("SetBackgroundPadding"), TEXT("SetBackgroundMaterial"), TEXT("SetBackgroundSolid"), TEXT("SetTag"), *HoverFn});
 
 		UWidgetTree* T = WBP->WidgetTree;
 		UBorder* Background = RootBackground(T);
+		Background->SetVisibility(ESlateVisibility::Visible); // core story 36: the whole row is in the hit path
 		T->RootWidget = Background;
 		UHorizontalBox* HBox = T->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("HBox"));
 		HBox->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
@@ -1394,11 +1401,32 @@ namespace
 		FFunc SetPad = AddFunction(WBP, TEXT("SetBackgroundPadding"), {{TEXT("Padding"), RealT()}}, {});
 		FFunc SetTag = AddTag(WBP);
 		FMaterialFns Mat = AddBackgroundMaterial(WBP);
+		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("HoverCount"), IntT(), TEXT("0"));
+		FFunc OnHover = AddFunction(WBP, FName(HoverFn), {}, {});
 		if (!Compile(WBP)) return nullptr;
 		FillBackground(WBP, SetBg, SetPad);
 		FillTag(WBP, SetTag);
 		FillBackgroundMaterial(WBP, Mat);
-		if (!Compile(WBP) || !Save(WBP)) return nullptr;
+		FillCounter(WBP, OnHover, TEXT("HoverCount"));
+		{
+			// Event graph: OnMouseEnter -> <Core>_OnHover(), nothing else (core story 36).
+			UEdGraph* EG = FBlueprintEditorUtils::FindEventGraph(WBP);
+			ClearGraph(WBP, EG);
+			FGraph G(WBP, EG);
+			int32 Y = 0;
+			UK2Node_Event* Enter = FKismetEditorUtilities::AddDefaultEventNode(WBP, EG, TEXT("OnMouseEnter"), UUserWidget::StaticClass(), Y);
+			if (!Enter) { UE_LOG(LogCoreGen, Error, TEXT("ROW: no OnMouseEnter event node")); return nullptr; }
+			Enter->SetEnabledState(ENodeEnabledState::Enabled, false);
+			G.X = 400;
+			G.Chain({Enter, G.CallSelf(FName(HoverFn))});
+		}
+		if (!Compile(WBP)) return nullptr;
+		const bool bOwnEnter = WBP->GeneratedClass->FindFunctionByName(TEXT("OnMouseEnter"), EIncludeSuperFlag::ExcludeSuper) != nullptr;
+		const bool bOwnHover = WBP->GeneratedClass->FindFunctionByName(FName(HoverFn), EIncludeSuperFlag::ExcludeSuper) != nullptr;
+		UE_LOG(LogCoreGen, Display, TEXT("ROW %s OnMouseEnter override=%s %s=%s"), *WBP->GetPathName(),
+			bOwnEnter ? TEXT("true") : TEXT("false"), *HoverFn, bOwnHover ? TEXT("true") : TEXT("false"));
+		if (!bOwnEnter || !bOwnHover) { UE_LOG(LogCoreGen, Error, TEXT("ROW: the OnMouseEnter override or %s did not compile into the class"), *HoverFn); return nullptr; }
+		if (!Save(WBP)) return nullptr;
 		return WBP;
 	}
 
