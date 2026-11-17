@@ -23,6 +23,8 @@
 -- choice, slider or button handle of this mod) is placed into the row, where the game row's control sits: the same as
 -- place(control, { row = h }), so the row's children (at most 16) all go there, before the "?". label, help and control
 -- need like. A like name that isn't a game row on the open screen gives core's game look and one WARN.
+-- style and setStyle have no effect on a game-style row while its like row is a game row (its look is copied; they
+-- apply to the fallback look), and gap spaces the children inside its holder.
 local BASE = (...):gsub("%.ui%.row$", "")
 local C = require(BASE .. ".ui.common")
 local P = require(BASE .. ".ui.place")

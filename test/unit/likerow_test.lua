@@ -1072,9 +1072,19 @@ do
     ok(#LOG == 2 and m.SelectedOption == "Max", "disabled: a click changes nothing, the picker put back")
     CH.setEnabled(gch, true)
     ok(m.enabled == true and m.opacity == 1, "setEnabled true")
-    -- a throwing onChange: logged once, the choice keeps working
-    local okSet = pcall(CH.set, gch, 3)
-    ok(okSet, "set back to 3")
+    -- a throwing onChange: logged once, the dispatch counter back to 0, the choice keeps working
+    CH.set(gch, 3)
+    local good = C.els["nr.c"].onChange
+    C.els["nr.c"].onChange = function() error("boom from the dependent") end
+    local th0, n0 = CH.stats().gameThrows, #LOG
+    m:click(1)
+    m:click(-1)
+    ok(CH.stats().gameThrows == th0 + 2 and C.inDispatch == 0, "a throwing onChange: both clicks counted as throws, inDispatch back to 0")
+    ok(countLogs("WARN choice 'nr.c' onChange:") == 1, "a throwing onChange: exactly one WARN")
+    C.els["nr.c"].onChange = good
+    m:click(1)
+    ok(#LOG == n0 + 1 and LOG[#LOG].i == 4, "after a throwing onChange: a later click with a good callback runs it")
+    CH.set(gch, 3)
     -- setLabel / setHelp while live
     local t1 = X.stats().gameTips
     RS.setLabel(like1, "Enemy Dmg")
@@ -1086,6 +1096,16 @@ do
     RS.setHelp(like1, HELP3)
     RS.setLabel(like1, "Enemy Damage")
     ok(p.help.vis == C.VIS.Visible and p.help.ToolTipWidget.Description.s == HELP3, "setHelp again: shown")
+    -- a create with the same id while open: the new label, help and control at once
+    local cb2 = CK.create{ id = "nr.cb2", onChange = function() end, place = { host = CSH, corner = "top-left" } }
+    RS.create{ id = "nr.r2", like = "Overlay_28", label = "Spread Again", help = "new help", control = cb2, place = { host = CSH, container = VB, after = "Overlay_28" } }
+    local p2b = Q.parts(Q.ours(vb, "nr.r2"))
+    ok(p2b.label.text == "Spread Again" and p2b.help.ToolTipWidget.Description.s == "new help", "same-id create while open: label and help updated")
+    ok(#p2b.holder.children == 2 and I.nameOf(p2b.holder.children[2]) == "nr.cb2" and C.els["nr.cb2"].panel == C.els["nr.r2"],
+        "same-id create while open: the new control in the holder")
+    CK.remove(cb2)
+    RS.create{ id = "nr.r2", like = "Overlay_28", label = { en = "Damage Spread", de = "Streuung" }, help = { en = "spread", de = "Streuung hilfe" },
+        place = { host = CSH, container = VB, after = "Overlay_28" } }
     -- a second pass on the open screen (no rebuild): the look copied again, no new widget
     local before = Q.constructs
     X._insertPass(CSH, s, nil, "test")
@@ -1094,9 +1114,9 @@ do
     tick()
     ok(C.els["nr.c"].msbRef == nil and C.els["nr.r1"].ref == nil, "Back: the row's and the picker's handles freed")
     -- a stale picker (the closed screen's): ignored
-    local ig2 = CH.stats().gameIgnored
+    local ig2, l2 = CH.stats().gameIgnored, #LOG
     m:click(1)
-    ok(#LOG == 2 and CH.stats().gameIgnored == ig2 + 1, "a stale picker after Back: ignored")
+    ok(#LOG == l2 and CH.stats().gameIgnored == ig2 + 1, "a stale picker after Back: ignored", #LOG .. " " .. (CH.stats().gameIgnored - ig2))
 end
 
 -- ---------------------------------------------------------------- ten opens: one widget set each, the look re-copied
@@ -1138,6 +1158,41 @@ do
     ok(hookCount("MultipleSelectBox_C:BndEvt__MultipleSelectBox_Button_K2Node") == 1, "ten opens: the arrow hooks registered once")
 end
 
+-- ---------------------------------------------------------------- the arrow hooks: a class reload, a half-failed registration
+do
+    local NEXT = "MultipleSelectBox_C:BndEvt__MultipleSelectBox_Button_K2Node"
+    local PREV = "MultipleSelectBox_C:BndEvt__MultipleSelectBox_Button_60_K2Node"
+    local n0, p0 = hookCount(NEXT), hookCount(PREV)
+    obj({}, C.MSB_NEXT_FN) -- the class loaded anew: the handler at a new address
+    local s = T.open(335)
+    tick()
+    ok(hookCount(NEXT) == n0 + 1 and hookCount(PREV) == p0 + 1 and CH.stats().gameHooked == true, "class reload: one new registration per arrow")
+    local m = Q.parts(Q.ours(s.vb, "nr.r1")).holder.children[1].HBox.children[1]
+    local c0 = #LOG
+    m:click(1)
+    ok(#LOG == c0 + 1, "class reload: a click still calls onChange once", #LOG - c0)
+    CH.set(gch, 3)
+    s:RemoveFromParent(); tick()
+    -- a half-failed registration: one WARN, never retried, gameHooked false
+    obj({}, C.MSB_NEXT_FN)
+    local real, tries = RegisterHook, 0
+    RegisterHook = function(path, f)
+        tries = tries + 1
+        if path == C.MSB_PREV_FN then error("hook refused (test)") end
+        return real(path, f)
+    end
+    local s2 = T.open(336)
+    tick(); tick()
+    ok(countLogs("WARN game choice arrows: RegisterHook failed:") == 1 and countLogs("hook refused (test)") == 1 and CH.stats().gameHooked == false, "a half-failed registration: one WARN, gameHooked false", countLogs("RegisterHook failed") .. " " .. tostring(CH.stats().gameHooked))
+    local t1 = tries
+    s2:RemoveFromParent(); tick()
+    local s3 = T.open(337)
+    tick(); tick()
+    ok(tries == t1 and t1 == 2, "a half-failed registration: not tried again on later ticks and opens", tries)
+    s3:RemoveFromParent(); tick()
+    RegisterHook = real
+end
+
 -- ---------------------------------------------------------------- the language re-picked at the next attach; a like that isn't a game row
 do
     F.lang = "de"
@@ -1173,6 +1228,18 @@ do
     s:RemoveFromParent(); tick()
 end
 
+-- ---------------------------------------------------------------- off the game thread
+do
+    local saved = _G.Nucleus_Deref
+    _G.Nucleus_Deref = function() error("Nucleus_Deref refused: called off the game thread") end
+    for _, d in ipairs({ { "row.setLabel", function() RS.setLabel(like1, "X") end }, { "row.setHelp", function() RS.setHelp(like1, "X") end },
+        { "row.create", function() RS.create{ id = "ot", like = "Overlay_28", place = { host = CSH, container = VB, after = "Overlay_28" } } end },
+        { "choice.create", function() CH.create{ id = "ot", widget = "game", options = OPTS, onChange = function() end } end } }) do
+        raises(d[2], "nucleus.ui." .. d[1] .. " called off the game thread", "off thread: " .. d[1])
+    end
+    _G.Nucleus_Deref = saved
+end
+
 -- ---------------------------------------------------------------- features
 local FE = require("nucleus.features")
 for _, n in ipairs({ "ui.row.like", "ui.row.setLabel", "ui.row.setHelp", "ui.choice.game" }) do
@@ -1183,7 +1250,7 @@ do
     local warns = {}
     -- (the fake clock adds 1 ms per reading, so a soft "hud slow tick" line is the fake's, not core's)
     for _, l in ipairs(logs) do if l:find("^WARN") and not l:find("^WARN hud slow tick") then warns[#warns + 1] = l end end
-    ok(#warns == 3, "exactly three WARNs in the run: the tooltip class missing, Overlay_NOPE, Overlay_29 (each once)", table.concat(warns, " | "))
+    ok(#warns == 5, "exactly five WARNs in the run: the tooltip class missing, Overlay_NOPE, the throwing onChange, the half-failed hook, Overlay_29 (each once)", table.concat(warns, " | "))
 end
 
 print(string.format("likerow_test: %d passed, %d failed", pass, failN))
