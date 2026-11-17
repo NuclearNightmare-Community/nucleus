@@ -152,11 +152,22 @@ function I._resolve(src)
 end
 
 -- Elements whose texture missed the cache inside a hook: el -> fn(el, widget), run on the next UI tick (outside any
--- hook) on the element's live widget. The tick is the shared 500 ms poll (hud.lua), as one more host's dispatch.
+-- hook) on the element's live widget. The tick is the shared 500 ms poll (hud.lua), as one more host's dispatch. Core
+-- story 37 (DW-71): while it isn't empty it holds one keep token, so the loop runs without a HUD watcher.
 local later = {}
-function I._later(el, fn) later[el] = fn end
+local laterKeep = nil
+local function laterSync()
+    if next(later) ~= nil then
+        if not laterKeep then laterKeep = H._keep() end
+    elseif laterKeep then
+        local k = laterKeep
+        laterKeep = nil
+        H._release(k)
+    end
+end
+function I._later(el, fn) later[el] = fn; laterSync() end
 local function flushLater()
-    if next(later) == nil then return nil end
+    if next(later) == nil then laterSync() return nil end
     local items = {}
     for el, fn in pairs(later) do items[#items + 1] = { el, fn } end
     for _, it in ipairs(items) do
@@ -170,10 +181,12 @@ local function flushLater()
             end
         end
     end
+    laterSync()
     return nil
 end
 H._host{ poll = function() end, dispatch = flushLater, reset = function() end }
 I._flushLater = flushLater -- unit tests
+I._laterKeep = function() return laterKeep end -- unit tests
 
 -- ---------------------------------------------------------------- the kind (text.lua's engine)
 

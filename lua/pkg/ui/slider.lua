@@ -227,7 +227,7 @@ local function settle(el, w, changed)
     if not changed then return end
     S.changes = S.changes + 1
     if C.debugOn() then C.log.debug("ui slider '%s' -> %s", el.id, tostring(el.value)) end
-    local ok, err = pcall(el.onChange, el.handle, el.value)
+    local ok, err = C.callDependent(el.onChange, el.handle, el.value) -- core story 37: no load inside the hook
     if not ok then
         S.throws = S.throws + 1
         if not el.warnedChange then

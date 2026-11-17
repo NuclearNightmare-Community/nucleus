@@ -745,6 +745,42 @@ do
     B.remove(C.els.pr.handle)
 end
 
+-- ---------------------------------------------------------------- core story 37: the pending queues keep the UI loop (DW-71)
+do
+    local H = require("nucleus.ui.hud")
+    local baseKeep, baseRelease, held = H._keep, H._release, 0
+    H._keep = function() held = held + 1 return baseKeep() end
+    H._release = function(k) held = held - 1 return baseRelease(k) end
+    local h = IM.create{ id = "k37", place = { list = T.list }, image = { icon = "gear" } }
+    local w = T.tagged("k37")
+    A._reset(); A.ensureLoadMapHook() -- (A._reset forgets the LoadMap hook; that request is the last case below)
+    ok(IM._laterKeep() == nil and held == 0, "story 37: no keep token while no texture is pending")
+    local g0 = F.getAssets
+    C.callDependent(function() IM.set(h, { image = { icon = "warning" } }) end)
+    ok(F.getAssets == g0 and w.tex.__asset == "T_Gear", "story 37: a texture set in a dependent's callback isn't loaded there")
+    ok(IM._laterKeep() ~= nil and held == 1, "story 37: the pending texture holds one keep token (the loop runs without a HUD watcher)")
+    C.callDependent(function() IM.set(h, { image = { icon = "lock" } }) end)
+    ok(held == 1, "story 37: a second pending texture takes no second token")
+    tick()
+    ok(w.tex.__asset == "T_Lock" and IM._laterKeep() == nil and held == 0, "story 37: applied on the next tick, the token released")
+    -- removed before the tick: dropped, the token released
+    A._reset(); A.ensureLoadMapHook()
+    C.callDependent(function() IM.set(h, { image = { icon = "warning" } }) end)
+    ok(held == 1, "story 37: pending again, one token")
+    IM.remove(h)
+    tick()
+    ok(IM._laterKeep() == nil and held == 0, "story 37: an element removed before the tick is dropped, the token released")
+    -- a LoadMap hook asked for inside a callback: registered by the next tick, outside the hook (with a token meanwhile)
+    A._reset()
+    local n0 = #F.loadMap
+    C.callDependent(function() IM.create{ id = "k37b", place = { list = T.list }, image = { icon = "gear" } } end)
+    ok(#F.loadMap == n0 and A._loadMapWanted() and select(2, X._deferred()) ~= nil, "story 37: no RegisterLoadMapPostHook inside a callback; remembered with a keep token")
+    tick()
+    ok(#F.loadMap == n0 + 1 and not A._loadMapWanted() and select(2, X._deferred()) == nil, "story 37: the next tick registers it and releases the token")
+    IM.remove(C.els.k37b.handle)
+    H._keep, H._release = baseKeep, baseRelease
+end
+
 -- ---------------------------------------------------------------- off the game thread and before connect
 do
     local saved = _G.Nucleus_Deref

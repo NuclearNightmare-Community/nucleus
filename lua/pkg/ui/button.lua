@@ -36,6 +36,7 @@
 -- story 16 (input mode) lands.
 local BASE = (...):gsub("%.ui%.button$", "")
 local C = require(BASE .. ".ui.common")
+local H = require(BASE .. ".ui.hud")
 local P = require(BASE .. ".ui.place")
 local X = require(BASE .. ".ui.text")
 local A = require(BASE .. ".ui.assets")
@@ -103,7 +104,7 @@ local function dispatch(ctx)
     S.clicks = S.clicks + 1
     el.clicks = (el.clicks or 0) + 1
     if C.debugOn() then C.log.debug("ui button '%s' clicked (%d)", el.id, el.clicks) end
-    local ok, err = pcall(el.onClick, el.handle)
+    local ok, err = C.callDependent(el.onClick, el.handle) -- core story 37: no load or hook registration inside the hook
     if not ok then
         S.throws = S.throws + 1
         if not el.warnedClick then
@@ -140,12 +141,19 @@ end
 
 -- Story 20: buttons can be attached inside the Journal's Construct hook, where no hook is registered: the poll tick
 -- that checks the Construct hook registers the click hook first, once a button exists.
-X._pollHooks[#X._pollHooks + 1] = function()
+local function pollHook()
     if S.hooked then return end
     for _, el in ipairs(C.order) do
         if el.kind == "button" and not el.removed then ensureHook() return end
     end
 end
+X._pollHooks[#X._pollHooks + 1] = pollHook
+-- Core story 37: a state's first button made inside a dependent's callback (create and attach register no hook there):
+-- the UI tick registers it (never inside a hook; once hooked this is one check).
+H._host{ poll = function() end, reset = function() end, dispatch = function()
+    if not S.hooked and not X._inHook() then pollHook() end
+    return nil
+end }
 
 -- ---------------------------------------------------------------- the kind (text.lua's engine)
 

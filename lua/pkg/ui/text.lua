@@ -474,6 +474,29 @@ local function classOf(kind)
 end
 X._classOf = classOf
 
+-- Core story 37: elements whose class missed the cache inside a dependent's callback (C.inDispatch > 0), in order;
+-- attached on the next UI tick (outside any hook, flushDeferred below). While it isn't empty, or a LoadMap hook request
+-- waits (assets.lua), the queue holds one keep token, so the loop runs without a HUD watcher (DW-71).
+local deferred = { list = {}, set = {} }
+local deferKeep = nil
+local function deferSync()
+    local want = #deferred.list > 0 or A._loadMapWanted()
+    if want and not deferKeep then deferKeep = H._keep()
+    elseif not want and deferKeep then
+        local k = deferKeep
+        deferKeep = nil
+        H._release(k)
+    end
+end
+local function deferAttach(el)
+    if not deferred.set[el] then
+        deferred.set[el] = true
+        deferred.list[#deferred.list + 1] = el
+    end
+    deferSync()
+end
+A.onDeferred = deferSync
+
 -- live(el) -> the element's widget when it sits in this container (a host canvas, or a panel's box), else nil.
 local function liveIn(container)
     local caddr = container:GetAddress()
@@ -761,6 +784,8 @@ attachOneBody = function(el, hostObj, container, byId, reason, report, steps)
         local cls = classOf(el.kind)
         C.pa("attach.class", t)
         if not cls then
+            -- Core story 37: inside a dependent's callback, attached on the next UI tick (no load inside the hook).
+            if C.inDispatch > 0 then deferAttach(el) return false end
             if inHookNow() then return false end -- story 20: not cached; attached at the poll's opened
             C.warnOnce("pak:" .. el.id, "%s '%s' stays pending: %s is not loaded (is Content/Paks/LogicMods/%s.pak installed?)", el.kind, el.id, KIND[el.kind].cls, C.NAME)
             return false
@@ -1185,7 +1210,9 @@ X._stepsText = stepsText
 -- attach line written at the poll's opened. Cleared at that Journal's closed / lost; an opened forgets the others.
 local constructed = {}
 local inHook = false             -- inside the Construct hook: classes from the cache only (classOf), no hook registered
-function X._inHook() return inHook or M._inHook == true end -- story 21: or inside the menu's Construct
+-- Story 21: or inside the menu's Construct. Core story 37: or inside core's dispatch work and a dependent's callback
+-- from a control's hook (C.inDispatch, common.lua C.callDependent).
+function X._inHook() return inHook or M._inHook == true or C.inDispatch > 0 end
 inHookNow = X._inHook
 
 -- Attaches the journal elements into the Journal's canvas (story 13; shared by the Construct hook and opened since
@@ -1549,6 +1576,32 @@ local function attachNow(el, reason)
     if res then placeAll(host, obj, canvas, true) end
 end
 X._attachNow = attachNow
+
+-- Core story 37: the UI tick (outside any hook) attaches the elements deferred from a dependent's callback (each one not
+-- removed and not live yet; the class loads normally here), registers a LoadMap hook asked for there, and keeps the
+-- window class warm while this state has menu or window elements, so a button's onClick can open a window.
+local function flushDeferred()
+    if X._inHook() then return nil end
+    if A._loadMapWanted() then A.ensureLoadMapHook() end
+    if #deferred.list > 0 then
+        local items = deferred.list
+        deferred.list, deferred.set = {}, {}
+        for _, el in ipairs(items) do
+            if not el.removed and not liveWidget(el) then attachNow(el, "deferred from a callback") end
+        end
+    end
+    deferSync()
+    for _, el in ipairs(C.order) do
+        if not el.removed then
+            local k = C.hostKind(C.hostOf(el))
+            if k == "menu" or k == "screen" then classOf("screen") break end
+        end
+    end
+    return nil
+end
+H._host{ poll = function() end, reset = function() end, dispatch = flushDeferred }
+X._flushDeferred = flushDeferred -- unit tests
+X._deferred = function() return #deferred.list, deferKeep end -- unit tests
 
 -- ---------------------------------------------------------------- story 21: the menu host and the windows
 -- Like the Journal: every menu is new (each return from a match builds one), so its elements get new widgets on each
