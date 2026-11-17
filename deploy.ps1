@@ -13,7 +13,7 @@
   For scenario bad-input it also installs core's test-only C++ part (test/SkelNative, built by build.ps1 as
   build/native-out/test/main.dll, never packaged) as Mods/<name>SkelNative: the forced missing struct member case.
   -Scenario breaks one part on purpose: skeleton (all parts), no-native (no dlls/main.dll), no-pak (no LogicMods pak);
-  bad-input, ui, journal, menu, createserver (core story 31), gameinsert (core story 32), soak and manual install all parts like skeleton. The scenario goes to the test dependent's Scripts/scenario.txt.
+  bad-input, ui, journal, menu, createserver (core story 31), soak and manual install all parts like skeleton. The scenario goes to the test dependent's Scripts/scenario.txt.
   net-host and net-client (core story 22) are the pair-run roles of test/pair/nucleus-scenarios.ps1 (all parts, the
   test dependent only; its mod.json "id" is skeltest, the id its core.net keys use); they run in a pair.ps1 session.
   presence-host, presence-client and presence-vanilla-host (core story 23) are the presence pair-run roles, installed
@@ -31,7 +31,7 @@
 param(
     [Parameter(Mandatory)] [string] $Instance,
     [switch] $Test,
-    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'createserver', 'gameinsert', 'soak', 'manual', 'net-host', 'net-client',
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'createserver', 'soak', 'manual', 'net-host', 'net-client',
                  'presence-host', 'presence-client', 'presence-vanilla-host')]
     [string] $Scenario = 'skeleton',
     [switch] $Remove,

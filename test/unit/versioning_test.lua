@@ -116,23 +116,13 @@ local want = { "call", "clock", "deref", "free", "map.setup",
     "ui.game", "ui.game.createServer",
     "ui.gap.compact", "ui.hud",
     "ui.image", "ui.image.create", "ui.image.isShown", "ui.image.remove", "ui.image.set", "ui.image.setTooltip", "ui.image.setVisible",
-    "ui.journal", "ui.journal.regions", "ui.list", "ui.look", "ui.menu", "ui.overflow", "ui.panel", "ui.place",
-    -- core story 32 (0.14.0): game containers
-    "ui.place.container",
-    "ui.row", "ui.screen",
+    "ui.journal", "ui.journal.regions", "ui.list", "ui.look", "ui.menu", "ui.overflow", "ui.panel", "ui.place", "ui.row", "ui.screen",
     -- core story 27 (0.12.0): the window card, keys and focus
     "ui.screen.focus", "ui.screen.panel",
     "ui.slider", "ui.slider.create", "ui.slider.get", "ui.slider.isShown", "ui.slider.remove", "ui.slider.set", "ui.slider.setDefault", "ui.slider.setEnabled",
     "ui.slider.setTooltip", "ui.slider.setVisible",
     "ui.text", "ui.text.setTooltip" }
-eq(table.concat(declared, ","), table.concat(want, ","), "declared(): the 0.14.0 feature list (map.setup, ui.journal.regions, ui.look, story 24's, story 4's, story 22's, story 23's, story 27's, story 31's and story 32's names hand-named; settings, net), sorted")
--- Core story 32: a 0.13.x core's list answers false for ui.place.container; this one true.
-do
-    local old = {}
-    for _, n in ipairs(want) do if n ~= "ui.place.container" then old[#old + 1] = n end end
-    ok(F.set(old)["ui.place.container"] == nil, "a 0.13.x core: core.has('ui.place.container') is false")
-    ok(F.set(declared)["ui.place.container"] == true, "0.14.0: ui.place.container is a feature")
-end
+eq(table.concat(declared, ","), table.concat(want, ","), "declared(): the 0.13.0 feature list (map.setup, ui.journal.regions, ui.look, story 24's, story 4's, story 22's, story 23's, story 27's and story 31's names hand-named; settings, net), sorted")
 -- Core story 31: a 0.12.x core's list answers false for ui.game and ui.game.createServer; this one true.
 do
     local old = {}
