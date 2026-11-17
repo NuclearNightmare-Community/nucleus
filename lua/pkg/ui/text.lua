@@ -142,8 +142,11 @@ local function gameAsset(key) return A.get(key) end
 
 -- Story 21: a game-look background (a material) or the plain one (a colour). Only rows get the worn strip by default
 -- in the game look; an explicit background is a colour in both looks. el.matBg: the widget shows a material now.
+-- Core story 28: el.selBg marks a row showing focus.lua's selection highlight; any re-style draws its own background
+-- again, so the mark goes (the UI tick puts the highlight back while the row holds focus).
 local function backgroundStyle(el, w, fresh)
     local s = el.style
+    el.selBg = nil
     local game = lookOf(el) == "game"
     if game and el.kind == "row" and not s.explicitBg then
         local mat = gameAsset("mat:strip")
@@ -162,6 +165,7 @@ local function backgroundStyle(el, w, fresh)
     end)
     if not ok then warnFirst("style:" .. el.id, "%s '%s': style not applied (is %s's pak current?): %s", err, el.kind, el.id, C.NAME) end
 end
+X._backgroundStyle = backgroundStyle -- core story 28: focus.lua restores a row's own background
 
 -- Story 21: a text's font and colour in the game look (style.font, default body); back to the generator's defaults
 -- (white, drop shadow, size 18) when it goes plain again.
@@ -1492,6 +1496,7 @@ local function releaseHost(host, keepPath)
         freeRef(el)
         el.attached, el.slotKey, el.appliedVis, el.stackHeight, el.padKey = false, nil, nil, nil, nil
         el.nearRect, el.jpath, el.sizeKey, el.matBg, el.gameText = nil, nil, nil, nil, nil
+        el.selBg, el.faceOn = nil, nil -- core story 28: the focus highlight and face went with the widget
         if el.appliedEnabled ~= nil then el.appliedEnabled = nil end
     end)
     return freed

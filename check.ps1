@@ -821,8 +821,19 @@ $menuChecks = $started + @(
     "\[$T\] OK CARD KBM contains: "
     "\[$T\] OK CARD KBM BACK bottom-left "
     "\[$T\] OK KFOCUS KBM kbm\.g1 "
+    # Core story 28: the focused row shows the selection, the others their worn strip; the focused dimmed icon-only gear
+    # has a focus face; after DOWN both move to row 2.
+    "\[$T\] OK KLOOK row: the focused row kbm\.r1 shows the selection "
+    "\[$T\] OK KLOOK row: the unfocused row kbm\.r2 shows its worn strip "
+    "\[$T\] OK KLOOK face: the focused gear kbm\.g1 shows a focus face "
+    "\[$T\] OK KLOOK face off: the unfocused gear kbm\.g2 has no face "
+    "\[$T\] OK KFOCUS KBM kbm\.g2 "
+    "\[$T\] OK KLOOK row: the focused row kbm\.r2 shows the selection "
+    "\[$T\] OK KLOOK row: the unfocused row kbm\.r1 shows its worn strip "
+    "\[$T\] OK KLOOK face: the focused gear kbm\.g2 shows a focus face "
+    "\[$T\] OK KLOOK face off: the unfocused gear kbm\.g1 has no face "
     "\[$T\] OK KBEND every window closed"
-    "!\[$T\] WARN .*(window key|focus look|focus window|focus tick|focusing it failed|focused row|keyboard focus|input mode|clicked element|card|re-fit|BACK button|NavHandled)"
+    "!\[$T\] WARN .*(window key|focus look|focus face|focus highlight|restoring its own|focus window|focus tick|focusing it failed|focused row|keyboard focus|input mode|clicked element|card|re-fit|BACK button|NavHandled)"
     "\[$T\] END result=PASS"
 )
 # Core story 24: the ic-* group, on window IC (menu3), and every new function off the game thread.
