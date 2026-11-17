@@ -167,7 +167,7 @@ end
 local function validateInsert(intent)
     local got = {}
     for _, k in ipairs(POSITIONS) do if intent[k] ~= nil then got[#got + 1] = k end end
-    if intent.container == nil then bad("%s needs container = <game widget name>", table.concat(got, " and ")) end
+    if intent.container == nil then bad("%s %s container = <game widget name>", table.concat(got, " and "), #got == 1 and "needs" or "need") end
     for k in pairs(intent) do
         if not INSERT_KEYS[k] then bad("%s is not allowed with container (valid keys: %s)", k, INSERT_KEY_NAMES) end
     end

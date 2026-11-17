@@ -949,6 +949,8 @@ $gameInsert = $started + @(
     "#15|\[$T\] OK GIORDER "
     "#15|\[$T\] OK GISLOTS .*: \d+ game rows in their order with the snapshot's slot values"
     "#15|\[$T\] OK GIONE "
+    # Every game picker in the rebuilt list shows its option from before the rebuild (created, ten opens, final, late).
+    "#13|\[$T\] OK GIPICKS .*: \d+ game pickers in the rebuilt list show their options from before the rebuild"
     # Ten opens by real clicks: one rebuild per open, new widgets each time.
     "#10|\[$T\] OK GIREBUILD open \d+: VerticalBox_202 rebuilt 1 time\(s\)"
     "#10|\[$T\] OK GINEW open \d+: "
@@ -974,6 +976,7 @@ $gameInsert = $started + @(
     "\[$T\] OK GILATELOBBY "
     "\[$T\] OK GILATE two texts made while open: not attached in the call \(true\), .*, 1 rebuild\(s\) for both"
     "\[$T\] OK GILATEKEEP "
+    "\[$T\] OK GIRESTORE core put back [1-9]\d* game picker option"
     # Poll-first (story 34): no hook on the screen's class.
     "!Registered script hook .*CreateServer_C"
     "!\[$T\] WARN (?!$slowWarnOk|ui createServer: anchor 'Overlay_NOPE' |ui createServer: container 'VerticalBox_NOPE' )"
