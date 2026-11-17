@@ -588,7 +588,21 @@ ok(C.els.bad == nil, "the refused calls created nothing")
 
 -- ---- nothing open yet: isOpen false; no hook on the screen's class, ever
 ok(G.isOpen(CSH) == false, "isOpen: false with no screen")
+-- the first game.watch keeps the shared loop running by itself (a dependent that only watches gets its events)
+local H = require("nucleus.ui.hud")
+local keeps = 0
+do
+    local keep = H._keep
+    H._keep = function(...) keeps = keeps + 1 return keep(...) end
+end
 local w1 = G.watch(CSH, T.watcher("A"))
+ok(keeps == 1, "watch: the first game.watch keeps the shared loop running (H._keep)", keeps)
+-- a dependent watcher registered before the elements hears opened after they are attached (internal watchers first)
+local seenAtOpen = nil
+local tx
+local w0 = G.watch(CSH, function(s, info)
+    if info.event == "opened" and seenAtOpen == nil then seenAtOpen = X.isShown(tx) == true and T.inCanvas(s, "cst") ~= nil end
+end)
 ok(math.type(w1) == "integer", "watch: an integer token")
 -- a menu.watch token never names a game watcher, even once game tokens exist (they come from their own range)
 do
@@ -598,7 +612,7 @@ do
     ok(w1 > 1 << 20 and w1 ~= mt, "game tokens: their own range", w1)
 end
 -- elements on the host before any open: a text and a checkbox (story 26's control), in a corner
-local tx = X.create{ id = "cst", text = "SKEL CS", place = { host = CSH, corner = "bottom-right" } }
+tx = X.create{ id = "cst", text = "SKEL CS", place = { host = CSH, corner = "bottom-right" } }
 T.log = {}
 local cb = CK.create{ id = "csc", place = { host = CSH, corner = "bottom-right" }, onChange = function(h, v) T.log[#T.log + 1] = { h = h, v = v } end }
 ok(X.isShown(tx) == false and CK.isShown(cb) == false, "elements: not shown while no screen is open")
@@ -611,6 +625,8 @@ ok(G.isOpen(CSH) == true, "isOpen: true once a screen is in the viewport (before
 tick()
 ok(T.evs("A") == "opened" and T.ev.A[1].path == s1.__path and T.ev.A[1].host == CSH and rawequal(T.ev.A[1].screen, s1), "open: opened with the path, host and screen", T.evs("A"))
 ok(type(T.ev.A[1].reason) == "string", "open: a reason")
+ok(seenAtOpen == true, "open: a dependent watcher registered before the elements finds them attached at opened")
+G.unwatch(w0)
 local t1, c1 = T.inCanvas(s1, "cst"), T.inCanvas(s1, "csc")
 ok(t1 ~= nil and c1 ~= nil, "open: the text and the checkbox are in the screen's CanvasPanel_21")
 ok(X.isShown(tx) == true and CK.isShown(cb) == true, "open: isShown true")
@@ -745,12 +761,17 @@ tick()
 ok(T.lastEv("A").event == "opened" and T.lastEv("A").path == s20.__path, "replace: s20 opened")
 local nA = #T.ev.A
 local s21 = T.open(21)
+-- an element made while the newer screen is up but not yet opened waits for its opened (never attached to it early)
+local rp = X.create{ id = "csrep", text = "REP", place = { host = CSH, corner = "top-left" } }
+ok(T.inCanvas(s21, "csrep") == nil and C.els.csrep.ref == nil, "replace: an element made before the newer screen's opened is not attached")
 tick()
 ok(#T.ev.A == nA + 1 and T.lastEv("A").event == "lost" and T.lastEv("A").path == s20.__path and T.lastEv("A").reason:find("replaced", 1, true) ~= nil,
     "replace: lost for the old one, one event this tick", T.evs("A"))
 tick()
 ok(#T.ev.A == nA + 2 and T.lastEv("A").event == "opened" and T.lastEv("A").path == s21.__path and T.inCanvas(s21, "cst") ~= nil,
     "replace: opened for the newer one next tick, its elements attached")
+ok(X.isShown(rp) == true and T.inCanvas(s21, "csrep") ~= nil, "replace: that element attached at the newer screen's opened")
+X.remove(rp)
 
 -- ---- lost: the object is gone (a map change destroyed it)
 s20:RemoveFromParent() -- (the replaced one left the viewport too)
