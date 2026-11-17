@@ -162,7 +162,10 @@ end
 -- ---- the watchers (every host in one list; tokens are unique across hosts)
 local watchers = {}              -- { token, host, fn, internal, needOpened, dead, warned }
 local issued = {}                -- token -> true for the dependent's own watchers
-local nextToken = 0
+-- Tokens come from their own range (from 2^20 + 1), so a token of another module (menu.watch, hud.watch, ... count
+-- from 1 in each Lua state) is never mistaken for one of these and unwatched here.
+local TOKEN_BASE = 1 << 20
+local nextToken = TOKEN_BASE
 local tickers = {}               -- host -> { internal fn(screen) per tick while a screen is open, on ticks without an event }
 
 local function deliver(w, s, info)

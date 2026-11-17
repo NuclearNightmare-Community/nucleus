@@ -540,6 +540,13 @@ ok(C.els.bad == nil, "the refused calls created nothing")
 ok(G.isOpen(CSH) == false, "isOpen: false with no screen")
 local w1 = G.watch(CSH, T.watcher("A"))
 ok(math.type(w1) == "integer", "watch: an integer token")
+-- a menu.watch token never names a game watcher, even once game tokens exist (they come from their own range)
+do
+    local mt
+    for _ = 1, 3 do mt = M.watch(function() end) end
+    raises(function() G.unwatch(mt) end, "(not one game.watch returned)", "unwatch: a menu.watch token after a game.watch")
+    ok(w1 > 1 << 20 and w1 ~= mt, "game tokens: their own range", w1)
+end
 -- elements on the host before any open: a text and a checkbox (story 26's control), in a corner
 local tx = X.create{ id = "cst", text = "SKEL CS", place = { host = CSH, corner = "bottom-right" } }
 T.log = {}
