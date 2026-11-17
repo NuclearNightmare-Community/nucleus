@@ -570,6 +570,10 @@ tick()
 ok(column(m2) == "START GAME,JOIN GAME,CUSTOMIZE,OPTIONS,MANAGE MODS,QUIT", "return from a match: inserted from the poll", column(m2))
 ok(countLogs("in MainMenu_C_2 (poll)") == 1 and countLogs("(construct)") == 0, "return from a match: reason poll, never construct")
 ok(#m2.page.children == 1, "return from a match: the menu text attached once, from the poll")
+local mt2 = m2.page.children[1]
+ok(mt2 and mt2.text == "corner" and X.isShown(mtext), "return from a match: the corner text attached in page 0 and shown")
+ok(mt2 and mt2.Slot.anchors.Minimum.X == 1 and mt2.Slot.anchors.Minimum.Y == 0 and mt2.Slot.alignment.X == 1 and mt2.Slot.position.X == -16 and mt2.Slot.position.Y == 16,
+    "return from a match: the corner text placed in the top-right corner", mt2 and mt2.Slot.position.X)
 fireHook("MainMenu_C:Construct", m2)
 tick(); tick()
 ok(#m2.VerticalBox_104.children == 6 and #m2.page.children == 1, "a Construct again and two more ticks: exactly one extra child, one widget")

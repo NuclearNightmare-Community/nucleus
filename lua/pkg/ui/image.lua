@@ -16,7 +16,7 @@
 -- Img is HitTestInvisible unless the image has a tooltip, and its tint's alpha is 0 while it shows no texture (a brush
 -- without a texture would draw a white box).
 --
--- Textures come from assets.lua: the cache only inside a hook (a menu's Construct; a load there is fatal). A miss there
+-- Textures come from assets.lua: the cache only inside a hook (a Journal's Construct; a load there is fatal). A miss there
 -- is applied on the next 500 ms UI tick. A texture that can't be loaded logs one WARN per texture per Lua state; the
 -- image keeps its size and shows core's icon for the same meaning (theme.gameTextures), else nothing.
 --
