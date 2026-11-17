@@ -138,14 +138,6 @@ function G._canvasOf(host, obj)
     return root
 end
 
--- Core story 32: the screen's root widget (any class), where a game container is searched by name; nil when missing.
-function G._rootOf(host, obj)
-    local ok, root = pcall(function() return obj.WidgetTree.RootWidget end)
-    if ok and C.valid(root) then return root end
-    C.warnOnce("game noroot " .. host, "the %s screen has no root widget; its elements stay pending", host)
-    return nil
-end
-
 -- ---- the poll: the newest live screen of the local player in the viewport. Returns screen, path. Paths whose screen
 -- is gone are dropped.
 local function pollOpen(host)

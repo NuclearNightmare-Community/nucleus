@@ -42,8 +42,6 @@ M.HAND = {
     -- core story 31 (0.13.0, UI-13): the game screens as hosts; createServer is the first (ui.game itself, a new
     -- module, is listed by the rule; this names the host, so a later screen adds its own name)
     "ui.game.createServer",
-    -- core story 32 (0.14.0, UI-14): an intent inside a game container (container, after, before, index, at)
-    "ui.place.container",
 }
 
 -- The UI part of the api table: path -> { module, function } (client.lua builds api.ui from this).
