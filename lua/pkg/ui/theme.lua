@@ -70,6 +70,15 @@ M.game = {
     shadowA = 0,                                           -- the game's texts have no shadow
     buttonTint = { r = 1, g = 1, b = 1, a = 0.52 },        -- M_NN_WornStrip on a button
     rowTint = { r = 1, g = 1, b = 1, a = 0.72 },           -- M_NN_WornStrip behind a row
+    -- Core story 30 (0.12.2): the focused row's strong look, a full-row band. On: a dynamic instance of the selection
+    -- material (M_NN_CinematicSelection, whose own fill is near-black) with these fill colours, in focusRowTint.
+    -- false: 0.12.1's look (the selection material itself, in rowTint).
+    focusRowStrong = true,
+    focusRowColors = {                                     -- the material's vector parameters, set on the instance
+        CinematicBaseColor = { r = 0.10, g = 0.012, b = 0.006, a = 1 },
+        CinematicWearColor = { r = 0.16, g = 0.02, b = 0.01, a = 1 },
+    },
+    focusRowTint = { r = 1, g = 1, b = 1, a = 1 },         -- the game's hover alpha 1.0
     buttonPadding = { l = 12, t = 4, r = 12, b = 4 },
     buttonMinHeight = 44,
     -- Mod Manager story 4: the controls. A choice's value and arrows and a slider's number box in AlumniSans (the

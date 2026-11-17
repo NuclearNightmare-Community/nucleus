@@ -2,6 +2,16 @@
 
 All notable changes to Nucleus are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). From 0.5.0 a dependent's `need` and `dependsOn` are minimum versions (`>=0.5.0`), so a newer Nucleus never asks dependents to raise them. Up to 0.3.0, below 1.0.0 a dependent connected only to the same minor version (`need = "0.3.0"` accepted 0.3.x).
 
+## [0.12.2] - 2026-11-17
+
+Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
+
+For players: in a mod's window, the row you are on with the keyboard or a gamepad is now a clearly visible full-row band.
+
+### Changed
+
+- The focused row's highlight is a full-row band (core story 30, Lua only, no pak change). In 0.12.1 the focused row showed the game's selection material `M_NN_CinematicSelection`, whose own fill is near-black, so on a window's dark card it read only as a thin red line under the row. Now the row shows an instance of that material (`MaterialInstanceDynamic`, its parent `M_NN_CinematicSelection`, the game's grain, wear and red selection line kept) with its fill colours `CinematicBaseColor` and `CinematicWearColor` lifted to a dark red band, at full opacity. One instance per mod's Lua state, shared by every row, kept only as a weak handle and made again after a map change; it is made only outside script hooks, so a key or click that comes first after a map change shows 0.12.1's look until the next UI tick (500 ms). The switch is theme data, not an option: `theme.game.focusRowStrong` (`lua/pkg/ui/theme.lua`, default `true`; `false` gives 0.12.1's look exactly), with the colours `focusRowColors` and the tint `focusRowTint` beside it. If the instance can't be made, focused rows keep 0.12.1's look and one `WARN` is logged. Focus faces, buttons, unfocused rows and mouse hover are unchanged.
+
 ## [0.12.1] - 2026-11-16
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.

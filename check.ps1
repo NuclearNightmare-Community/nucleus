@@ -822,13 +822,14 @@ $menuChecks = $started + @(
     "\[$T\] OK CARD KBM BACK bottom-left "
     "\[$T\] OK KFOCUS KBM kbm\.g1 "
     # Core story 28: the focused row shows the selection, the others their worn strip; the focused dimmed icon-only gear
-    # has a focus face; after DOWN both move to row 2.
-    "\[$T\] OK KLOOK row: the focused row kbm\.r1 shows the selection "
+    # has a focus face; after DOWN both move to row 2. Core story 30: the strong selection (an instance of it with the
+    # theme's fill colours).
+    "\[$T\] OK KLOOK row: the focused row kbm\.r1 shows the strong selection "
     "\[$T\] OK KLOOK row: the unfocused row kbm\.r2 shows its worn strip "
     "\[$T\] OK KLOOK face: the focused gear kbm\.g1 shows a focus face "
     "\[$T\] OK KLOOK face off: the unfocused gear kbm\.g2 has no face "
     "\[$T\] OK KFOCUS KBM kbm\.g2 "
-    "\[$T\] OK KLOOK row: the focused row kbm\.r2 shows the selection "
+    "\[$T\] OK KLOOK row: the focused row kbm\.r2 shows the strong selection "
     "\[$T\] OK KLOOK row: the unfocused row kbm\.r1 shows its worn strip "
     "\[$T\] OK KLOOK face: the focused gear kbm\.g2 shows a focus face "
     "\[$T\] OK KLOOK face off: the unfocused gear kbm\.g1 has no face "

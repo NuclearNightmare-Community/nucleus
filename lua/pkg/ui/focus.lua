@@ -28,8 +28,11 @@
 -- its undimmed self, faceless borrows the selection material); and the row holding the focused element shows the
 -- game's selection material (M_NN_CinematicSelection) as its background, one row per window (rec.lookRowId). Both go
 -- back to the element's and the row's own style when focus leaves them (focus moves, the window widget takes it, the
--- element goes, another window covers this one); the UI tick puts them back after a re-style. A focused row inside a
--- list is scrolled into view.
+-- element goes, another window covers this one); the UI tick puts them back after a re-style. Core story 30 (0.12.2):
+-- with theme.game.focusRowStrong (default on) the row's highlight is a full-row band, an instance of that material with
+-- its near-black fill lifted to theme colours (assets.lua A.focusRowMaterial); the instance is made only outside script
+-- hooks, so inside one with none alive the row gets the plain selection and the UI tick upgrades it; off: 0.12.1's look.
+-- A focused row inside a list is scrolled into view.
 -- Each window remembers its last-focused element (by id): after a close the next window down gets it back.
 local BASE = (...):gsub("%.ui%.focus$", "")
 local C = require(BASE .. ".ui.common")
@@ -208,17 +211,30 @@ end
 -- Core story 28: the row holding the focused element. on: the selection material behind it (el.selBg marks it; text.lua
 -- clears the mark on any re-style); off: its own background (worn strip, colour or explicit background) through
 -- text.lua's own path. True when the row shows the highlight (on) or a live row was restored (off).
+-- Core story 30: with theme.game.focusRowStrong the highlight is the strong look (assets.lua A.focusRowMaterial, an
+-- instance of the selection material with lifted fill colours, in focusRowTint); while that instance can't be had (a
+-- hook with none alive, or it failed) the plain selection in rowTint. row.selBg records which ("strong" | "plain"), so
+-- the UI tick (outside any hook) upgrades a plain one. hookDepth: inside this module's own script hooks (OnNav, a click).
+local hookDepth = 0
 local function rowLook(row, on)
     local w = widgetOf(row)
     if not w then return false end
     if on then
-        if row.selBg then return true end
-        local m = A.get("mat:selection")
+        local strong = theme.game.focusRowStrong == true
+        if row.selBg == "strong" or (row.selBg and not strong) then return true end
+        local m, t, look = nil, nil, nil
+        if strong then
+            local okM, mid = pcall(A.focusRowMaterial, w, hookDepth > 0)
+            if okM and mid then m, t, look = mid, theme.game.focusRowTint, "strong" end
+        end
+        if not m then
+            if row.selBg then return true end -- already the plain selection; the tick tries the strong look again
+            m, t, look = A.get("mat:selection"), theme.game.rowTint, "plain"
+        end
         if not m then return false end
-        local t = theme.game.rowTint
         local ok, err = pcall(function() C.count(); w:SetBackgroundMaterial(m, t.r, t.g, t.b, t.a, row.style.pad) end)
         if not ok then C.warnOnce("focus row", "row '%s': the focus highlight failed (is %s's pak current?): %s", row.id, C.NAME, firstLine(err)) return false end
-        row.matBg, row.selBg = true, true
+        row.matBg, row.selBg = true, look
         S.rowLooks = S.rowLooks + 1
         return true
     end
@@ -428,7 +444,14 @@ function F.tick(rec, w)
 end
 
 -- A mouse click (or drag, or commit) on an element of a window: the model's focus moves there.
+local used
 function F.used(el)
+    hookDepth = hookDepth + 1 -- always inside a click, drag end, commit or arrow hook
+    local ok, err = pcall(used, el)
+    hookDepth = hookDepth - 1
+    if not ok then error(err, 0) end
+end
+used = function(el)
     if not F.focusable(el) then return end
     local host = C.hostOf(el)
     if type(host) ~= "string" or C.hostKind(host) ~= "screen" then return end
@@ -521,7 +544,9 @@ local function navBody(ctx)
     end
 end
 local function onNav(ctx)
+    hookDepth = hookDepth + 1
     local ok, err = pcall(navBody, ctx)
+    hookDepth = hookDepth - 1
     if not ok then
         S.faults = S.faults + 1
         C.warnOnce("nav dispatch", "window key handling failed: %s (further failures not logged)", firstLine(err))
