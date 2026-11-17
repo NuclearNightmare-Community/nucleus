@@ -313,20 +313,18 @@ function B._focusFace(el, w)
         local sel = A.get("mat:selection")
         if not sel then return false end
         local t = g.buttonTint
-        el.faceOn = true
         -- the icon-only Box keeps its width and height overrides: no padding, no minimum height
         C.count(); w:SetMaterials(sel, sel, t.r, t.g, t.b, t.a, 0, 0, 0, 0, 0)
     elseif el.gameLook then
         local strip, sel = A.get("mat:strip"), A.get("mat:selection")
         if not (strip and sel) then return false end
         local t, pd = g.buttonTint, g.buttonPadding
-        el.faceOn = true
         C.count(); w:SetMaterials(strip, sel, t.r, t.g, t.b, t.a, pd.l, pd.t, pd.r, pd.b, g.buttonMinHeight)
     else
         local s, h, p = el.style, el.style.hover, el.style.pressed
-        el.faceOn = true
         C.count(); w:SetColors(s.r, s.g, s.b, s.a, h.r, h.g, h.b, h.a, p.r, p.g, p.b, p.a, el.styledIconOnly and 0 or s.pad)
     end
+    el.faceOn = true -- only once the face is on: a failed one is tried again on the next tick
     if el.dimmed then
         local n, h = theme.white, theme.white
         if el.gameFace then n, h = g.text, g.textHover end
