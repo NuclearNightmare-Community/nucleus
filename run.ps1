@@ -35,14 +35,14 @@
 #>
 param(
     [Parameter(Mandatory)] [string] $Instance,
-    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'soak')]
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'createserver', 'soak')]
     [string] $Scenario = 'skeleton',
-    [int] $TimeoutSec = 0, # 0: 420 s, 900 s for ui (it travels four times and waits for layout) and menu (about 40 requests and three map loads), 1200 s for journal (24 key presses, a revive, a map change), 1000 s for soak (10 min idle); x1.5 in the VM
+    [int] $TimeoutSec = 0, # 0: 420 s, 900 s for ui (it travels four times and waits for layout), menu (about 40 requests and three map loads) and createserver (about 30 clicks, a hosted session, a minute in it), 1200 s for journal (24 key presses, a revive, a map change), 1000 s for soak (10 min idle); x1.5 in the VM
     [ValidateSet('host', 'vm')] [string] $Target = 'host',
     [switch] $AllowOtherDrivers # run even when another runner's test mod is enabled in the copy (tools/run-guard)
 )
 $ErrorActionPreference = 'Stop'
-$hostTimeout = switch ($Scenario) { 'ui' { 900 } 'menu' { 900 } 'journal' { 1200 } 'soak' { 1000 } default { 420 } }
+$hostTimeout = switch ($Scenario) { 'ui' { 900 } 'menu' { 900 } 'createserver' { 900 } 'journal' { 1200 } 'soak' { 1000 } default { 420 } }
 if ($TimeoutSec -le 0 -and $Target -eq 'host') { $TimeoutSec = $hostTimeout }
 $here     = $PSScriptRoot
 $name     = (Get-Content (Join-Path $here 'mod.json') -Raw | ConvertFrom-Json).name

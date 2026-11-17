@@ -39,6 +39,9 @@ M.HAND = {
     -- core story 27 (UI-12): a window's content on a hugging card (corner and absolute intents inside it), BACK, keyboard
     -- and gamepad focus with Escape / B closing the top window, and the list and row gap "compact"
     "ui.screen.panel", "ui.screen.focus", "ui.gap.compact",
+    -- core story 31 (0.13.0, UI-13): the game screens as hosts; createServer is the first (ui.game itself, a new
+    -- module, is listed by the rule; this names the host, so a later screen adds its own name)
+    "ui.game.createServer",
 }
 
 -- The UI part of the api table: path -> { module, function } (client.lua builds api.ui from this).
@@ -83,6 +86,8 @@ M.UI = {
     { "slider.create", "slider", "create" }, { "slider.get", "slider", "get" }, { "slider.set", "slider", "set" },
     { "slider.setDefault", "slider", "setDefault" }, { "slider.setEnabled", "slider", "setEnabled" }, { "slider.setVisible", "slider", "setVisible" },
     { "slider.remove", "slider", "remove" }, { "slider.isShown", "slider", "isShown" }, { "slider.setTooltip", "slider", "setTooltip" },
+    -- core story 31 (core 0.13.0, UI-13): the game screens as hosts (createServer)
+    { "game.watch", "game", "watch" }, { "game.unwatch", "game", "unwatch" }, { "game.isOpen", "game", "isOpen" },
     { "place", "place", "place" },
     { "elements", "place", "elements" },
     { "debug.overlaps", "debug", "overlaps" }, -- story 12: a diagnostic for testing a mod's UI

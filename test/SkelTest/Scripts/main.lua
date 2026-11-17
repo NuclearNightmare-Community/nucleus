@@ -91,6 +91,16 @@ if SCENARIO == "bad-input" then
     try("pre-panel-move", "ui.panel.move({}, {}, 1) [before connect]", "panel", "move", {}, {}, 1)
     try("pre-button-create", "ui.button.create{ id = 'early' } [before connect]", "button", "create", { id = "early" })
 end
+-- Core story 31: the game-screen functions before connect (createserver; reported by gamescreen.lua). In a field of
+-- PRE_CONNECT: main.lua is at the 200-locals limit.
+if SCENARIO == "createserver" then
+    PRE_CONNECT.game = {}
+    local okM, m = pcall(require, CORE:lower() .. ".ui.game")
+    for _, c in ipairs({ { "pre-game-watch", "watch", "createServer", function() end }, { "pre-game-unwatch", "unwatch", 1 }, { "pre-game-isopen", "isOpen", "createServer" } }) do
+        local r = okM and table.pack(pcall(m[c[2]], c[3], c[4])) or { false, "require failed: " .. tostring(m) }
+        PRE_CONNECT.game[#PRE_CONNECT.game + 1] = { id = c[1], fn = c[2], ok = r[1], err = r[2] }
+    end
+end
 
 -- 4. The objectives natives called during main.lua, before the first engine tick (bad-input): allowed, so each must
 -- get as far as the lookup and fail there cleanly ("no object at ..."). Reported as cases once the scenario runs.
@@ -619,6 +629,7 @@ local function offThreadCases(phase)
                 SETS.offThread(P)
                 SETS.NET.offThread(P) -- core story 22
                 SETS.PRES.offThread(P) -- core story 23
+                SETS.GAME.offThread(P) -- core story 31
             end)
             if not ok then check(false, "CASE %s off-thread block threw: %s", P .. "off", firstLine(err)) end
             doneOff = true
@@ -1067,9 +1078,9 @@ local function uiCases(phase)
 
     -- UI-3 elements()
     case(P .. "elements-ok", "ui.elements() [control]", f(U.elements), E.ret("{ crosshair = ... }", function(r) return type(r[1]) == "table" and type(r[1].crosshair) == "string" and r[1].mic == nil end))
-    case(P .. "elements-arg", "ui.elements(1)", f(U.elements, 1), E.err(UI .. ".elements: unknown host 1 (valid: hud, journal, menu, screen)"))
+    case(P .. "elements-arg", "ui.elements(1)", f(U.elements, 1), E.err(UI .. ".elements: unknown host 1 (valid: createServer, hud, journal, menu, screen)"))
     -- story 19: elements(host)
-    case(P .. "elements-bogus", "ui.elements('bogus')", f(U.elements, "bogus"), E.err(UI .. ".elements: unknown host 'bogus' (valid: hud, journal, menu, screen)"))
+    case(P .. "elements-bogus", "ui.elements('bogus')", f(U.elements, "bogus"), E.err(UI .. ".elements: unknown host 'bogus' (valid: createServer, hud, journal, menu, screen)"))
     case(P .. "elements-two", "ui.elements('hud', 2)", f(U.elements, "hud", 2), E.err(UI .. ".elements: expected 0 or 1 arguments, got 2"))
     case(P .. "elements-hud", "ui.elements('hud') [control]", f(U.elements, "hud"), E.ret("{ crosshair = ... }", function(r) return type(r[1]) == "table" and type(r[1].crosshair) == "string" and r[1].map == nil end))
     case(P .. "elements-journal", "ui.elements('journal') [control]", f(U.elements, "journal"), E.ret("the nine journal regions", function(r)
@@ -1171,8 +1182,8 @@ local function uiCases(phase)
     pc_("corner-num", "{ corner = 1 }", { corner = 1 }, E.err(PL .. "unknown corner 1"))
     pc_("gap-bad", "{ corner, gap = 'huge' }", { corner = "top-left", gap = "huge" }, E.err(PL .. "unknown gap 'huge' (valid: tight, normal, loose)"))
     pc_("gap-num", "{ corner, gap = 16 }", { corner = "top-left", gap = 16 }, E.err(PL .. "unknown gap 16"))
-    pc_("host", "{ host = 'Journal', corner }", { host = "Journal", corner = "top-left" }, E.err(PL .. "unknown host 'Journal' (valid: hud, journal, menu, screen)"))
-    pc_("host-num", "{ host = 5, corner }", { host = 5, corner = "top-left" }, E.err(PL .. "unknown host 5 (valid: hud, journal, menu, screen)"))
+    pc_("host", "{ host = 'Journal', corner }", { host = "Journal", corner = "top-left" }, E.err(PL .. "unknown host 'Journal' (valid: createServer, hud, journal, menu, screen)"))
+    pc_("host-num", "{ host = 5, corner }", { host = 5, corner = "top-left" }, E.err(PL .. "unknown host 5 (valid: createServer, hud, journal, menu, screen)"))
     pc_("host-journal-near", "{ host = 'journal', near = 'crosshair' }", { host = "journal", near = "crosshair" }, E.err(PL .. "unknown near region 'crosshair' (valid: ammo, binder, cover, map, map-header, match, page-left, page-right, tasks)"))
     -- story 19: journal regions (the I/O matrix's error rows)
     local RN = "(valid: ammo, binder, cover, map, map-header, match, page-left, page-right, tasks)"
@@ -1969,6 +1980,7 @@ local function badInputCases(phase)
     SETS.restart(phase)
     SETS.NET.badInput(phase) -- core story 22
     SETS.PRES.badInput(phase) -- core story 23
+    SETS.GAME.cases(phase) -- core story 31
     offThreadCases(phase)
 end
 
@@ -5343,6 +5355,11 @@ local function buildMenu()
     MM.kbSteps()
 end
 
+-- Core story 31: core.ui.game's bad-input cases and the createserver scenario (gamescreen.lua next to this file).
+SETS.GAME = dofile(scriptDir .. "\\gamescreen.lua")({ case = case, E = E, step = step, check = check, say = say, CORE = CORE,
+    core = function() return core end, absR = absR, request = request, waitWorld = waitWorld, travel = travel,
+    worldName = worldName, taggedIn = taggedIn, PRE_CONNECT = PRE_CONNECT, MENU_MAP = MENU_MAP })
+
 -- ---------------------------------------------------------------- runner (game thread, every 250 ms)
 local idx, waiting, busy, finished = 0, nil, false, false
 local function finish()
@@ -5539,6 +5556,11 @@ client.connect{
         if SCENARIO == "bad-input" then buildBadInput()
         elseif SCENARIO == "menu" then
             buildMenu() -- story 21 (Mod Manager story 2): the menu entry, the menu host and the window stack
+        elseif SCENARIO == "createserver" then
+            -- Core story 31: the create-server screen as a host; the tick profiler and DEBUG lines for the match's timing
+            core.log.debugEnabled = true
+            profile(true)
+            SETS.GAME.build()
         elseif SCENARIO == "journal" then
             core.log.debugEnabled = true -- the journal attach lines (cost per open) are DEBUG; no profiler: real costs
             buildJournal()

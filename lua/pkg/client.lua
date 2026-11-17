@@ -27,7 +27,9 @@ local uiOk, uiErr = pcall(function()
              -- story 24 (core 0.8.0): images and icons
              image = require(BASE .. ".ui.image"),
              -- Mod Manager story 4 (core story 26): checkbox, choice and slider-with-number controls
-             checkbox = require(BASE .. ".ui.checkbox"), choice = require(BASE .. ".ui.choice"), slider = require(BASE .. ".ui.slider") }
+             checkbox = require(BASE .. ".ui.checkbox"), choice = require(BASE .. ".ui.choice"), slider = require(BASE .. ".ui.slider"),
+             -- core story 31 (core 0.13.0): the game screens as hosts (createServer)
+             game = require(BASE .. ".ui.game") }
 end)
 
 local NAME, LOWER = V.name, V.name:lower()

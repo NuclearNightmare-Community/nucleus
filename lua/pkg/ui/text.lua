@@ -37,11 +37,16 @@
 -- deepest hovered widget that has one, so the inner widget is made hit-testable only while it has a tooltip (a text's
 -- Background SelfHitTestInvisible and Text Visible; an image's Img Visible), and otherwise stays HitTestInvisible, so
 -- the hover never walks up to the tag. Tooltips need a host with a cursor (journal, menu, screen).
+--
+-- Core story 31 (core 0.13.0): the game's own screens as hosts (game.lua; first "createServer"): every open is a new
+-- screen, so its elements get new widgets in its root canvas at the poll's opened, and closed / lost free their
+-- handles, as for a window. They have a cursor and the game look, like the menu.
 local BASE = (...):gsub("%.ui%.text$", "")
 local C = require(BASE .. ".ui.common")
 local H = require(BASE .. ".ui.hud")
 local J = require(BASE .. ".ui.journal")
 local M = require(BASE .. ".ui.menu")
+local G = require(BASE .. ".ui.game") -- core story 31: the game screens (createServer)
 local P = require(BASE .. ".ui.place")
 local A = require(BASE .. ".ui.assets")
 local theme = require(BASE .. ".ui.theme")
@@ -70,6 +75,13 @@ local HOST = {
         canvas = function(m) return M._canvasOf(m) end,
     },
 }
+-- Core story 31: the game screens (createServer): the open screen of the local player and its root CanvasPanel.
+for host in pairs(C.GAME_SCREENS) do
+    HOST[host] = {
+        poll = function() local s = G._poll(host) return s, s ~= nil end,
+        canvas = function(s) return G._canvasOf(host, s) end,
+    }
+end
 -- Story 21: a window of the screen host ("screen#<id>"): its widget while it is open, and its Canvas.
 local windowAdapters = {}
 local function windowCanvas(w)
@@ -1434,10 +1446,12 @@ local function ensureWatching()
     end)
 end
 local ensureMenu -- story 21, below
+local ensureGame -- core story 31, below
 local function ensureHost(el)
     ensureWatching()
     local host = C.hostOf(el)
     if host == "journal" then ensureJournal()
+    elseif C.gameScreen(host) then ensureGame(host) -- core story 31
     elseif C.gameHost(host) then ensureMenu() end
     -- Story 21: the game look's assets are loaded in this state's LoadMap post-hook from now on.
     if C.gameHost(host) or (el.style and el.style.look == "game") then A.ensureLoadMapHook() end
@@ -1567,6 +1581,29 @@ function X._tickHost(host, obj)
     P.tick(host, obj, function(el) return el.ref and C.deref(el.ref) or nil end)
 end
 X._ensureMenu = function() ensureMenu() end
+
+-- Core story 31: the game screens (createServer). Like a window: every open is a new screen, so its elements get new
+-- widgets in its root canvas at the poll's opened (never inside a hook of the game's), and on closed or lost only their
+-- handles are freed (the widgets went, or go, with the screen). Corner stacks settle on the screen's ticks.
+local gameWatching = {}
+ensureGame = function(host)
+    if gameWatching[host] then return end
+    gameWatching[host] = true
+    G._watch(host, function(s, info)
+        if info.event == "opened" then
+            local canvas = G._canvasOf(host, s)
+            if not canvas then return end -- _canvasOf warned once; the elements stay pending until the next open
+            local t0 = C.micros()
+            local n = X._attachHost(host, s, canvas, info.reason)
+            if n > 0 and C.debugOn() then C.log.debug("ui %s attach n=%d in %d us (%s)", host, n, C.micros() - t0, tostring(info.reason)) end
+        else
+            local freed = X._detachHost(host)
+            if freed > 0 and C.debugOn() then C.log.debug("ui %s %s: freed %d widget handle(s) (%s)", host, info.event, freed, tostring(info.reason)) end
+        end
+    end)
+    G._ticker(host, function(s) X._tickHost(host, s) end)
+end
+X._ensureGame = function(host) ensureGame(host) end
 
 -- ---------------------------------------------------------------- the element registry (all kinds)
 

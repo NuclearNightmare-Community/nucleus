@@ -347,8 +347,8 @@ local bad = {
     { { near = "mic" }, "unknown near element 'mic' (valid: crosshair)" },
     { { near = "crosshair", side = "up" }, "unknown side 'up'" },
     { { near = "crosshair", align = "middle" }, "unknown align 'middle'" },
-    { { host = "Journal", corner = "top-left" }, "unknown host 'Journal' (valid: hud, journal, menu, screen)" },
-    { { host = 5, corner = "top-left" }, "unknown host 5 (valid: hud, journal, menu, screen)" },
+    { { host = "Journal", corner = "top-left" }, "unknown host 'Journal' (valid: createServer, hud, journal, menu, screen)" },
+    { { host = 5, corner = "top-left" }, "unknown host 5 (valid: createServer, hud, journal, menu, screen)" },
     { { host = "journal", near = "crosshair" }, "unknown near region 'crosshair' (valid: ammo, binder, cover, map, map-header, match, page-left, page-right, tasks)" },
     -- story 19: the I/O matrix's error rows
     { { corner = "top-left", region = "map" }, "region is not available on host 'hud' (journal only)" },
@@ -1094,8 +1094,8 @@ function regionTests() -- a function: the main chunk is at Lua's 200-locals limi
     local ej, n = P.elements("journal"), 0
     for k, d in pairs(ej) do n = n + 1; ok(type(d) == "string" and P._REGIONS[k] ~= nil, "elements('journal'): " .. k) end
     ok(n == 9, "elements('journal'): nine regions", n)
-    raises(function() P.elements("bogus") end, "nucleus.ui.elements: unknown host 'bogus' (valid: hud, journal, menu, screen)", "elements('bogus')")
-    raises(function() P.elements(1) end, "nucleus.ui.elements: unknown host 1 (valid: hud, journal, menu, screen)", "elements(1)")
+    raises(function() P.elements("bogus") end, "nucleus.ui.elements: unknown host 'bogus' (valid: createServer, hud, journal, menu, screen)", "elements('bogus')")
+    raises(function() P.elements(1) end, "nucleus.ui.elements: unknown host 1 (valid: createServer, hud, journal, menu, screen)", "elements(1)")
     raises(function() P.elements("hud", 2) end, "nucleus.ui.elements: expected 0 or 1 arguments, got 2", "elements('hud', 2)")
 
     -- placement on an open Journal (16:9)
