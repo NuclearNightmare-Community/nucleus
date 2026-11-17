@@ -366,5 +366,10 @@ return function(X)
         end)
     end
 
+    -- Core story 32: the helpers gameinsert.lua shares (the same screen, the same clicks).
+    GS.util = { try = try, v = v, prop = prop, pathOf = pathOf, fname = fname, str = str, msAfter = msAfter, liveOf = liveOf,
+        center = center, rootOf = rootOf, firstLine = firstLine, BOX_NEXT = BOX_NEXT, BOX_PREV = BOX_PREV,
+        CS_SHORT = CS_SHORT, MENU_SHORT = MENU_SHORT, START = START }
+
     return GS
 end
