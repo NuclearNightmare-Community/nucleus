@@ -22,7 +22,7 @@
 param(
     [string] $Instance,
     [string] $Log,
-    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'createserver', 'soak', 'manual', 'net-host', 'net-client', 'net-vanilla-host',
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'createserver', 'gameinsert', 'soak', 'manual', 'net-host', 'net-client', 'net-vanilla-host',
                  'presence-host', 'presence-client', 'presence-vanilla-host')]
     [string] $Scenario = 'skeleton',
     [ValidateSet('host', 'vm')] [string] $Target = 'host'
@@ -886,6 +886,14 @@ foreach ($p in 'menu1', 'match1') {
     foreach ($id in $gameCaseIds) { $badInput += "\[$T\] OK CASE $p\.ui-game-$id " }
     foreach ($id in 'watch', 'unwatch', 'isopen') { $badInput += "\[$T\] OK CASE $p\.off-ui-game-$id " }
 }
+# Core story 32 (UI-14, core 0.14.0): the game-container intent's bad-input group (gameinsert.lua), in both worlds.
+$insCaseIds = @('cont-num', 'cont-empty', 'cont-65', 'cont-path', 'cont-digit', 'anchor-num', 'anchor-empty', 'anchor-65', 'anchor-name',
+                'anchor-table', 'two', 'two-at', 'none', 'index-0', 'index-frac', 'index-257', 'index-nan', 'index-str', 'at-start', 'corner',
+                'gap', 'near', 'absolute', 'offset', 'hud', 'menu', 'journal', 'screen', 'key', 'nocont', 'panel', 'list', 'row', 'ok', 'place-bad', 'place-hud',
+                'isshown', 'remove', 'has')
+foreach ($p in 'menu1', 'match1') {
+    foreach ($id in $insCaseIds) { $badInput += "\[$T\] OK CASE $p\.ui-ins-$id " }
+}
 # Core story 31: the create-server screen as a host, one launch written for the VM at 1280x720 (run.ps1 -Scenario
 # createserver -Target vm). END result=PASS already means every check the test made passed; these name the ones the
 # acceptance criteria rest on.
@@ -926,6 +934,53 @@ $createServer = $started + @(
 foreach ($id in 'pre-game-watch', 'pre-game-unwatch', 'pre-game-isopen') { $createServer += "\[$T\] OK CASE $id " }
 foreach ($id in $gameCaseIds) { $createServer += "\[$T\] OK CASE menu1\.ui-game-$id " }
 foreach ($id in 'watch', 'unwatch', 'isopen') { $createServer += "\[$T\] OK CASE menu1\.off-ui-game-$id " }
+# Core story 32: elements inside the create-server screen's settings list (VerticalBox_202), one launch written for the
+# VM at 1280x720 (run.ps1 -Scenario gameinsert -Target vm). END result=PASS already means every check the test made
+# passed; these name the ones the acceptance criteria rest on. No session is made (Create is never clicked).
+$gameInsert = $started + @(
+    "\[$T\] SCENARIO gameinsert "
+    "\[$T\] OK GISETUP "
+    "\[$T\] OK GISNAP VerticalBox_202 before any container element: \d+ game rows, none of ours \(0\)"
+    # Review loop 1 (Design Note 8): made while open, attached on the next tick, one rebuild for all of them.
+    "\[$T\] OK GICREATE 21 texts and a checkbox made while the screen is open: none attached in the call \(true\), .*; 1 rebuild\(s\) for all"
+    # AC 1-2: five after Overlay_28 (children 2-6), fourteen after Overlay_738, in creation order; every game row's order
+    # and slot values against the snapshot; one widget per element. Made while open, ten opens, the final open, after
+    # the picker clicks, after the preset and after the late creates.
+    "#15|\[$T\] OK GIORDER "
+    "#15|\[$T\] OK GISLOTS .*: \d+ game rows in their order with the snapshot's slot values"
+    "#15|\[$T\] OK GIONE "
+    # Ten opens by real clicks: one rebuild per open, new widgets each time.
+    "#10|\[$T\] OK GIREBUILD open \d+: VerticalBox_202 rebuilt 1 time\(s\)"
+    "#10|\[$T\] OK GINEW open \d+: "
+    "\[$T\] OK GITEN 10 opens by real clicks: .*; 10 distinct screens, 10 distinct knob widgets, lost=0"
+    "#12|\[$T\] OK GIOPENED \d+ "
+    "#12|\[$T\] OK GICLOSED \d+ "
+    "\[$T\] OK GIEVENTS opened=12 closed=12 lost=0"
+    # AC 3: the unknown anchor (last) and the unknown container (not attached): one WARN each in the whole run.
+    "#1|\[$T\] WARN ui createServer: anchor 'Overlay_NOPE' is not a child of 'VerticalBox_202'"
+    "#1|\[$T\] WARN ui createServer: container 'VerticalBox_NOPE' is missing"
+    # AC 4: the game's own controls after the rebuild.
+    "\[$T\] OK GICONFIG "
+    "\[$T\] OK GIDIFF a real click on the Difficulty picker's arrow changed it"
+    "\[$T\] OK GILOBBY a real click on Lobby Time's arrow"
+    "\[$T\] OK GIPNAME "
+    "\[$T\] OK GISAVE a real click on SAVE WORLD PRESET saved "
+    "\[$T\] OK GILOBBY2 "
+    "\[$T\] OK GILOAD loading "
+    "\[$T\] OK GIDELETE a real click on DELETE removed "
+    # AC 5 (review loop 1): the checkbox in the list takes a real click; two creates while open with Lobby Time changed:
+    # one rebuild on the next tick, Lobby Time (a rebuilt row) keeps the player's value.
+    "\[$T\] OK GICB a real click on the checkbox in VerticalBox_202 \(at end\) ran onChange once with true \(1 call"
+    "\[$T\] OK GILATELOBBY "
+    "\[$T\] OK GILATE two texts made while open: not attached in the call \(true\), .*, 1 rebuild\(s\) for both"
+    "\[$T\] OK GILATEKEEP "
+    # Poll-first (story 34): no hook on the screen's class.
+    "!Registered script hook .*CreateServer_C"
+    "!\[$T\] WARN (?!$slowWarnOk|ui createServer: anchor 'Overlay_NOPE' |ui createServer: container 'VerticalBox_NOPE' )"
+    "!\[$T\] ERROR"
+    "\[$T\] END result=PASS"
+)
+foreach ($id in $insCaseIds) { $gameInsert += "\[$T\] OK CASE menu1\.ui-ins-$id " }
 $manual = @(
     "\[$T\] SCENARIO manual "
     "\[$T\] CONNECT ok $N $Ver "
@@ -1050,6 +1105,7 @@ $expect = @{
     'journal'   = $journal
     'menu'      = $menuChecks
     'createserver' = $createServer
+    'gameinsert' = $gameInsert
     'soak'      = $soak
     'manual'    = $manual
     'bad-input' = $badInput
