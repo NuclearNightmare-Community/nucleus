@@ -1092,6 +1092,39 @@ do
     w1.throwBg = false
     tick()
     ok(T.selected("r28r1"), "story 28 throwing setter fixed: the tick highlights the row")
+    -- Dimmed labelled buttons: a game-look one gets its undimmed game face, a plain-look one its hover colours
+    local r7 = RS.create{ id = "r28r7", place = { list = L } }
+    B.create{ id = "r28d7", label = "DIM", dimmed = true, place = { row = r7 }, onClick = T.rec("r28d7") }
+    local r8 = RS.create{ id = "r28r8", place = { list = L } }
+    B.create{ id = "r28p8", label = "PLAIN DIM", dimmed = true, style = { look = "plain" }, place = { row = r8 }, onClick = T.rec("r28p8") }
+    local d7, p8 = T.tagged("r28d7"), T.tagged("r28p8")
+    local g = theme.game
+    local function same4(t, a, b) return T.near(t[a], t[b]) and T.near(t[a + 1], t[b + 1]) and T.near(t[a + 2], t[b + 2]) and T.near(t[a + 3], t[b + 3]) end
+    ok(d7.mats and d7.mats[2] == T.STRIP and T.near(d7.content[1], T.DIM.r) and T.near(d7.content[5], T.DIM.r), "story 28 dimmed game button: its own look first (strip on hover, dim colours)")
+    T.fire(T.CLICK, d7)
+    ok(T.agree("r28d7") and d7.mats[1] == T.STRIP and d7.mats[2] == T.SEL and d7.focusLook == true
+        and T.near(d7.content[1], g.text.r) and T.near(d7.content[5], g.textHover.r), "story 28 dimmed game button focused: the undimmed face (selection on hover, game text / hover colours)")
+    T.fire(T.CLICK, p8)
+    ok(T.agree("r28p8") and p8.colors and not same4(p8.colors, 1, 5) and p8.focusLook == true
+        and T.near(p8.content[1], 1) and T.near(p8.content[5], 1) and T.near(p8.content[8], 1), "story 28 dimmed plain button focused: its hover colour, white content")
+    ok(d7.mats[2] == T.STRIP and d7.focusLook == false and T.near(d7.content[1], T.DIM.r) and T.near(d7.content[5], T.DIM.r),
+        "story 28 dimmed game button unfocused: its own dimmed look back (hover = normal, dim colours)")
+    T.fire(T.CLICK, T.tagged("r28g1"))
+    ok(T.agree("r28g1") and same4(p8.colors, 1, 5) and p8.focusLook == false and T.near(p8.content[1], T.DIM.r) and T.near(p8.content[5], T.DIM.r),
+        "story 28 dimmed plain button unfocused: its own dimmed look back (hover = normal, dim colours)")
+    -- Another mod's window on top (the shared Z registry): this window's tick clears its look; back once it is gone
+    F.focus = T.tagged("r28g1").Btn
+    tick()
+    ok(T.selected("r28r1") and T.gearFaced("r28g1"), "story 28 interleaved: highlighted before")
+    local ZK = SC._OPEN_Z_KEY
+    local other = T.screenOf("R28").z + 100
+    local before = ModRef:GetSharedVariable(ZK) or ""
+    ModRef:SetSharedVariable(ZK, before .. "," .. other)
+    tick()
+    ok(T.strip("r28r1") and T.gearOwn("r28g1") and rec.lookRowId == nil, "story 28 interleaved: another mod's window on top: the row's strip, the gear's own look, nothing recorded")
+    ModRef:SetSharedVariable(ZK, before)
+    tick()
+    ok(T.selected("r28r1") and T.gearFaced("r28g1") and rec.lookRowId == "r28r1", "story 28 interleaved: the other window gone: the highlight and the face are back")
     -- Window closed: nothing stays recorded
     SC.close(R)
     ok(rec.lookRowId == nil and rec.lookId == nil, "story 28 window closed: nothing recorded")

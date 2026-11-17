@@ -201,7 +201,7 @@ local function setLook(el, on)
         -- the kind's own style draws it again (it clears faceOn)
         local okS, errS = pcall(X.KIND[el.kind].style, el, w, false)
         el.faceOn = nil
-        if not okS then C.warnOnce("focus face", "button '%s': restoring its own look failed: %s", el.id, firstLine(errS)) end
+        if not okS then C.warnOnce("focus face restore", "button '%s': restoring its own look failed: %s", el.id, firstLine(errS)) end
     end
 end
 
@@ -224,7 +224,7 @@ local function rowLook(row, on)
     end
     local ok, err = pcall(X._backgroundStyle, row, w, false)
     row.selBg = nil
-    if not ok then C.warnOnce("focus row", "row '%s': restoring its own background failed: %s", row.id, firstLine(err)) end
+    if not ok then C.warnOnce("focus row restore", "row '%s': restoring its own background failed: %s", row.id, firstLine(err)) end
     return true
 end
 F._rowLook = rowLook
