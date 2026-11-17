@@ -1737,7 +1737,8 @@ local function namedOf(host, s, name)
     end
     if bc.likeMissing[name] then return nil end
     local root = G._rootOf(host, s)
-    local w = root and findNamed(root, { [name] = true }, 1)[name] or nil
+    if not root then return nil end -- no root now (G warned): looked for again later, not remembered as missing
+    local w = findNamed(root, { [name] = true }, 1)[name]
     if not w then bc.likeMissing[name] = true return nil end
     local okR, h = pcall(C.ref, w)
     if okR then bc.like[name] = h end
@@ -1869,7 +1870,7 @@ end
 -- one WARN naming it per Lua state. help goes on the "?" in the game's tooltip widget (W_ToolTip3_C, created with
 -- WidgetBlueprintLibrary:Create, its Description set), once per attach and per help or language change, never per
 -- hover; when that class can't be loaded, as plain tooltip text (assets.lua's one WARN).
-local LIKE_LABEL, LIKE_INNER, LIKE_HOLDER, LIKE_HELP, LIKE_HEIGHT = "NucleusLikeLabel", "NucleusLikeInner", "NucleusLikeHolder", "NucleusLikeHelp", "NucleusLikeHeight"
+local LIKE_LABEL, LIKE_INNER, LIKE_HOLDER, LIKE_HELP, LIKE_HEIGHT = C.NAME .. "LikeLabel", C.NAME .. "LikeInner", C.NAME .. "LikeHolder", C.NAME .. "LikeHelp", C.NAME .. "LikeHeight"
 local UMG_TEXT, UMG_HBOX, UMG_SPACER = "/Script/UMG.TextBlock", "/Script/UMG.HorizontalBox", "/Script/UMG.Spacer"
 local KSL_CDO = "/Script/Engine.Default__KismetSystemLibrary"
 local SIZE_RULE_AUTO, SIZE_RULE_FILL, VALIGN_CENTER = 0, 1, 2
@@ -1882,7 +1883,7 @@ local function likeParts(w)
         if not C.valid(hb) or hb:GetChildrenCount() < 2 then return nil end
         local lbl, inner = hb:GetChildAt(0), hb:GetChildAt(1)
         if not (C.valid(lbl) and C.valid(inner)) then return nil end
-        if not (widgetNameOf(lbl) or ""):find("^" .. LIKE_LABEL) then return nil end
+        if (widgetNameOf(lbl) or ""):find(LIKE_LABEL, 1, true) ~= 1 then return nil end
         if inner:GetChildrenCount() < 2 then return nil end
         local holder, q = inner:GetChildAt(0), inner:GetChildAt(1)
         if not (C.valid(holder) and C.valid(q)) then return nil end
@@ -2105,7 +2106,10 @@ local function applyHelp(el, w, parts)
         end
     end
     local ok, err = pcall(function()
-        if not tip then C.count(); q:SetToolTipText(FText(s)) end
+        if not tip then
+            pcall(function() C.count(); q:SetToolTip(nil) end) -- an earlier tooltip widget would win over the text
+            C.count(); q:SetToolTipText(FText(s))
+        end
         C.count(); q:SetVisibility(C.VIS.Visible)
     end)
     if ok then el.appliedHelp = s

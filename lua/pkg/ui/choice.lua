@@ -230,7 +230,7 @@ H._host{ poll = function() end, reset = function() end, dispatch = function()
 end }
 
 -- ---------------------------------------------------------------- core story 33: the game's picker (widget = "game")
-local GS = { clicks = 0, dropped = 0, debounced = 0, ignored = 0, throws = 0, hookKey = nil, hookChecks = 0, needCheck = false, ticking = {} }
+local GS = { clicks = 0, dropped = 0, debounced = 0, ignored = 0, throws = 0, hookKey = nil, hookedOk = false, hookChecks = 0, needCheck = false, ticking = {} }
 local WBL = "/Script/UMG.Default__WidgetBlueprintLibrary"
 
 local function classNameOf(w)
@@ -388,19 +388,28 @@ local function ensureGameHooks()
     local cls = A.get("cls:msb")
     if not cls then return end
     local fn = C.found(C.MSB_NEXT_FN)
-    if not fn then return end
+    if not fn then
+        C.warnOnce("game choice hook fn", "game choice arrows: %s is not there (the game changed its picker?); game choices' clicks don't call onChange", C.MSB_NEXT_FN)
+        return
+    end
     local okK, key = pcall(C.addr, fn)
     if not okK or key == GS.hookKey then return end
     local okN, errN = pcall(RegisterHook, C.MSB_NEXT_FN, onGNext)
     local okP, errP = pcall(RegisterHook, C.MSB_PREV_FN, onGPrev)
     GS.hookKey = key -- a half-registered pair is not tried again (it would double one arrow); one WARN instead
+    GS.hookedOk = okN and okP
     if okN and okP then C.log.debug("ui game choice hooks registered on %s's arrows", C.MSB_SHORT)
     else C.warnOnce("game choice hook", "game choice arrows: RegisterHook failed: %s", firstLine(okN and errP or errN)) end
 end
 local function watchGame(host)
     if GS.ticking[host] then return end
     GS.ticking[host] = true
-    G._watch(host, function(_, info) if info.event == "opened" then GS.needCheck = true; pcall(ensureGameHooks) end end)
+    G._watch(host, function(_, info)
+        if info.event ~= "opened" then return end
+        GS.needCheck = true
+        local ok, err = pcall(ensureGameHooks)
+        if not ok then C.warnOnce("game choice hook check", "game choice arrows: the hook check failed: %s", firstLine(err)) end
+    end)
     G._ticker(host, function()
         if not GS.needCheck then return end
         GS.needCheck = false
@@ -647,7 +656,7 @@ function CH.stats()
     return { clicks = S.clicks, dropped = S.dropped, debounced = S.debounced, ignored = S.ignored, throws = S.throws, hooked = S.hooked,
         -- core story 33: the game choices' arrow clicks
         gameClicks = GS.clicks, gameDropped = GS.dropped, gameDebounced = GS.debounced, gameIgnored = GS.ignored, gameThrows = GS.throws,
-        gameHooked = GS.hookKey ~= nil }
+        gameHooked = GS.hookedOk }
 end
 CH._prev, CH._next, CH._S, CH._ensureHooks = onPrev, onNext, S, ensureHooks -- unit tests
 CH._gNext, CH._gPrev, CH._GS, CH._ensureGameHooks = onGNext, onGPrev, GS, ensureGameHooks -- unit tests (core story 33)
