@@ -23,7 +23,13 @@
 --   Accept: on a button left to the Button, whose own Accept clicks it (onClick once, the click path); on a choice, a
 --   slider or the window itself, Handled and nothing changes. Back: closes the top window (reason "close") only when it was opened with close = true.
 -- Focus targets: a button's inner Button "Btn", a choice's and a slider's own widget (focusable class defaults). The
--- focused element shows its hover look (SetFocusLook on its widget). A focused row inside a list is scrolled into view.
+-- focused element shows its hover look (SetFocusLook on its widget). Core story 28: a dimmed button or a game-look
+-- icon-only one, whose hover look changes nothing, first gets a focus face (button.lua B._focusFace: dimmed looks like
+-- its undimmed self, faceless borrows the selection material); and the row holding the focused element shows the
+-- game's selection material (M_NN_CinematicSelection) as its background, one row per window (rec.lookRowId). Both go
+-- back to the element's and the row's own style when focus leaves them (focus moves, the window widget takes it, the
+-- element goes, another window covers this one); the UI tick puts them back after a re-style. A focused row inside a
+-- list is scrolled into view.
 -- Each window remembers its last-focused element (by id): after a close the next window down gets it back.
 local BASE = (...):gsub("%.ui%.focus$", "")
 local C = require(BASE .. ".ui.common")
@@ -31,6 +37,9 @@ local H = require(BASE .. ".ui.hud")
 local X = require(BASE .. ".ui.text")
 local CH = require(BASE .. ".ui.choice")
 local SL = require(BASE .. ".ui.slider")
+local A = require(BASE .. ".ui.assets")
+local B = require(BASE .. ".ui.button")
+local theme = require(BASE .. ".ui.theme")
 
 local F = {}
 F.DIR = { left = 0, right = 1, up = 2, down = 3, next = 4, previous = 5 }
@@ -39,7 +48,7 @@ F.NAV_FN = C.SCREEN_CLASS .. ":" .. C.NAME .. "_OnNav"
 local FOCUSABLE = { button = true, checkbox = true, choice = true, slider = true }
 local INPUT_DO_NOT_LOCK = 0
 local S = { navs = 0, handled = 0, ignored = 0, moves = 0, steps = 0, closes = 0, refocus = 0, recovered = 0,
-    scrolls = 0, faults = 0, hooked = false, hookTries = 0 }
+    scrolls = 0, faults = 0, hooked = false, hookTries = 0, rowLooks = 0, faces = 0 }
 
 local function firstLine(e) return (tostring(e):match("^[^\n]*")) end
 
@@ -180,8 +189,75 @@ F._hasFocus = hasFocus
 local function setLook(el, on)
     local w = el and widgetOf(el)
     if not w then return end
+    -- Core story 28: a face first where the hover look shows nothing (SetMaterials / SetColors turn FocusLook off).
+    if on and not el.faceOn and B._needsFace(el) then
+        local okF, res = pcall(B._focusFace, el, w)
+        if okF and res then S.faces = S.faces + 1
+        elseif not okF then C.warnOnce("focus face", "button '%s': its focus face failed (is %s's pak current?): %s", el.id, C.NAME, firstLine(res)) end
+    end
     local ok, err = pcall(function() C.count(); w:SetFocusLook(on) end)
     if not ok then C.warnOnce("focus look", "the focus look failed (is %s's pak current?): %s", C.NAME, firstLine(err)) end
+    if not on and el.faceOn then
+        -- the kind's own style draws it again (it clears faceOn)
+        local okS, errS = pcall(X.KIND[el.kind].style, el, w, false)
+        el.faceOn = nil
+        if not okS then C.warnOnce("focus face", "button '%s': restoring its own look failed: %s", el.id, firstLine(errS)) end
+    end
+end
+
+-- Core story 28: the row holding the focused element. on: the selection material behind it (el.selBg marks it; text.lua
+-- clears the mark on any re-style); off: its own background (worn strip, colour or explicit background) through
+-- text.lua's own path. True when the row shows the highlight (on) or a live row was restored (off).
+local function rowLook(row, on)
+    local w = widgetOf(row)
+    if not w then return false end
+    if on then
+        if row.selBg then return true end
+        local m = A.get("mat:selection")
+        if not m then return false end
+        local t = theme.game.rowTint
+        local ok, err = pcall(function() C.count(); w:SetBackgroundMaterial(m, t.r, t.g, t.b, t.a, row.style.pad) end)
+        if not ok then C.warnOnce("focus row", "row '%s': the focus highlight failed (is %s's pak current?): %s", row.id, C.NAME, firstLine(err)) return false end
+        row.matBg, row.selBg = true, true
+        S.rowLooks = S.rowLooks + 1
+        return true
+    end
+    local ok, err = pcall(X._backgroundStyle, row, w, false)
+    row.selBg = nil
+    if not ok then C.warnOnce("focus row", "row '%s': restoring its own background failed: %s", row.id, firstLine(err)) end
+    return true
+end
+F._rowLook = rowLook
+
+local function rowOf(el)
+    local p = el and el.panel
+    if p and p.kind == "row" and not p.removed then return p end
+    return nil
+end
+
+-- The highlighted row of rec's window becomes el's row (nil: none). At most one per window; a row that is gone
+-- (removed, or its widget gone) is forgotten without a call.
+local function setRow(rec, el)
+    local row = rowOf(el)
+    local cur = rec.lookRowId
+    if cur and not (row and row.id == cur) then
+        local old = C.els[cur]
+        if old and not old.removed and old.kind == "row" then rowLook(old, false) end
+        rec.lookRowId = nil
+    end
+    if row and rowLook(row, true) then rec.lookRowId = row.id end
+end
+F._setRow = setRow
+
+-- Core story 28: the window no longer holds focus (another window covers it, or it closed): its focused element and
+-- row go back to their own look; the model keeps the element (focusId) for the return.
+function F.blur(rec)
+    if rec.lookId then
+        local old = C.els[rec.lookId]
+        if old and not old.removed then setLook(old, false) end
+        rec.lookId = nil
+    end
+    if rec.lookRowId then setRow(rec, nil) end
 end
 
 -- The list a focused element sits in (a row in a list, or a list's own child) and the widget to scroll into view.
@@ -226,6 +302,7 @@ local function focusEl(rec, el, lines, mode)
         if old and not old.removed then setLook(old, false) end
     end
     setLook(el, true)
+    setRow(rec, el)
     rec.lookId = el.id
     rec.focusId = el.id
     local li, ci = F.find(lines, el)
@@ -255,6 +332,7 @@ local function focusWindowWidget(rec, mode)
         if old and not old.removed then setLook(old, false) end
         rec.lookId = nil
     end
+    setRow(rec, nil)
 end
 
 -- Where keyboard focus is in rec's window now: the element whose target holds it (the remembered one first; another
@@ -271,6 +349,7 @@ local function focusedIn(rec, lines)
                     setLook(e, true)
                     rec.lookId = e.id
                 end
+                setRow(rec, e)
                 rec.focusId = e.id
                 local li, ci = F.find(lines, e)
                 rec.focusPos = { li = li, ci = ci, owner = l.owner }
@@ -288,7 +367,7 @@ F._focusedIn = focusedIn
 -- element, else its first focusable); else the window widget. With the UI input mode.
 function F.focusWindow(rec, fresh)
     local lines = F.lines(C.windowHost(rec.id), backIdOf(rec))
-    if fresh then rec.focusId, rec.focusPos, rec.lookId = nil, nil, nil end
+    if fresh then rec.focusId, rec.focusPos, rec.lookId, rec.lookRowId = nil, nil, nil, nil end
     -- A dependent opens a window, then builds it: until the next UI tick (or the first key or click) focus follows the
     -- window's first element as elements arrive (F.changed).
     rec.openFresh = fresh == true
@@ -338,7 +417,14 @@ function F.tick(rec, w)
         return
     end
     local el = rec.focusId and C.els[rec.focusId]
-    if el and not el.removed then setLook(el, true); rec.lookId = el.id end
+    if el and not el.removed then
+        if rec.lookId and rec.lookId ~= el.id then
+            local old = C.els[rec.lookId]
+            if old and not old.removed then setLook(old, false) end
+        end
+        setLook(el, true); rec.lookId = el.id
+        setRow(rec, el) -- story 28: the row's highlight back after a re-style
+    elseif rec.lookRowId then setRow(rec, nil) end
 end
 
 -- A mouse click (or drag, or commit) on an element of a window: the model's focus moves there.

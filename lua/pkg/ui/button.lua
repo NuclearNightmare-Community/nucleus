@@ -261,6 +261,7 @@ X.KIND.button = {
 
 style = function(el, w, fresh)
     if fresh then el.colorKey = "plain" end -- the generator's white label
+    el.faceOn = nil -- core story 28: a re-style draws the button's own look (the UI tick puts a focus face back)
     local s, h, p = el.style, el.style.hover, el.style.pressed
     local only = iconOnly(el)
     el.styledIconOnly = only
@@ -293,6 +294,46 @@ style = function(el, w, fresh)
         applyColors(el, w)
     end)
     if not ok then C.warnOnce("style:" .. el.id, "button '%s': style not applied (is %s's pak current?): %s", el.id, C.NAME, firstLine(err)) end
+end
+
+-- Core story 28: the focus face. SetFocusLook (story 27) shows the hover brush and the hover colours, which change
+-- nothing on a dimmed button (hover = normal) or on a game-look icon-only one (no face at all). While such a button holds
+-- keyboard focus, focus.lua draws it with a face first: a dimmed one looks like its undimmed self (the hover brush and
+-- the hover colours), a faceless icon-only one borrows the game's selection material as its face. Unfocused, the kind's
+-- own style draws it again (el.colorKey = "focus" makes applyColors put its own colours back). Mouse hover is unchanged.
+function B._needsFace(el)
+    return (el.kind == "button" or el.kind == "checkbox") and (el.dimmed == true or (el.gameFace == true and el.styledIconOnly == true))
+end
+
+-- Applies the face (before SetFocusLook(true): SetMaterials and SetColors turn FocusLook off). False when the game's
+-- material is missing (no face; assets.lua warned once). Raises on a failed widget call (the caller logs it once).
+function B._focusFace(el, w)
+    local g = theme.game
+    if el.gameFace and el.styledIconOnly then
+        local sel = A.get("mat:selection")
+        if not sel then return false end
+        local t = g.buttonTint
+        el.faceOn = true
+        -- the icon-only Box keeps its width and height overrides: no padding, no minimum height
+        C.count(); w:SetMaterials(sel, sel, t.r, t.g, t.b, t.a, 0, 0, 0, 0, 0)
+    elseif el.gameLook then
+        local strip, sel = A.get("mat:strip"), A.get("mat:selection")
+        if not (strip and sel) then return false end
+        local t, pd = g.buttonTint, g.buttonPadding
+        el.faceOn = true
+        C.count(); w:SetMaterials(strip, sel, t.r, t.g, t.b, t.a, pd.l, pd.t, pd.r, pd.b, g.buttonMinHeight)
+    else
+        local s, h, p = el.style, el.style.hover, el.style.pressed
+        el.faceOn = true
+        C.count(); w:SetColors(s.r, s.g, s.b, s.a, h.r, h.g, h.b, h.a, p.r, p.g, p.b, p.a, el.styledIconOnly and 0 or s.pad)
+    end
+    if el.dimmed then
+        local n, h = theme.white, theme.white
+        if el.gameFace then n, h = g.text, g.textHover end
+        el.colorKey = "focus"
+        C.count(); w:SetContentColors(n.r, n.g, n.b, n.a, h.r, h.g, h.b, h.a)
+    end
+    return true
 end
 
 -- Whether a container holds an element of a kind in set, at any depth (story 21: a row in a list).

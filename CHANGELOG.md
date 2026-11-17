@@ -2,6 +2,16 @@
 
 All notable changes to Nucleus are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). From 0.5.0 a dependent's `need` and `dependsOn` are minimum versions (`>=0.5.0`), so a newer Nucleus never asks dependents to raise them. Up to 0.3.0, below 1.0.0 a dependent connected only to the same minor version (`need = "0.3.0"` accepted 0.3.x).
 
+## [0.12.1] - 2026-11-16
+
+Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
+
+For players: in a mod's window, the keyboard and gamepad focus can be seen again: the focused row and icon buttons are highlighted.
+
+### Fixed
+
+- The focused row and icon buttons are highlighted (core story 28, Lua only, no pak change). In 0.12.0 focus moved, but on a row whose only focusable is a dimmed or icon-only button (Mod Manager's gear) nothing showed it: the button's focus look (`SetFocusLook`: the hover brush and the hover colours) changes nothing on a dimmed button (hover = normal) or on a game-look icon-only one (no face). Now, while an element holds keyboard focus, the row holding it shows the game's selection material (`M_NN_CinematicSelection`, in the row tint) instead of its own background, at most one row per window; a dimmed button is drawn like its undimmed self (the hover brush and the hover colours) and a game-look icon-only button or checkbox gets the selection material as its face. Both go back to the row's and the element's own style when focus leaves them (focus moves, the window takes it, the element is removed, hidden or disabled, another window covers this one, the window closes), and the UI tick puts them back after a dependent re-styles the focused element or its row. Mouse hover is unchanged (a dimmed button still doesn't light up under the mouse); other buttons keep 0.12.0's focus look. A failed widget call logs one `WARN` and focus keeps working; without the game's selection material there is no highlight (`assets.lua`'s one `WARN`).
+
 ## [0.12.0] - 2026-11-14
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.

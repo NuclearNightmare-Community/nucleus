@@ -344,6 +344,7 @@ local function closeOne(rec, reason, event)
     if rec.ref then pcall(C.free, rec.ref) end
     rec.ref, rec.open = nil, false
     rec.cardKey, rec.dirty = nil, false -- the next open's widget is new: its card is sized again
+    rec.lookId, rec.lookRowId = nil, nil -- core story 28: the focus look went with the widgets; nothing stays recorded
     removeOpenZ(rec.z)
     if event == "lost" then T.lost = T.lost + 1 else T.closes = T.closes + 1 end
     dispatch(rec, { event = event or "closed", id = rec.id, reason = reason })
@@ -415,6 +416,10 @@ local function ensureMenu()
                     if i == #order and isGlobalTop(rec) then
                         local okF, errF = pcall(F.tick, rec, w)
                         if not okF then C.warnOnce("focus tick", "window '%s': its focus tick failed: %s", rec.id, tostring(errF):match("^[^\n]*")) end
+                    elseif i == #order and (rec.lookId or rec.lookRowId) then
+                        -- core story 28: another mod's window covers this one: no focus look here until it is back
+                        local okB, errB = pcall(F.blur, rec)
+                        if not okB then C.warnOnce("focus blur", "window '%s': clearing its focus look failed: %s", rec.id, tostring(errB):match("^[^\n]*")) end
                     end
                 else
                     closeOne(rec, "its widget is gone", "lost")
@@ -482,7 +487,15 @@ function SC.open(opts, ...)
     w:AddToViewport(rec.z)
     rec.ref = C.ref(w)
     rec.open = true
-    for _, oid in ipairs(order) do setTop(C.windows[oid], false) end
+    for _, oid in ipairs(order) do
+        local below = C.windows[oid]
+        setTop(below, false)
+        if below then
+            -- core story 28: a covered window doesn't show focus (its row highlight and focus face go until it is back)
+            local okB, errB = pcall(F.blur, below)
+            if not okB then C.warnOnce("focus blur", "window '%s': clearing its focus look failed: %s", oid, tostring(errB):match("^[^\n]*")) end
+        end
+    end
     order[#order + 1] = id
     setTop(rec, true)
     local okC, canvas = pcall(C.prop, w, "Canvas")

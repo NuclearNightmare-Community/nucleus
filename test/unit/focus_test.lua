@@ -947,5 +947,177 @@ do
     SC.close(W9)
 end
 
+-- ---------------------------------------------------------------- core story 28: the focused row and the focus face
+-- Fakes as the Blueprint: SetColors and SetMaterials (a fresh style) turn FocusLook off; calls are counted per widget.
+do
+    local WBL = F.objects["/Script/UMG.Default__WidgetBlueprintLibrary"]
+    local base = WBL.Create
+    WBL.Create = function(self, world, c, owner)
+        local w = base(self, world, c, owner)
+        if w.__class == "WBP_NucleusButton_C" then
+            local sc, sm = w.SetColors, w.SetMaterials
+            function w:SetColors(...) self.focusLook = false; self.colorCalls = (self.colorCalls or 0) + 1; return sc(self, ...) end
+            function w:SetMaterials(...) self.focusLook = false; self.matCalls = (self.matCalls or 0) + 1; return sm(self, ...) end
+        end
+        if w.SetBackgroundMaterial then
+            local sbm = w.SetBackgroundMaterial
+            function w:SetBackgroundMaterial(...)
+                self.bgMatCalls = (self.bgMatCalls or 0) + 1
+                if self.throwBg then error("SetBackgroundMaterial: boom") end
+                return sbm(self, ...)
+            end
+        end
+        return w
+    end
+end
+T.SEL = F.assets["/Game/Graphics/MainMenu/Styles/Remaster/M_NN_CinematicSelection.M_NN_CinematicSelection"]
+T.STRIP = F.assets["/Game/Graphics/MainMenu/Styles/Remaster/M_NN_WornStrip.M_NN_WornStrip"]
+function T.matOf(id) local w = T.tagged(id) return w and w.mat end
+function T.selected(id) return T.matOf(id) == T.SEL end
+function T.strip(id) return T.matOf(id) == T.STRIP end
+function T.gearFaced(id)
+    local w = T.tagged(id)
+    local g = theme.game
+    return w ~= nil and w.mats ~= nil and w.mats[1] == T.SEL and w.mats[2] == T.SEL and w.mats[11] == 0 and w.focusLook == true
+        and T.near(w.content[1], g.text.r) and T.near(w.content[5], g.textHover.r)
+end
+function T.gearOwn(id)
+    local w = T.tagged(id)
+    return w ~= nil and w.colors ~= nil and w.colors[4] == 0 and w.colors[13] == 0 and T.near(w.content[1], T.DIM.r) and T.near(w.content[5], T.DIM.r)
+        and w.focusLook == false
+end
+do
+    local R = SC.open{ id = "R28" }
+    local wr = T.screenOf("R28")
+    local rec = C.windows["R28"]
+    local L = LS.create{ id = "r28l", place = { screen = R, corner = "top-left" }, size = { 600, 400 } }
+    local rows, gears = {}, {}
+    for i = 1, 3 do
+        rows[i] = RS.create{ id = "r28r" .. i, place = { list = L } }
+        IM.create{ id = "r28i" .. i, place = { row = rows[i] }, image = { icon = "checkbox-on" }, size = 28 }
+        X.create{ id = "r28n" .. i, text = "MOD " .. i, place = { row = rows[i], fill = 4 } }
+        gears[i] = B.create{ id = "r28g" .. i, place = { row = rows[i] }, icon = { icon = "gear" }, iconSize = 28, dimmed = true, onClick = T.rec("r28g" .. i) }
+    end
+    -- row 4: a gear and a checkbox (two focusables in a row); row 5: an explicit background; row 6: the plain look
+    rows[4] = RS.create{ id = "r28r4", place = { list = L } }
+    gears[4] = B.create{ id = "r28g4", place = { row = rows[4] }, icon = { icon = "gear" }, iconSize = 28, dimmed = true, onClick = T.rec("r28g4") }
+    local cb4 = CK.create{ id = "r28c4", place = { row = rows[4] }, onChange = T.rec("r28c4") }
+    rows[5] = RS.create{ id = "r28r5", place = { list = L }, style = { background = { r = 0.2, g = 0.3, b = 0.4, a = 0.5 } } }
+    gears[5] = B.create{ id = "r28g5", label = "TOGGLE", place = { row = rows[5] }, onClick = T.rec("r28g5") }
+    rows[6] = RS.create{ id = "r28r6", place = { list = L }, style = { look = "plain" } }
+    gears[6] = B.create{ id = "r28g6", label = "PLAIN", place = { row = rows[6] }, onClick = T.rec("r28g6") }
+    tick() -- open then build: the tick settles focus on the first element
+    -- Row focus: r1 highlighted, the others their worn strip; the dimmed icon-only gear has a face
+    ok(T.agree("r28g1") and T.selected("r28r1") and T.strip("r28r2") and T.strip("r28r3") and rec.lookRowId == "r28r1",
+        "story 28 open: the focused element's row shows the selection, the others the worn strip", tostring(T.matOf("r28r1")))
+    local r1w = T.tagged("r28r1")
+    ok(T.tintIs(r1w.matTint, theme.game.rowTint), "story 28 open: the highlight in the row tint")
+    ok(T.gearFaced("r28g1"), "story 28 open: the dimmed icon-only gear gets a face (selection, no padding, the undimmed colours) and the focus look")
+    ok(T.gearOwn("r28g2"), "story 28 open: the other gears keep their own look (no face, dimmed)")
+    -- Down: r2 highlighted, r1 back to the worn strip in the same tint and padding
+    local padBefore = T.tagged("r28r2").pad
+    ok(T.key(wr, D.down, INV_ACT) and T.agree("r28g2") and T.selected("r28r2") and T.strip("r28r1") and rec.lookRowId == "r28r2",
+        "story 28 Down: the highlight moves to row 2, row 1 shows its worn strip again")
+    ok(T.tintIs(r1w.matTint, theme.game.rowTint) and r1w.pad == padBefore, "story 28 Down: row 1's strip in its own tint and padding")
+    ok(T.gearOwn("r28g1") and T.gearFaced("r28g2"), "story 28 Down: the old gear's own look back, the new one faced")
+    -- Same row: Left / Right inside one row keeps the highlight; the face follows the element
+    T.key(wr, D.down, INV_ACT); T.key(wr, D.down, INV_ACT)
+    ok(T.agree("r28g4") and T.selected("r28r4"), "story 28 same row: on row 4's gear")
+    local n4 = T.tagged("r28r4").bgMatCalls or 0
+    local cw = T.tagged("r28c4")
+    ok(T.key(wr, D.right, INV_ACT) and T.agree("r28c4") and T.selected("r28r4") and (T.tagged("r28r4").bgMatCalls or 0) == n4,
+        "story 28 same row: Right to the checkbox, the row stays highlighted (no call)")
+    ok(T.gearOwn("r28g4") and cw.mats and cw.mats[1] == T.SEL and cw.focusLook == true, "story 28 same row: the gear's own look back, the checkbox (faceless) faced")
+    local g4 = T.tagged("r28g4")
+    local gc = g4.colorCalls
+    ok(T.key(wr, D.left, INV_ACT) and T.agree("r28g4") and cw.colors and cw.colors[4] == 0 and cw.focusLook == false and g4.colorCalls == gc and T.gearFaced("r28g4"),
+        "story 28 same row: Left back: the checkbox's own (faceless) look, the gear faced again")
+    -- Explicit row: selection while focused, its own colour (SetBackgroundSolid + colour) after
+    T.key(wr, D.down, INV_ACT)
+    local t5 = T.tagged("r28g5")
+    ok(T.agree("r28g5") and T.selected("r28r5"), "story 28 explicit row: the selection while focused")
+    ok(t5.matCalls == 1 and t5.focusLook == true and FO.stats().faces > 0, "story 28 labelled TOGGLE: no face call, the story 27 look", t5.matCalls)
+    T.key(wr, D.down, INV_ACT)
+    local r5 = T.tagged("r28r5")
+    ok(r5.mat == nil and r5.bg and T.near(r5.bg[1], 0.2) and T.near(r5.bg[4], 0.5), "story 28 explicit row: its own colour after (solid + colour)")
+    ok(T.agree("r28g6") and T.selected("r28r6"), "story 28 plain row: the selection while focused")
+    -- To BACK: no row highlighted; BACK has its own look
+    local facesBefore = FO.stats().faces
+    T.key(wr, D.down, INV_ACT)
+    local r6 = T.tagged("r28r6")
+    ok(T.agree("#close:R28") and rec.lookRowId == nil and r6.mat == nil and r6.bg ~= nil, "story 28 to BACK: no row highlighted, the plain row its own colour")
+    local nsel = 0
+    for i = 1, 6 do if T.selected("r28r" .. i) then nsel = nsel + 1 end end
+    ok(nsel == 0 and FO.stats().faces == facesBefore and T.tagged("#close:R28").focusLook == true, "story 28 to BACK: no row selected, BACK's own focus look (no face)")
+    -- Re-style while focused: the next tick shows the highlight and the face again
+    T.key(wr, D.up, INV_ACT); T.key(wr, D.up, INV_ACT); T.key(wr, D.up, INV_ACT); T.key(wr, D.up, INV_ACT); T.key(wr, D.up, INV_ACT)
+    ok(T.agree("r28g2") and T.selected("r28r2"), "story 28 re-style: on row 2's gear")
+    RS.setStyle(rows[2], { padding = "tight" })
+    B.create{ id = "r28g2", place = { row = rows[2] }, icon = { icon = "gear" }, iconSize = 28, dimmed = false, onClick = T.rec("r28g2") }
+    B.create{ id = "r28g2", place = { row = rows[2] }, icon = { icon = "gear" }, iconSize = 28, dimmed = true, onClick = T.rec("r28g2") }
+    ok(T.strip("r28r2") and not T.gearFaced("r28g2"), "story 28 re-style: the row and the gear show their own style at once")
+    tick()
+    ok(T.selected("r28r2") and T.gearFaced("r28g2") and rec.lookRowId == "r28r2", "story 28 re-style: the tick puts the highlight and the face back")
+    local calls = T.tagged("r28r2").bgMatCalls
+    tick()
+    ok(T.tagged("r28r2").bgMatCalls == calls, "story 28 tick: nothing re-styled, no widget call for the row")
+    -- Focused element removed while its row stays: the recovered element is in another row, the highlight follows
+    B.remove(gears[2])
+    ok(T.agree("r28g3") and T.selected("r28r3") and T.strip("r28r2") and rec.lookRowId == "r28r3", "story 28 removed: focus to the next row, the old row loses the highlight", SC.stats().focus)
+    -- ... and the recovered element in the same row: the highlight stays
+    T.key(wr, D.down, INV_ACT); T.key(wr, D.right, INV_ACT)
+    ok(T.agree("r28c4"), "story 28 removed (same row): on the checkbox")
+    CK.remove(cb4)
+    ok(T.agree("r28g4") and T.selected("r28r4") and rec.lookRowId == "r28r4", "story 28 removed (same row): the gear, its row still highlighted")
+    -- Row removed: no call on the dead row, nothing recorded for it
+    local deadW = T.tagged("r28r4")
+    local deadCalls = deadW.bgMatCalls
+    RS.remove(rows[4])
+    ok(rec.lookRowId ~= "r28r4" and deadW.bgMatCalls == deadCalls, "story 28 row removed: no call on it, not recorded", tostring(rec.lookRowId))
+    -- A covering window: the lower one shows no highlight or face; back on return
+    T.key(wr, D.up, INV_ACT)
+    ok(T.agree("r28g3") and T.selected("r28r3"), "story 28 cover: on row 3")
+    local R2 = SC.open{ id = "R28b" }
+    ok(T.strip("r28r3") and T.gearOwn("r28g3") and rec.lookRowId == nil, "story 28 cover: the covered window's row and gear show their own look")
+    SC.close(R2)
+    ok(T.agree("r28g3") and T.selected("r28r3") and T.gearFaced("r28g3"), "story 28 cover: after the close, the highlight and the face come back")
+    -- Widget call fails: one WARN, focus keeps working
+    local w1 = T.tagged("r28r1")
+    w1.throwBg = true
+    local n0 = countLogs("the focus highlight failed")
+    T.key(wr, D.up, INV_ACT)
+    ok(T.agree("r28g1") and countLogs("the focus highlight failed") == n0 + 1 and rec.lookRowId == nil, "story 28 throwing setter: one WARN, focus moved")
+    tick(); T.key(wr, D.down, INV_ACT); T.key(wr, D.up, INV_ACT)
+    ok(T.agree("r28g1") and countLogs("the focus highlight failed") == n0 + 1, "story 28 throwing setter: logged once only")
+    w1.throwBg = false
+    tick()
+    ok(T.selected("r28r1"), "story 28 throwing setter fixed: the tick highlights the row")
+    -- Window closed: nothing stays recorded
+    SC.close(R)
+    ok(rec.lookRowId == nil and rec.lookId == nil, "story 28 window closed: nothing recorded")
+    -- Material missing: no highlight or face; assets.lua's one WARN; focus still moves
+    require("nucleus.ui.assets")._reset()
+    local SELP = "/Game/Graphics/MainMenu/Styles/Remaster/M_NN_CinematicSelection.M_NN_CinematicSelection"
+    F.missing[SELP] = true
+    local nW = countLogs("could not be loaded")
+    local M2 = SC.open{ id = "R28m" }
+    local wm = T.screenOf("R28m")
+    local Lm = LS.create{ id = "r28ml", place = { screen = M2, corner = "top-left" }, size = { 300, 200 } }
+    for i = 1, 2 do
+        local r = RS.create{ id = "r28mr" .. i, place = { list = Lm } }
+        B.create{ id = "r28mg" .. i, place = { row = r }, icon = { icon = "gear" }, iconSize = 28, dimmed = true, onClick = T.rec("r28mg" .. i) }
+    end
+    tick()
+    ok(T.agree("r28mg1") and not T.selected("r28mr1") and T.tagged("r28mg1").mats == nil and C.windows["R28m"].lookRowId == nil,
+        "story 28 material missing: no row highlight, no face")
+    ok(T.key(wm, D.down, INV_ACT) and T.agree("r28mg2"), "story 28 material missing: focus still moves")
+    tick()
+    ok(countLogs("could not be loaded") == nW + 1, "story 28 material missing: assets.lua's one WARN", countLogs("could not be loaded") - nW)
+    SC.close(M2)
+    F.missing[SELP] = nil
+    require("nucleus.ui.assets")._reset()
+    ok(FO.stats().faults == 0, "story 28: no fault in the focus path")
+end
+
 print(string.format("focus_test: %d passed, %d failed", pass, failN))
 if failN > 0 then os.exit(1) end

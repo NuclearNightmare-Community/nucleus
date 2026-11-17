@@ -4062,7 +4062,8 @@ local function buildMenu()
         local rw = rowWidget(1)
         local c1 = cellOf(rw, "c1-1")
         local font = try(function() return oname(c1.Text.Font.FontObject) end) or "?"
-        local rowBrush = try(function() return oname(rw.Background.Background.ResourceObject) end) or "?"
+        -- core story 28: row 1 holds the focused PICK and shows the selection; row 2 shows a row's own worn strip
+        local rowBrush = try(function() return oname(rowWidget(2).Background.Background.ResourceObject) end) or "?"
         local cb = closeButtonIn(prop(s, "Canvas"))
         -- core story 27: a focused BACK shows its hover brush as its normal one; its own style is then SavedStyle
         local cbStyle = try(function() return cb.FocusLook end) == true and try(function() return cb.SavedStyle end) or try(function() return cb.Btn.WidgetStyle end)
@@ -4427,6 +4428,11 @@ local function buildMenu()
             img("ic.on", onW, "T_CheckboxOn", { 1, 1, 1, 1 })
             img("ic.gap", gapW, "none", { 1, 1, 1, 0 })
             for _, g in ipairs(GAME) do img("ic." .. g[1], cell(2, "ic." .. g[1]), g[3], { 1, 1, 1, 1 }) end
+            -- core story 28: the gear is window IC's first focusable, so it holds focus and shows its focus face (its
+            -- undimmed colours). Its own dimmed look is read with the window's focus look cleared (the next UI tick
+            -- puts the face back).
+            local LOc = CORE:lower()
+            pcall(function() require(LOc .. ".ui.focus").blur(require(LOc .. ".ui.common").windows["IC"]) end)
             local icon = prop(cfgW, "Icon")
             local ic = try(function() return icon.ColorAndOpacity end)
             check(resName(icon) == "T_Gear" and near4(ic, DIM), "IMG ic.cfg icon tex=%s tint=%s (dimmed)", resName(icon), col4(ic))
@@ -5282,7 +5288,35 @@ local function buildMenu()
             cardCheck("KBM", "kbm.h")
             kfocus("KBM", "kbm.g1")
         end)
+        -- Core story 28: the focused row shows the game's selection material, the others their worn strip; the focused
+        -- dimmed icon-only gear has a focus face (the selection as its brush while FocusLook is on), the others none.
+        KB.mmRow = function(i)
+            local _, c = screenWith("kbm.h")
+            return childTagged(prop(childTagged(c, "kbm.list"), "VBox"), "kbm.r" .. i)
+        end
+        KB.mmLook = function(sel, other)
+            local rs = KB.mmRow(sel)
+            local ro = KB.mmRow(other)
+            local bs = try(function() return oname(rs.Background.Background.ResourceObject) end) or "?"
+            local bo = try(function() return oname(ro.Background.Background.ResourceObject) end) or "?"
+            check(bs:find("M_NN_CinematicSelection", 1, true) ~= nil, "KLOOK row: the focused row kbm.r%d shows the selection (%s)", sel, bs)
+            check(bo:find("M_NN_WornStrip", 1, true) ~= nil, "KLOOK row: the unfocused row kbm.r%d shows its worn strip (%s)", other, bo)
+            local gs = childTagged(prop(rs, "HBox"), "kbm.g" .. sel)
+            local go = childTagged(prop(ro, "HBox"), "kbm.g" .. other)
+            local fs = try(function() return oname(gs.Btn.WidgetStyle.Normal.ResourceObject) end) or "?"
+            local fo = try(function() return oname(go.Btn.WidgetStyle.Normal.ResourceObject) end) or "?"
+            check(try(function() return gs.FocusLook end) == true and fs:find("M_NN_CinematicSelection", 1, true) ~= nil,
+                "KLOOK face: the focused gear kbm.g%d shows a focus face (%s)", sel, fs)
+            check(try(function() return go.FocusLook end) == false and fo:find("M_NN_CinematicSelection", 1, true) == nil,
+                "KLOOK face off: the unfocused gear kbm.g%d has no face (%s)", other, fo)
+        end
+        step("kb: mod manager focus look", function() KB.mmLook(1, 2) end)
         shot("kb-mm-rows")
+        kkey("DOWN", "mm down", function()
+            kfocus("KBM", "kbm.g2")
+            KB.mmLook(2, 1)
+        end)
+        shot("kb-mm-rows-down")
         step("kb: mod manager close", function()
             UI.screen.close(KB.MM)
             UI.screen.unwatch(KB.stok)
