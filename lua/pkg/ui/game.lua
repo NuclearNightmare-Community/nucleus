@@ -81,6 +81,10 @@ local function ensureNotify(host)
         pcall(function() track(host, C.pathOf(obj), obj) end)
         return false
     end)
+    if not st.okNotify then
+        C.warnOnce("game notify " .. host, "game %s: NotifyOnNewObject(%s) failed: %s; only screens found by the seed FindAllOf are known (new ones are missed)",
+            host, spec(host).class, tostring(st.errNotify):match("^[^\n]*"))
+    end
 end
 
 local function seed(host)
