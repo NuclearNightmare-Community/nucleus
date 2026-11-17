@@ -1497,11 +1497,10 @@ local function attachNow(el, reason)
         return
     end
     local host = el.place.host
-    -- Core story 32: an element in a game container attaches by the insert pass for its container.
+    -- Core story 32: an element in a game container attaches by the insert pass for its container, on the host's next
+    -- poll tick (never inside the dependent's call, so never inside a hook it calls from); the poll's opened runs it too.
     if el.place.container then
-        local ad = hostA(host)
-        local s = ad and ad.poll()
-        if s then X._insertPass(host, s, el.place.container, reason) end
+        X._queueInsert(host, el.place.container)
         return
     end
     local obj, canvas = liveHost(host)
@@ -1613,12 +1612,20 @@ X._ensureMenu = function() ensureMenu() end
 -- from the first child out of order, every child is removed and added back in the wanted order, each game child with
 -- its saved slot values (padding, size, alignment; plain Lua values). Nothing is rebuilt when the order is right. The
 -- game's children are never changed otherwise. Another mod's core widgets in the box follow the game child before them.
--- Runs at the poll's opened and from a dependent's own create / place while the screen is open (never inside a game
--- hook). A missing anchor puts the element at the end and a missing container leaves it pending until the next open,
--- each with one WARN for the life of the Lua state.
+-- Runs at the poll's opened, and on the host's next poll tick after a dependent's create / place while the screen is
+-- open (queued, one pass per container per tick however many calls; never inside the dependent's call, so never inside
+-- a hook it calls from). A re-added game row's Blueprint pickers (MultipleSelectBox_C) run their PreConstruct again,
+-- which puts back their default option, so the pass reads each picker's selected index before taking the row out and
+-- sets it again after the re-add (SetSelectedOption: no broadcast, no game handler runs). A missing anchor puts the
+-- element at the end and a missing container leaves it pending until the next open, each with one WARN for the life
+-- of the Lua state.
 local INSERT_CLASSES = { VerticalBox = true, HorizontalBox = true, ScrollBox = true }
 local INSERT_CLASS_NAMES = "a VerticalBox, HorizontalBox or ScrollBox"
+local INSERT_CLASS_LIST = "VerticalBox, HorizontalBox or ScrollBox"
 local WALK_MAX, WALK_DEPTH = 4096, 32
+-- The pickers inside one game row: at most PICK_WALK widgets and PICK_DEPTH levels are looked at.
+local PICKER_CLASS = "MultipleSelectBox_C"
+local PICK_WALK, PICK_DEPTH = 64, 8
 -- host -> { path = <the screen's path>, refs = { name -> weak handle of the box }, missing = { name -> why } }
 local boxCache = {}
 
@@ -1704,7 +1711,7 @@ local function boxesOf(host, s, names)
                 local okR, h = pcall(C.ref, w)
                 if okR then bc.refs[nm] = h end
             else
-                bc.missing[nm] = w and ("it is a " .. tostring(cls) .. ", not " .. INSERT_CLASS_NAMES) or ("no widget of that name is in the open screen")
+                bc.missing[nm] = w and { notBox = tostring(cls) } or { why = "no widget of that name is in the open screen" }
             end
         end
     end
@@ -1742,6 +1749,41 @@ local function restoreSlot(w, v, name)
     set("SetSize", v.size)
     set("SetHorizontalAlignment", v.ha)
     set("SetVerticalAlignment", v.va)
+end
+
+-- The Blueprint pickers (MultipleSelectBox_C) inside a game child, with their selected index (0-based; plain numbers;
+-- the widgets are used only within this pass). A bounded walk through panels; user widgets are not entered.
+local function pickersOf(c)
+    local out = {}
+    local ws, ds = { c }, { 0 }
+    local seen = 0
+    while #ws > 0 and seen < PICK_WALK do
+        local w, d = ws[#ws], ds[#ds]
+        ws[#ws], ds[#ds] = nil, nil
+        seen = seen + 1
+        if classNameOf(w) == PICKER_CLASS then
+            local ok, i = pcall(function() C.count(); return w:GetSelectedIndex() end)
+            i = ok and math.tointeger(tonumber(i)) or nil
+            if i and i >= 0 then out[#out + 1] = { w = w, index = i } end
+        elseif d < PICK_DEPTH then
+            for k = childCountOf(w) - 1, 0, -1 do
+                local ch = childAt(w, k)
+                if ch then ws[#ws + 1], ds[#ds + 1] = ch, d + 1 end
+            end
+        end
+    end
+    return out
+end
+-- After a re-add: each picker back on the index it had (only when its PreConstruct changed it).
+local function restorePickers(list, name)
+    for _, pk in ipairs(list) do
+        local okR, now = pcall(function() C.count(); return pk.w:GetSelectedIndex() end)
+        if not (okR and math.tointeger(tonumber(now)) == pk.index) then
+            local ok, err = pcall(function() C.count(); pk.w:SetSelectedOption(pk.index) end)
+            if ok then C.stats.pickerRestores = (C.stats.pickerRestores or 0) + 1
+            else C.warnOnce("insert picker " .. name, "ui: putting back a game picker's option in '%s' failed: %s", name, firstLineOf(err)) end
+        end
+    end
 end
 
 -- A box child's core tag (any mod's), or nil for a game widget.
@@ -1826,11 +1868,11 @@ local function insertBox(host, s, name, box, els, reason)
     while k <= #cur and k <= #want and cur[k]:GetAddress() == want[k]:GetAddress() do k = k + 1 end
     if k <= #want or k <= #cur then
         -- From the first child out of order: save the game's slots, take every child out, add them back in order.
-        local saved, removed = {}, 0
+        local saved, picks, removed = {}, {}, 0
         for i = k, #cur do
             local c = cur[i]
             local a = c:GetAddress()
-            if not ours[a] then saved[a] = saveSlot(c) end
+            if not ours[a] then saved[a] = saveSlot(c); picks[a] = pickersOf(c) end
             local ok, err = pcall(function() C.count(); return box:RemoveChild(c) end)
             if ok then removed = removed + 1
             else C.warnOnce("insert remove " .. host .. "|" .. name, "ui %s: taking a child out of '%s' failed: %s", host, name, firstLineOf(err)) end
@@ -1839,8 +1881,10 @@ local function insertBox(host, s, name, box, els, reason)
             local c = want[i]
             local ok, err = pcall(function() C.count(); box:AddChild(c) end)
             if ok then
-                local v = saved[c:GetAddress()]
+                local a = c:GetAddress()
+                local v = saved[a]
                 if v then restoreSlot(c, v, name) end
+                if picks[a] and #picks[a] > 0 then restorePickers(picks[a], name) end
             else
                 C.warnOnce("insert add " .. host .. "|" .. name, "ui %s: putting a child back into '%s' failed: %s", host, name, firstLineOf(err))
             end
@@ -1887,14 +1931,36 @@ local function insertPass(host, s, only, reason)
                 freeRef(el)
                 el.attached = false
             end
-            C.warnOnce("insert container " .. host .. "|" .. nm,
-                "ui %s: container '%s' is missing (%s; it must be %s, by name); %s stay(s) pending until the next open",
-                host, nm, tostring(missing[nm]), INSERT_CLASS_NAMES, idsOf(els))
+            local why = missing[nm] or {}
+            if why.notBox then
+                C.warnOnce("insert container " .. host .. "|" .. nm,
+                    "ui %s: '%s' is a %s, not %s; %s stay(s) pending until the next open",
+                    host, nm, why.notBox, INSERT_CLASS_LIST, idsOf(els))
+            else
+                C.warnOnce("insert container " .. host .. "|" .. nm,
+                    "ui %s: container '%s' is missing (%s; it must be %s, by name); %s stay(s) pending until the next open",
+                    host, nm, tostring(why.why), INSERT_CLASS_NAMES, idsOf(els))
+            end
         end
     end
     return n
 end
 X._insertPass = insertPass
+
+-- create / place while a game screen is open: the containers to pass on the host's next poll tick (host -> { list, set }).
+local insertQueue = {}
+function X._queueInsert(host, name)
+    local q = insertQueue[host]
+    if not q then q = { list = {}, set = {} }; insertQueue[host] = q end
+    if not q.set[name] then q.set[name] = true; q.list[#q.list + 1] = name end
+end
+-- The host's poll tick (a screen open, no event this tick): one insert pass per queued container.
+local function runQueued(host, s)
+    local q = insertQueue[host]
+    if not q then return end
+    insertQueue[host] = nil
+    for _, nm in ipairs(q.list) do insertPass(host, s, nm, "queued create / place") end
+end
 
 -- Core story 31: the game screens (createServer). Like a window: every open is a new screen, so its elements get new
 -- widgets in its root canvas at the poll's opened (never inside a hook of the game's), and on closed or lost only their
@@ -1908,6 +1974,7 @@ ensureGame = function(host)
         if info.event == "opened" then
             local t0 = C.micros()
             dropBoxes(host)
+            insertQueue[host] = nil -- the full pass below covers every container
             local n = 0
             local canvas = G._canvasOf(host, s) -- nil: _canvasOf warned once; those elements stay pending until the next open
             if canvas then n = X._attachHost(host, s, canvas, info.reason) end
@@ -1915,11 +1982,15 @@ ensureGame = function(host)
             if n > 0 and C.debugOn() then C.log.debug("ui %s attach n=%d in %d us (%s)", host, n, C.micros() - t0, tostring(info.reason)) end
         else
             dropBoxes(host)
+            insertQueue[host] = nil
             local freed = X._detachHost(host)
             if freed > 0 and C.debugOn() then C.log.debug("ui %s %s: freed %d widget handle(s) (%s)", host, info.event, freed, tostring(info.reason)) end
         end
     end)
-    G._ticker(host, function(s) X._tickHost(host, s) end)
+    G._ticker(host, function(s)
+        runQueued(host, s)
+        X._tickHost(host, s)
+    end)
 end
 X._ensureGame = function(host) ensureGame(host) end
 

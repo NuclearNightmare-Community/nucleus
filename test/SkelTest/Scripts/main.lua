@@ -5363,7 +5363,7 @@ SETS.GAME = dofile(scriptDir .. "\\gamescreen.lua")({ case = case, E = E, step =
     worldName = worldName, taggedIn = taggedIn, PRE_CONNECT = PRE_CONNECT, MENU_MAP = MENU_MAP })
 -- Core story 32: the game-container bad-input cases and the gameinsert scenario (gameinsert.lua; gamescreen.lua's helpers).
 SETS.INS = dofile(scriptDir .. "\\gameinsert.lua")({ case = case, E = E, step = step, check = check, say = say, CORE = CORE,
-    core = function() return core end, absR = absR, request = request, waitWorld = waitWorld, worldName = worldName, taggedIn = taggedIn }, SETS.GAME)
+    core = function() return core end, absR = absR, request = request, waitWorld = waitWorld, worldName = worldName, taggedIn = taggedIn, tagOfWidget = tagOfWidget }, SETS.GAME)
 
 -- ---------------------------------------------------------------- runner (game thread, every 250 ms)
 local idx, waiting, busy, finished = 0, nil, false, false

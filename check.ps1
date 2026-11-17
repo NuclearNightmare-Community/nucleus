@@ -889,7 +889,8 @@ foreach ($p in 'menu1', 'match1') {
 # Core story 32 (UI-14, core 0.14.0): the game-container intent's bad-input group (gameinsert.lua), in both worlds.
 $insCaseIds = @('cont-num', 'cont-empty', 'cont-65', 'cont-path', 'cont-digit', 'anchor-num', 'anchor-empty', 'anchor-65', 'anchor-name',
                 'anchor-table', 'two', 'two-at', 'none', 'index-0', 'index-frac', 'index-257', 'index-nan', 'index-str', 'at-start', 'corner',
-                'gap', 'hud', 'menu', 'journal', 'screen', 'key', 'nocont', 'panel', 'ok', 'place-bad', 'place-hud', 'isshown', 'remove', 'has')
+                'gap', 'near', 'absolute', 'offset', 'hud', 'menu', 'journal', 'screen', 'key', 'nocont', 'panel', 'list', 'row', 'ok', 'place-bad', 'place-hud',
+                'isshown', 'remove', 'has')
 foreach ($p in 'menu1', 'match1') {
     foreach ($id in $insCaseIds) { $badInput += "\[$T\] OK CASE $p\.ui-ins-$id " }
 }
@@ -940,13 +941,14 @@ $gameInsert = $started + @(
     "\[$T\] SCENARIO gameinsert "
     "\[$T\] OK GISETUP "
     "\[$T\] OK GISNAP VerticalBox_202 before any container element: \d+ game rows, none of ours \(0\)"
-    "\[$T\] OK GICREATE 21 texts made while the screen is open"
+    # Review loop 1 (Design Note 8): made while open, attached on the next tick, one rebuild for all of them.
+    "\[$T\] OK GICREATE 21 texts and a checkbox made while the screen is open: none attached in the call \(true\), .*; 1 rebuild\(s\) for all"
     # AC 1-2: five after Overlay_28 (children 2-6), fourteen after Overlay_738, in creation order; every game row's order
     # and slot values against the snapshot; one widget per element. Made while open, ten opens, the final open, after
-    # the picker clicks and after the preset.
-    "#14|\[$T\] OK GIORDER "
-    "#14|\[$T\] OK GISLOTS .*: \d+ game rows in their order with the snapshot's slot values"
-    "#14|\[$T\] OK GIONE "
+    # the picker clicks, after the preset and after the late creates.
+    "#15|\[$T\] OK GIORDER "
+    "#15|\[$T\] OK GISLOTS .*: \d+ game rows in their order with the snapshot's slot values"
+    "#15|\[$T\] OK GIONE "
     # Ten opens by real clicks: one rebuild per open, new widgets each time.
     "#10|\[$T\] OK GIREBUILD open \d+: VerticalBox_202 rebuilt 1 time\(s\)"
     "#10|\[$T\] OK GINEW open \d+: "
@@ -966,6 +968,12 @@ $gameInsert = $started + @(
     "\[$T\] OK GILOBBY2 "
     "\[$T\] OK GILOAD loading "
     "\[$T\] OK GIDELETE a real click on DELETE removed "
+    # AC 5 (review loop 1): the checkbox in the list takes a real click; two creates while open with Lobby Time changed:
+    # one rebuild on the next tick, Lobby Time (a rebuilt row) keeps the player's value.
+    "\[$T\] OK GICB a real click on the checkbox in VerticalBox_202 \(at end\) ran onChange once with true \(1 call"
+    "\[$T\] OK GILATELOBBY "
+    "\[$T\] OK GILATE two texts made while open: not attached in the call \(true\), .*, 1 rebuild\(s\) for both"
+    "\[$T\] OK GILATEKEEP "
     # Poll-first (story 34): no hook on the screen's class.
     "!Registered script hook .*CreateServer_C"
     "!\[$T\] WARN (?!$slowWarnOk|ui createServer: anchor 'Overlay_NOPE' |ui createServer: container 'VerticalBox_NOPE' )"

@@ -5,12 +5,16 @@
 --                  calls); in bad-input (menu1, match1) and in gameinsert (menu1)
 --   build()        the gameinsert scenario, written for the VM at 1280x720 (run.ps1 -Target vm): menu1; a real click on
 --                  START GAME with no container element, VerticalBox_202 snapshotted (names, slot values); while open,
---                  five texts after Overlay_28, fourteen after Overlay_738, one after an unknown anchor and one in an
---                  unknown container; a real click on Back. Ten real opens: the order, the game rows' slot values
+--                  a checkbox at the end, five texts after Overlay_28, fourteen after Overlay_738, one after an unknown
+--                  anchor and one in an unknown container (none attached inside the call; all on the next tick, one
+--                  rebuild for all); a real click on Back. Ten real opens: the order, the game rows' slot values
 --                  against the snapshot, one rebuild per open, one widget per element (a new one each open); Back.
---                  Then one more open: CONFIGURE, a screenshot, a real click on the Difficulty picker's arrow and on
---                  Lobby Time's (a rebuilt row), values changed; a preset saved under a unique name, Lobby Time changed,
---                  the preset loaded (Lobby Time restored) and deleted (the preset count back); CONFIRM, Back.
+--                  Then one more open: CONFIGURE, a screenshot, the list scrolled to its end and a real click on the
+--                  checkbox (onChange once), a real click on the Difficulty picker's arrow and on Lobby Time's (a
+--                  rebuilt row), values changed; a preset saved under a unique name, Lobby Time changed, the preset
+--                  loaded (Lobby Time restored) and deleted (the preset count back); with Lobby Time at a non-default
+--                  value, two more texts after Overlay_28 made while open: on the next tick in place, one rebuild for
+--                  both, Lobby Time still showing its value (core restores the rebuilt rows' pickers); CONFIRM, Back.
 -- Never keeps a UObject across steps: each step finds what it needs again; only paths, names and counts are kept.
 -- Never clicks Create: no session is made.
 return function(X, GS)
@@ -23,7 +27,6 @@ return function(X, GS)
     local PL = LOWER .. ".ui.place: "
     local HOST = "createServer"
     local VB = "VerticalBox_202"
-    local TEXT_SHORT = "WBP_" .. CORE .. "Text_C"
     local OPENS = 10
     local function core() return X.core() end
 
@@ -58,6 +61,9 @@ return function(X, GS)
                 { "at-start", "at = 'start'", { host = HOST, container = VB, at = "start" }, "unknown at 'start' (valid: end)" },
                 { "corner", "container with corner", { host = HOST, container = VB, after = "Overlay_28", corner = "top-left" }, "corner is not allowed with container " .. KEYS },
                 { "gap", "container with gap", { host = HOST, container = VB, after = "Overlay_28", gap = "tight" }, "gap is not allowed with container " .. KEYS },
+                { "near", "container with near", { host = HOST, container = VB, after = "Overlay_28", near = "crosshair" }, "near is not allowed with container " .. KEYS },
+                { "absolute", "container with absolute", { host = HOST, container = VB, after = "Overlay_28", absolute = { anchor = "center", x = 0, y = 0 } }, "absolute is not allowed with container " .. KEYS },
+                { "offset", "container with offset", { host = HOST, container = VB, after = "Overlay_28", offset = { x = 1, y = 1 } }, "offset is not allowed with container " .. KEYS },
                 { "hud", "container on the default host (hud)", { container = VB, after = "Overlay_28" }, "container is not available on host 'hud' (game screens only: createServer)" },
                 { "menu", "container on host menu", { host = "menu", container = VB, after = "Overlay_28" }, "container is not available on host 'menu' (game screens only: createServer)" },
                 { "journal", "container on host journal", { host = "journal", container = VB, after = "Overlay_28" }, "container is not available on host 'journal' (game screens only: createServer)" },
@@ -75,6 +81,21 @@ return function(X, GS)
                 pcall(U.panel.remove, pnl)
             else
                 check(false, "CASE %spanel could not create a panel: %s", P, firstLine(pnl))
+            end
+            -- inside a core list or row: refused the same way
+            local okL, lst = pcall(U.list.create, { id = "gins-list", place = { host = HOST, corner = "top-left" }, size = { w = 400, h = 300 } })
+            if okL then
+                case(P .. "list", "ui.text.create{ place = { list = <list>, container = ... } }", mk({ list = lst, container = VB }), E.err(PL .. "container is not allowed with list"))
+                local okR, rw = pcall(U.row.create, { id = "gins-row", place = { list = lst } })
+                if okR then
+                    case(P .. "row", "ui.text.create{ place = { row = <row>, container = ... } }", mk({ row = rw, container = VB }), E.err(PL .. "container is not allowed with row"))
+                    pcall(U.row.remove, rw)
+                else
+                    check(false, "CASE %srow could not create a row: %s", P, firstLine(rw))
+                end
+                pcall(U.list.remove, lst)
+            else
+                check(false, "CASE %slist could not create a list: %s", P, firstLine(lst))
             end
             -- controls: a valid one (pending: no screen open here), a bad place on it, isShown, remove, core.has
             local h
@@ -111,12 +132,10 @@ return function(X, GS)
         end
         return nil
     end
-    -- A child's element id (one of ours: from its tag) or nil.
+    -- A child's element id (one of ours, any core class: from its tag) or nil.
     local function idOf(c)
-        local cls = try(function() return c:GetClass():GetFName():ToString() end)
-        if cls ~= TEXT_SHORT then return nil end
-        local t = try(function() return c.ToolTipText:ToString() end)
-        return t and t:match("^" .. LOWER .. ":[^:]+:(.+)$") or nil
+        local t = try(function() return X.tagOfWidget(c) end)
+        return type(t) == "string" and t:match("^" .. LOWER .. ":[^:]+:(.+)$") or nil
     end
     local function slotKey(c)
         local s = prop(c, "Slot")
@@ -143,7 +162,7 @@ return function(X, GS)
     local function names(l) local t = {} for _, e in ipairs(l) do t[#t + 1] = e.name end return table.concat(t, ",") end
 
     function IN.build()
-        local S = { ev = {}, opens = {}, kPaths = {}, ePaths = {} }
+        local S = { ev = {}, opens = {}, kPaths = {}, ePaths = {}, late = {}, cbn = 0 }
         local function count(e) local n = 0 for _, x in ipairs(S.ev) do if x.event == e then n = n + 1 end end return n end
         local function lastOf(e) for i = #S.ev, 1, -1 do if S.ev[i].event == e then return S.ev[i] end end return nil end
         local function screen() return liveOf(U8.CS_SHORT) end
@@ -161,15 +180,19 @@ return function(X, GS)
         end
         local function shot(label) step("gi: shot " .. label, function() return X.request("shot " .. label), 30, "screenshot " .. label end) end
         local function settle(label, sec) step("gi: settle " .. label, function() return msAfter(sec), sec + 3 end) end
-        -- The wanted order: the snapshot's game rows with five knobs after Overlay_28, fourteen enemies after
-        -- Overlay_738, the unknown anchor's text last.
+        -- The wanted order: the snapshot's game rows with five knobs (and the late texts) after Overlay_28, fourteen
+        -- enemies after Overlay_738, then the checkbox (at end) and the unknown anchor's text, in creation order.
         local function wanted()
             local t = {}
             for _, g in ipairs(S.snap) do
                 t[#t + 1] = g.name
-                if g.name == "Overlay_28" then for i = 1, 5 do t[#t + 1] = "gi-k" .. i end end
+                if g.name == "Overlay_28" then
+                    for i = 1, 5 do t[#t + 1] = "gi-k" .. i end
+                    for i = 1, #S.late do t[#t + 1] = "gi-n" .. i end
+                end
                 if g.name == "Overlay_738" then for i = 1, 14 do t[#t + 1] = "gi-e" .. i end end
             end
+            t[#t + 1] = "gi-cb"
             t[#t + 1] = "gi-xa"
             return table.concat(t, ",")
         end
@@ -199,6 +222,7 @@ return function(X, GS)
                 label, tostring(kIdx), orderOk and "" or (": got " .. got))
             check(slotsOk, "GISLOTS %s: %d game rows in their order with the snapshot's slot values%s", label, #games, slotsOk and "" or (": " .. tostring(bad)))
             check(one and seen["gi-xc"] == nil, "GIONE %s: one widget per element (%d ids), none for the unknown container's", label, #S.ids)
+            S.lastList = got
             return orderOk and slotsOk and one, l
         end
 
@@ -271,6 +295,11 @@ return function(X, GS)
             if S.abort then return end
             local T = core().ui.text
             S.k, S.e, S.ids = {}, {}, {}
+            S.rc = rebuilds()
+            -- the checkbox first: at the end, before the unknown anchor's text (creation order)
+            S.cb = core().ui.checkbox.create{ id = "gi-cb", place = { host = HOST, container = VB, at = "end" },
+                onChange = function(_, val) S.cbn = S.cbn + 1; S.cbv = val end }
+            S.ids[#S.ids + 1] = "gi-cb"
             for i = 1, 5 do
                 S.k[i] = T.create{ id = "gi-k" .. i, text = "SKEL KNOB " .. i, place = { host = HOST, container = VB, after = "Overlay_28" } }
                 S.ids[#S.ids + 1] = "gi-k" .. i
@@ -282,8 +311,24 @@ return function(X, GS)
             S.xa = T.create{ id = "gi-xa", text = "SKEL NO ANCHOR", place = { host = HOST, container = VB, after = "Overlay_NOPE" } }
             S.ids[#S.ids + 1] = "gi-xa"
             S.xc = T.create{ id = "gi-xc", text = "SKEL NO BOX", place = { host = HOST, container = "VerticalBox_NOPE", after = "Overlay_28" } }
-            check(T.isShown(S.k[1]) and T.isShown(S.e[14]) and T.isShown(S.xa) and not T.isShown(S.xc),
-                "GICREATE 21 texts made while the screen is open: shown in %s, the unknown container's not", VB)
+            -- queued: nothing attached inside the call, no rebuild yet (Design Note 8)
+            S.inCall = not T.isShown(S.k[1]) and not T.isShown(S.xa) and not core().ui.checkbox.isShown(S.cb) and rebuilds() == S.rc
+        end)
+        step("gi: created on the tick", function()
+            if S.abort then return end
+            local deadline = os.clock() + 5
+            return function()
+                local T = core().ui.text
+                return (T.isShown(S.k[1]) and T.isShown(S.e[14]) and T.isShown(S.xa)) or os.clock() > deadline
+            end, 8, "created elements attached"
+        end)
+        step("gi: created tick check", function()
+            if S.abort then return end
+            local T = core().ui.text
+            local d = rebuilds() - S.rc
+            check(S.inCall and T.isShown(S.k[1]) and T.isShown(S.e[14]) and T.isShown(S.xa) and core().ui.checkbox.isShown(S.cb) and not T.isShown(S.xc) and d == 1,
+                "GICREATE 21 texts and a checkbox made while the screen is open: none attached in the call (%s), all on the next tick in %s, the unknown container's not; %d rebuild(s) for all",
+                tostring(S.inCall), VB, d)
         end)
         step("gi: created check", function()
             if S.abort then return end
@@ -306,8 +351,8 @@ return function(X, GS)
                 local new = kp ~= nil and ep ~= nil and not S.kPaths[kp] and not S.ePaths[ep]
                 if kp then S.kPaths[kp] = true end
                 if ep then S.ePaths[ep] = true end
-                check(new and T.isShown(S.k[1]) and T.isShown(S.xa) and not T.isShown(S.xc),
-                    "GINEW open %d: new widgets (%s), knob and unknown-anchor text shown, the unknown container's not", n, tostring(kp))
+                check(new and T.isShown(S.k[1]) and T.isShown(S.xa) and core().ui.checkbox.isShown(S.cb) and not T.isShown(S.xc),
+                    "GINEW open %d: new widgets (%s), knob, checkbox and unknown-anchor text shown, the unknown container's not", n, tostring(kp))
                 S.allOk = (S.allOk ~= false) and okV and d == 1 and new
             end)
             if n == 2 then shot("gi-open") end
@@ -338,6 +383,28 @@ return function(X, GS)
         end)
         settle("scroll", 1)
         shot("gi-configure")
+        -- The checkbox at the end of the list: scrolled into view, a real click runs its onChange once.
+        local function cbWidget() local vb = vbOf() return vb and (X.taggedIn(vb, "gi-cb")) end
+        step("gi: checkbox into view", function()
+            local s = screen()
+            local sb = s and rootOf(s) and findIn(rootOf(s), "ScrollBox_54")
+            local w = cbWidget()
+            local okS = sb ~= nil and w ~= nil and pcall(function() sb:ScrollWidgetIntoView(w, false, 0, 0) end)
+            if not okS and sb then pcall(function() sb:ScrollToEnd() end) end
+            S.cbn0 = S.cbn
+            say("GICBSCROLL into view %s", tostring(okS))
+        end)
+        settle("checkbox scroll", 1)
+        clickAt("checkbox", cbWidget)
+        settle("checkbox", 1)
+        step("gi: checkbox check", function()
+            check(S.cbn == S.cbn0 + 1 and S.cbv == true and core().ui.checkbox.get(S.cb) == true,
+                "GICB a real click on the checkbox in %s (at end) ran onChange once with true (%d call(s), %s)", VB, S.cbn - S.cbn0, tostring(S.cbv))
+            local s = screen()
+            local sb = s and rootOf(s) and findIn(rootOf(s), "ScrollBox_54")
+            if sb then pcall(function() sb:ScrollToStart() end) end
+        end)
+        settle("scroll back", 1)
         -- A picker's arrow that is drawn now (next, else prev): the box's Button / Button_60.
         local function arrowOf(boxName)
             local box = prop(screen(), boxName)
@@ -422,6 +489,36 @@ return function(X, GS)
             verify("after the preset")
         end)
         shot("gi-preset")
+        -- With Lobby Time at a non-default value, a dependent makes two more texts while the screen is open: on the
+        -- next tick they are in place after one rebuild, and Lobby Time (a rebuilt row) still shows the player's value.
+        step("gi: late creates", function()
+            if S.abort then return end
+            S.lobbyL = optionOf("MultipleSelectBox_5")
+            S.rl = rebuilds()
+            local T = core().ui.text
+            for i = 1, 2 do
+                S.late[i] = T.create{ id = "gi-n" .. i, text = "SKEL LATE " .. i, place = { host = HOST, container = VB, after = "Overlay_28" } }
+                S.ids[#S.ids + 1] = "gi-n" .. i
+            end
+            S.lateInCall = not T.isShown(S.late[1]) and rebuilds() == S.rl
+        end)
+        step("gi: late tick", function()
+            if S.abort then return end
+            local deadline = os.clock() + 5
+            return function() return core().ui.text.isShown(S.late[2]) or os.clock() > deadline end, 8, "late texts attached"
+        end)
+        settle("late", 0.5)
+        step("gi: late check", function()
+            if S.abort then return end
+            local now = optionOf("MultipleSelectBox_5")
+            local d = rebuilds() - S.rl
+            local okV = verify("after the late creates")
+            check(S.lobbyL ~= nil and S.lobbyL ~= S.lobby0, "GILATELOBBY Lobby Time at a non-default value before the creates (%s; %s at open)", tostring(S.lobbyL), tostring(S.lobby0))
+            check(S.lateInCall and okV and d == 1, "GILATE two texts made while open: not attached in the call (%s), in place after the knobs on the next tick, %d rebuild(s) for both",
+                tostring(S.lateInCall), d)
+            check(now ~= nil and now == S.lobbyL, "GILATEKEEP Lobby Time (a rebuilt row) still shows %s after the rebuild (now %s)", tostring(S.lobbyL), tostring(now))
+        end)
+        shot("gi-late")
         clickAt("CONFIRM WORLD SETTINGS", function() return prop(screen(), "Create_3") end)
         settle("confirm", 1)
         backOnce("menu1", FINAL)
@@ -432,6 +529,8 @@ return function(X, GS)
             for _, h in ipairs(S.k or {}) do pcall(T.remove, h) end
             for _, h in ipairs(S.e or {}) do pcall(T.remove, h) end
             pcall(T.remove, S.xa); pcall(T.remove, S.xc)
+            for _, h in ipairs(S.late) do pcall(T.remove, h) end
+            pcall(core().ui.checkbox.remove, S.cb)
             pcall(core().ui.game.unwatch, S.tok)
         end)
     end

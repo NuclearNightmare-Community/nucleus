@@ -3,7 +3,10 @@
 -- screen's settings list: CanvasPanel_21 > Overlay_0 > ScrollBox_54 > VerticalBox_202 holding 26 game rows, each with
 -- its own slot values. This checks core's own logic: P.insertOrder (the positions), the intent's validation, and the
 -- insert pass (one rebuild for two anchors, slot values kept, none when already ordered, ten opens without duplicates,
--- one WARN per unknown anchor or container, place and remove); the in-game proof is run.ps1 -Scenario gameinsert.
+-- one WARN per unknown anchor or container, place and remove; review loop 1: the rows' pickers keep their value across
+-- the rebuild, a create / place while open is queued to the next tick (one pass for several), a ScrollBox container,
+-- a checkbox and a button in the container, the refusals with near / absolute / list / row); the in-game proof is
+-- run.ps1 -Scenario gameinsert.
 -- Run from the repo root with any standalone Lua 5.3 or 5.4:  lua test/unit/insert_test.lua  (here: MiKTeX's texlua)
 local ROOT = (arg and arg[0] or ""):match("^(.*)[/\\]test[/\\]unit[/\\][^/\\]+$") or "."
 
@@ -565,7 +568,9 @@ function I.box(cls, path, horiz)
     function b:AddChild(w)
         if w.parent then w:RemoveFromParent() end
         I.adds = I.adds + 1
-        return add(self, w)
+        local sl = add(self, w)
+        if w.onAdded then w:onAdded() end -- UMG rebuilds a re-added widget: a user widget's PreConstruct runs again
+        return sl
     end
     function b:RemoveChild(w)
         for i, c in ipairs(self.children) do
@@ -580,8 +585,20 @@ function I.slotOf(i)
     return { Padding = { Left = i, Top = i + 0.5, Right = 2 * i, Bottom = 3 }, HorizontalAlignment = i % 4, VerticalAlignment = (i + 1) % 4,
         Size = { SizeRule = i % 2, Value = 1 + i / 10 } }
 end
+-- The game's picker (MultipleSelectBox_C): GetSelectedIndex, SetSelectedOption (no broadcast), and PreConstruct, which
+-- puts back DefaultOption (MultipleSelectBox_C.cpp:76) whenever the widget is rebuilt (a re-add).
+function I.picker(path, def)
+    local pk = widget("MultipleSelectBox_C", path)
+    pk.def, pk.sel, pk.pre, pk.sets = def, def, 0, 0
+    function pk:GetSelectedIndex() return self.sel end
+    function pk:SetSelectedOption(i) self.sel = i; self.sets = self.sets + 1 end
+    function pk:PreConstruct() self.sel = self.def; self.pre = self.pre + 1 end
+    return pk
+end
+-- rows with a picker: Difficulty (MultipleSelectBox_6, default 1 Normal) and Lobby Time (MultipleSelectBox_5, default 0)
+I.PICKERS = { Overlay_28 = { "MultipleSelectBox_6", 1 }, Overlay_27 = { "MultipleSelectBox_5", 0 } }
 -- CreateServer_C as the game builds it: CanvasPanel_21 > Overlay_0 > ScrollBox_54 > VerticalBox_202 (26 rows), an empty
--- HorizontalBox_9, and Image_5 (not a box)
+-- HorizontalBox_9, and Image_5 (not a box). VerticalBox_202's own slot in the ScrollBox has its own values.
 do
     local baseCS = T.newCS
     T.newCS = function(n, opts)
@@ -597,8 +614,22 @@ do
         sb:AddChild(vb)
         local hb = I.box("HorizontalBox", p .. "HorizontalBox_9", true)
         ov:AddChild(hb)
+        local vs = vb.Slot
+        vs.Padding, vs.HorizontalAlignment, vs.VerticalAlignment, vs.Size = { Left = 7, Top = 8, Right = 9, Bottom = 10 }, 2, 3, { SizeRule = 1, Value = 0.5 }
+        s.pickers = {}
         for i, nm in ipairs(I.ROWS) do
-            local r = widget("Overlay", p .. nm)
+            local r
+            if I.PICKERS[nm] then
+                r = I.box("Overlay", p .. nm)
+                local inner = I.box("HorizontalBox", p .. nm .. "_HB", true)
+                r:AddChild(inner)
+                local pk = I.picker(p .. I.PICKERS[nm][1], I.PICKERS[nm][2])
+                inner:AddChild(pk)
+                s.pickers[nm] = pk
+                function r:onAdded() pk:PreConstruct() end
+            else
+                r = widget("Overlay", p .. nm)
+            end
             local sl = vb:AddChild(r)
             local v = I.slotOf(i)
             sl.Padding, sl.HorizontalAlignment, sl.VerticalAlignment, sl.Size = v.Padding, v.HorizontalAlignment, v.VerticalAlignment, v.Size
@@ -763,17 +794,25 @@ X._insertPass(CSH, s1, nil, "test")
 ok(I.rebuilds() == r1 and I.removes == 0 and I.list(s1.vb) == I.wantOrder(), "a second pass on an ordered box: no rebuild, nothing removed")
 
 -- made while open: an unknown anchor (end, one WARN), an unknown container (not attached, one WARN), a widget that isn't a box
+-- (each queued to the host's next poll tick)
 local xa = X.create{ id = "xa", text = "NOPE ANCHOR", place = { host = CSH, container = VB, after = "Overlay_NOPE" } }
-ok(I.list(s1.vb) == I.wantOrder({ "xa" }) and X.isShown(xa) == true, "unknown anchor: at the end of the container", I.list(s1.vb))
+ok(I.list(s1.vb) == I.wantOrder() and X.isShown(xa) == false and C.els.xa.ref == nil, "made while open: nothing in the dependent's call (queued)")
+tick()
+ok(I.list(s1.vb) == I.wantOrder({ "xa" }) and X.isShown(xa) == true, "unknown anchor: at the end of the container on the next tick", I.list(s1.vb))
 ok(I.rebuilds() == r1, "unknown anchor while open: appended, no rebuild")
 ok(countLogs("WARN ui createServer: anchor 'Overlay_NOPE' is not a child of 'VerticalBox_202'") == 1, "unknown anchor: one WARN naming it")
 local xc = X.create{ id = "xc", text = "NOPE BOX", place = { host = CSH, container = "VerticalBox_NOPE", after = "Overlay_28" } }
+tick()
 ok(X.isShown(xc) == false and C.els.xc.ref == nil and C.els.xc.attached == false, "unknown container: not attached, isShown false")
 ok(countLogs("WARN ui createServer: container 'VerticalBox_NOPE' is missing") == 1 and countLogs("'xc'") >= 1, "unknown container: one WARN naming it and the element")
 local xi = X.create{ id = "xi", text = "NOT A BOX", place = { host = CSH, container = "Image_5", at = "end" } }
-ok(X.isShown(xi) == false and countLogs("container 'Image_5' is missing (it is a Image, not a VerticalBox, HorizontalBox or ScrollBox") == 1, "a container that is not a box: missing, one WARN")
+tick()
+ok(X.isShown(xi) == false and countLogs("WARN ui createServer: 'Image_5' is a Image, not VerticalBox, HorizontalBox or ScrollBox; 'xi' stay(s) pending") == 1,
+    "a container that is not a box: one WARN saying what it is (not 'missing')")
+ok(countLogs("container 'Image_5' is missing") == 0, "a container that is not a box: not called missing")
 -- a HorizontalBox works too
 local hx = X.create{ id = "hx", text = "IN HB", place = { host = CSH, container = "HorizontalBox_9", at = "end" } }
+tick()
 ok(I.list(s1.hb) == "hx" and X.isShown(hx) == true, "a HorizontalBox container: attached", I.list(s1.hb))
 
 -- Back: closed; handles freed
@@ -841,14 +880,18 @@ do
     -- place: before Overlay_10 (index 1's gap: k1 is older than ib, so first)
     local rb = I.rebuilds()
     P.place(K[1], { host = CSH, container = VB, before = "Overlay_10" })
+    ok(I.count(vb, "k1") == 0 and I.rebuilds() == rb, "place into a container while open: taken out now, put back on the next tick (no rebuild in the call)")
+    tick()
     names = I.names(vb)
     ok(names[1] == "k1" and names[2] == "ib" and I.count(vb, "k1") == 1, "place: k1 moves before Overlay_10 (creation order before ib)", I.list(vb))
     ok(I.rebuilds() == rb + 1, "place: one rebuild")
     P.place(K[1], { host = CSH, container = VB, before = "Overlay_10" })
+    tick()
     ok(I.rebuilds() == rb + 1 and I.names(vb)[1] == "k1", "place: the same intent changes nothing")
     P.place(K[1], { host = CSH, corner = "top-left" })
     ok(I.count(vb, "k1") == 0 and T.inCanvas(s, "k1") ~= nil and X.isShown(K[1]) == true, "place: out of the container into a corner")
     P.place(K[1], { host = CSH, container = VB, after = "Overlay_28" })
+    tick()
     ok(T.inCanvas(s, "k1") == nil and I.indexOf(vb, "k1") == I.indexOf(vb, "Overlay_28") + 1 and I.indexOf(vb, "k2") == I.indexOf(vb, "k1") + 1,
         "place: back after Overlay_28, first of the knobs again (creation order)", I.list(vb))
     g, why = I.gameOk(vb)
@@ -872,6 +915,103 @@ do
     ok(I.indexOf(s.vb, "k1") == 2, "a fresh open after the moves: knobs back at 2-6", I.list(s.vb))
     s:RemoveFromParent()
     tick()
+end
+
+-- ---- review loop 1: the rows' pickers keep their value across the rebuild (Design Note 7)
+do
+    local s = T.open(150)
+    -- CreateServer's Construct sets the pickers from the GameInstance (SetSelectedOption, before core's opened)
+    s.pickers.Overlay_27:SetSelectedOption(3)
+    s.pickers.Overlay_28:SetSelectedOption(2)
+    local pre27, pre28 = s.pickers.Overlay_27.pre, s.pickers.Overlay_28.pre
+    tick()
+    ok(I.list(s.vb) == I.wantOrder({ "xa" }), "pickers: the list in its order", I.list(s.vb))
+    ok(s.pickers.Overlay_27.pre == pre27 + 1, "pickers: Lobby Time's row was re-added (its PreConstruct ran again)")
+    ok(s.pickers.Overlay_27.sel == 3, "pickers: a rebuilt row's picker keeps its value (Lobby Time 3, not its default 0)", s.pickers.Overlay_27.sel)
+    ok(s.pickers.Overlay_28.pre == pre28 and s.pickers.Overlay_28.sel == 2, "pickers: Difficulty (before the first change) is not rebuilt and keeps its value")
+    -- the player changes Lobby Time, then a dependent makes two elements while open: one pass on the next tick
+    s.pickers.Overlay_27:SetSelectedOption(5)
+    local rb, sets = I.rebuilds(), s.pickers.Overlay_27.sets
+    local n1 = X.create{ id = "n1", text = "NEW 1", place = { host = CSH, container = VB, after = "Overlay_28" } }
+    local n2 = X.create{ id = "n2", text = "NEW 2", place = { host = CSH, container = VB, after = "Overlay_28" } }
+    local n3 = X.create{ id = "n3", text = "NEW 3", place = { host = CSH, container = VB, after = "Overlay_28" } }
+    ok(I.rebuilds() == rb and I.count(s.vb, "n1") == 0 and X.isShown(n1) == false, "three creates while open: no rebuild, nothing attached until the tick")
+    tick()
+    ok(I.rebuilds() == rb + 1, "three creates while open: one rebuild on the next tick", I.rebuilds() - rb)
+    ok(I.indexOf(s.vb, "n1") == I.indexOf(s.vb, "k5") + 1 and I.indexOf(s.vb, "n3") == I.indexOf(s.vb, "n1") + 2 and X.isShown(n3) == true,
+        "three creates while open: in place after the knobs, creation order", I.list(s.vb))
+    ok(s.pickers.Overlay_27.sel == 5 and s.pickers.Overlay_27.sets == sets + 1, "three creates while open: Lobby Time still shows the player's value (put back once)")
+    local g, why = I.gameOk(s.vb)
+    ok(g, "three creates while open: game rows' order and slot values kept", why)
+    tick(); tick()
+    ok(I.rebuilds() == rb + 1, "three creates while open: no further pass on later ticks")
+    X.remove(n1); X.remove(n2); X.remove(n3)
+    s:RemoveFromParent()
+    tick()
+end
+-- the same without the restore: the picker would show its default (the check above fails without restorePickers)
+do
+    local s = T.open(151)
+    s.pickers.Overlay_27:SetSelectedOption(3)
+    local box = s.vb
+    local row
+    for _, c in ipairs(box.children) do if I.nameOf(c) == "Overlay_27" then row = c end end
+    box:RemoveChild(row); box:AddChild(row)
+    ok(s.pickers.Overlay_27.sel == 0, "pickers (the fake): a plain re-add resets the picker to its default")
+    s:RemoveFromParent()
+    tick()
+end
+
+-- ---- review loop 1: a ScrollBox container (position and slot values)
+do
+    local sx = X.create{ id = "sx", text = "IN SCROLL", place = { host = CSH, container = "ScrollBox_54", index = 1 } }
+    local s = T.open(160)
+    tick()
+    local sb = s.vb.parent
+    ok(I.list(sb) == "sx,VerticalBox_202", "ScrollBox: index 1 before its game child", I.list(sb))
+    local vs = s.vb.Slot
+    ok(vs.Padding.Left == 7 and vs.Padding.Top == 8 and vs.Padding.Right == 9 and vs.Padding.Bottom == 10 and vs.HorizontalAlignment == 2
+        and vs.VerticalAlignment == 3 and vs.Size.SizeRule == 1 and vs.Size.Value == 0.5, "ScrollBox: the re-added game child keeps its slot values")
+    ok(X.isShown(sx) == true, "ScrollBox: isShown true")
+    ok(I.list(s.vb) == I.wantOrder({ "xa" }), "ScrollBox: the list inside it still in order", I.list(s.vb))
+    X.remove(sx)
+    s:RemoveFromParent()
+    tick()
+end
+
+-- ---- review loop 1: a checkbox and a button in the container (attached, shown, the checkbox takes a click)
+do
+    T.log = {}
+    local cb = CK.create{ id = "icb", place = { host = CSH, container = VB, at = "end" }, onChange = function(h, v) T.log[#T.log + 1] = { h = h, v = v } end }
+    local bt = T.BN.create{ id = "ibt", label = "GO", place = { host = CSH, container = VB, after = "Overlay_33" }, onClick = function() T.log[#T.log + 1] = "click" end }
+    local s = T.open(170)
+    tick()
+    local names = I.names(s.vb)
+    ok(names[#names] == "icb" and I.indexOf(s.vb, "ibt") == I.indexOf(s.vb, "Overlay_33") + 1, "checkbox at end and button after Overlay_33: in place", I.list(s.vb))
+    ok(CK.isShown(cb) == true and T.BN.isShown(bt) == true, "checkbox and button: isShown true")
+    local cw
+    for _, c in ipairs(s.vb.children) do if I.nameOf(c) == "icb" then cw = c end end
+    T.fire(T.CLICK, cw)
+    ok(CK.get(cb) == true and #T.log == 1 and T.log[1].v == true, "checkbox in the container: a click runs onChange once")
+    CK.remove(cb); T.BN.remove(bt)
+    s:RemoveFromParent()
+    tick()
+end
+
+-- ---- review loop 1: refusals of container with near, absolute, offset, list and row
+do
+    local function bad(intent, text, name)
+        raises(function() X.create{ id = "badins2", place = intent } end, PL .. text, "validate: " .. name)
+    end
+    bad({ host = CSH, container = VB, after = "A", near = "crosshair" }, "near is not allowed with container", "container with near")
+    bad({ host = CSH, container = VB, after = "A", absolute = { anchor = "center", x = 0, y = 0 } }, "absolute is not allowed with container", "container with absolute")
+    bad({ host = CSH, container = VB, after = "A", offset = { x = 1, y = 1 } }, "offset is not allowed with container", "container with offset")
+    local lh = LS.create{ id = "inslist", place = { host = CSH, corner = "top-left" }, size = { w = 400, h = 300 } }
+    raises(function() X.create{ id = "badins2", place = { list = lh, container = VB } } end, PL .. "container is not allowed with list", "validate: container inside a core list")
+    local rh = RS.create{ id = "insrow", place = { list = lh } }
+    raises(function() X.create{ id = "badins2", place = { row = rh, container = VB } } end, PL .. "container is not allowed with row", "validate: container inside a core row")
+    RS.remove(rh); LS.remove(lh)
+    ok(C.els.badins2 == nil, "validate: the refused calls created nothing")
 end
 
 -- ---- stats and features
