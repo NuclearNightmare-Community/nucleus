@@ -5299,7 +5299,23 @@ local function buildMenu()
             local ro = KB.mmRow(other)
             local bs = try(function() return oname(rs.Background.Background.ResourceObject) end) or "?"
             local bo = try(function() return oname(ro.Background.Background.ResourceObject) end) or "?"
-            check(bs:find("M_NN_CinematicSelection", 1, true) ~= nil, "KLOOK row: the focused row kbm.r%d shows the selection (%s)", sel, bs)
+            local tg = require(LO .. ".ui.theme").game
+            if tg.focusRowStrong then
+                -- Core story 30: the strong look, an instance of the selection material with the theme's fill colours.
+                local mi = try(function() return rs.Background.Background.ResourceObject end)
+                local par = try(function() return oname(mi.Parent) end) or "?"
+                local mc = cname(mi) -- an unnamed instance is named MID_<parent>_<n>; its class tells
+                local want = tg.focusRowColors.CinematicBaseColor
+                local c = try(function() return mi:K2_GetVectorParameterValue(FName("CinematicBaseColor")) end)
+                local cr, cg, cb = try(function() return c.R end), try(function() return c.G end), try(function() return c.B end)
+                local near = function(a, b) return type(a) == "number" and math.abs(a - b) < 0.002 end
+                check(mc == "MaterialInstanceDynamic" and par:find("M_NN_CinematicSelection", 1, true) ~= nil
+                    and near(cr, want.r) and near(cg, want.g) and near(cb, want.b),
+                    "KLOOK row: the focused row kbm.r%d shows the strong selection (%s %s, parent %s, base %s,%s,%s)", sel, mc, bs, par,
+                    tostring(cr), tostring(cg), tostring(cb))
+            else
+                check(bs:find("M_NN_CinematicSelection", 1, true) ~= nil, "KLOOK row: the focused row kbm.r%d shows the selection (%s)", sel, bs)
+            end
             check(bo:find("M_NN_WornStrip", 1, true) ~= nil, "KLOOK row: the unfocused row kbm.r%d shows its worn strip (%s)", other, bo)
             local gs = childTagged(prop(rs, "HBox"), "kbm.g" .. sel)
             local go = childTagged(prop(ro, "HBox"), "kbm.g" .. other)

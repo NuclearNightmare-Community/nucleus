@@ -122,6 +122,50 @@ function A.sliderTemplate()
     return o
 end
 
+-- Core story 30 (0.12.2): the focused row's strong look, a dynamic instance of the selection material with
+-- theme.game.focusRowColors as its fill, or nil and why: "uncached" (cachedOnly, inside a hook, or core's own dispatch,
+-- and none alive: the UI tick creates it), "missing" (the selection material can't be loaded: assets.lua's WARN),
+-- "failed" (creating or colouring it failed: one WARN, not tried again in this Lua state). One instance per Lua state,
+-- shared by every row while it lives, kept only as a weak handle (a map change or GC may take it: created again).
+-- Unnamed (OptionalName None: a reused name collides) and transient. w: the world context (the row's widget).
+local KML = "/Script/Engine.Default__KismetMaterialLibrary"
+local MID_TRANSIENT = 1 -- EMIDCreationFlags::Transient: the transient package is its outer
+local midRef, midFailed = nil, false
+function A.focusRowMaterial(w, cachedOnly)
+    if midRef then
+        local ok, o = pcall(C.deref, midRef)
+        if ok and o then return o end
+        pcall(C.free, midRef)
+        midRef = nil
+    end
+    if midFailed then return nil, "failed" end
+    if cachedOnly or inHook() or C.inDispatch > 0 then return nil, "uncached" end
+    local m, why = A.get("mat:selection")
+    if not m then return nil, why end
+    local ok, mid = pcall(function()
+        local lib = C.found(KML)
+        if not lib then error("KismetMaterialLibrary is not there", 0) end
+        C.count()
+        local o = lib:CreateDynamicMaterialInstance(w, m, FName("None"), MID_TRANSIENT)
+        if not C.valid(o) then error("CreateDynamicMaterialInstance returned nothing", 0) end
+        for name, c in pairs(theme.game.focusRowColors) do
+            C.count(); o:SetVectorParameterValue(FName(name), { R = c.r, G = c.g, B = c.b, A = c.a })
+        end
+        return o
+    end)
+    if not ok then
+        midFailed = true
+        C.warnOnce("asset:focus row", "the focused row's strong look (an instance of %s) could not be made; focused rows show the plain selection: %s",
+            theme.game.materials.selection.name, (tostring(mid):match("^[^\n]*")))
+        return nil, "failed"
+    end
+    if C.ref then
+        local okR, h = pcall(C.ref, mid)
+        if okR then midRef = h end
+    end
+    return mid
+end
+
 -- Loads every game-look asset (fonts and materials), the engine font and the textures in use; extra(), when set,
 -- loads more (text.lua: core's widget classes in use). Never raises.
 A.extra = nil
@@ -146,6 +190,6 @@ function A.ensureLoadMapHook()
     end
 end
 
-function A._reset() for k in pairs(refs) do refs[k] = nil end for k in pairs(used) do used[k] = nil end loadMapHooked = false; tmplRef, tmplMissing = nil, false end -- unit tests
+function A._reset() for k in pairs(refs) do refs[k] = nil end for k in pairs(used) do used[k] = nil end loadMapHooked = false; tmplRef, tmplMissing = nil, false; midRef, midFailed = nil, false end -- unit tests
 A._used = used -- unit tests
 return A

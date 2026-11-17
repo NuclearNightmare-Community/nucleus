@@ -312,6 +312,20 @@ obj({
     end,
     SetInputMode_UIOnlyEx = function(_, pc, w, lock, flush) F.inputModes[#F.inputModes + 1] = { w = w, lock = lock, flush = flush } end,
 }, "/Script/UMG.Default__WidgetBlueprintLibrary")
+-- Core story 30: the material library; an instance records its parent and vector parameters. F.midFail: "create"
+-- (throws), "nil" (returns nothing) or "set" (SetVectorParameterValue throws).
+F.mids = {}
+obj({ CreateDynamicMaterialInstance = function(_, wc, parent, name, flags)
+    if F.midFail == "create" then error("CreateDynamicMaterialInstance: boom") end
+    if F.midFail == "nil" then return INVALID end
+    local mi = obj({ __class = "MaterialInstanceDynamic", Parent = parent, params = {}, wc = wc, name = name, flags = flags,
+        SetVectorParameterValue = function(self, n, c)
+            if F.midFail == "set" then error("SetVectorParameterValue: boom") end
+            self.params[n] = c
+        end })
+    F.mids[#F.mids + 1] = mi
+    return mi
+end }, "/Script/Engine.Default__KismetMaterialLibrary")
 
 -- ---------------------------------------------------------------- the modules under test
 local C = require("nucleus.ui.common")
@@ -986,6 +1000,8 @@ function T.gearOwn(id)
     return w ~= nil and w.colors ~= nil and w.colors[4] == 0 and w.colors[13] == 0 and T.near(w.content[1], T.DIM.r) and T.near(w.content[5], T.DIM.r)
         and w.focusLook == false
 end
+theme.game.focusRowStrong = false -- core story 30: story 28's block proves 0.12.1's look (the switch off)
+T.mids28 = #F.mids
 do
     local R = SC.open{ id = "R28" }
     local wr = T.screenOf("R28")
@@ -1172,6 +1188,115 @@ do
     F.missing[SELP] = nil
     require("nucleus.ui.assets")._reset()
     ok(FO.stats().faults == 0, "story 28: no fault in the focus path")
+end
+ok(#F.mids == T.mids28, "story 28 (switch off): no instance created", #F.mids - T.mids28)
+theme.game.focusRowStrong = true
+
+-- ---------------------------------------------------------------- core story 30: the strong full-row look
+function T.strong(id) local m = T.matOf(id) return m ~= nil and m.__class == "MaterialInstanceDynamic" and m.Parent == T.SEL end
+do
+    local AS = require("nucleus.ui.assets")
+    AS._reset()
+    for k in pairs(F.mids) do F.mids[k] = nil end
+    local g = theme.game
+    local R = SC.open{ id = "R30" }
+    local wr = T.screenOf("R30")
+    local rec = C.windows["R30"]
+    local L = LS.create{ id = "r30l", place = { screen = R, corner = "top-left" }, size = { 600, 400 } }
+    local rows = {}
+    for i = 1, 3 do
+        rows[i] = RS.create{ id = "r30r" .. i, place = { list = L } }
+        X.create{ id = "r30n" .. i, text = "MOD " .. i, place = { row = rows[i], fill = 4 } }
+        B.create{ id = "r30g" .. i, place = { row = rows[i] }, icon = { icon = "gear" }, iconSize = 28, dimmed = true, onClick = T.rec("r30g" .. i) }
+    end
+    tick()
+    -- Strong on (default): r1 shows the instance (parent the selection, theme fill colours, focusRowTint), others the strip
+    local mi = T.matOf("r30r1")
+    ok(T.agree("r30g1") and T.strong("r30r1") and T.strip("r30r2") and T.strip("r30r3") and rec.lookRowId == "r30r1",
+        "story 30 open: the focused row shows the strong instance, the others the worn strip", tostring(mi and mi.__class))
+    local function colourIs(c, t) return c ~= nil and T.near(c.R, t.r) and T.near(c.G, t.g) and T.near(c.B, t.b) and T.near(c.A, t.a) end
+    ok(mi and colourIs(mi.params.CinematicBaseColor, g.focusRowColors.CinematicBaseColor) and colourIs(mi.params.CinematicWearColor, g.focusRowColors.CinematicWearColor),
+        "story 30 open: the instance's fill colours are the theme's")
+    ok(mi and mi.name == "None" and mi.flags == 1 and mi.wc == T.tagged("r30r1"), "story 30 open: unnamed, transient, the row as world context")
+    ok(T.tintIs(T.tagged("r30r1").matTint, g.focusRowTint) and T.gearFaced("r30g1"), "story 30 open: in focusRowTint; the gear's face unchanged")
+    -- DOWN: r2 strong, r1 its own worn strip (same tint, padding); the instance reused
+    local r1w = T.tagged("r30r1")
+    local pad = r1w.pad
+    ok(T.key(wr, D.down, INV_ACT) and T.agree("r30g2") and T.strong("r30r2") and T.strip("r30r1") and rec.lookRowId == "r30r2",
+        "story 30 Down: row 2 strong, row 1 its worn strip")
+    ok(T.tintIs(r1w.matTint, g.rowTint) and r1w.pad == pad, "story 30 Down: row 1's strip in its own tint and padding")
+    T.key(wr, D.down, INV_ACT); T.key(wr, D.up, INV_ACT); T.key(wr, D.up, INV_ACT)
+    ok(T.agree("r30g1") and T.strong("r30r1") and #F.mids == 1 and T.matOf("r30r1") == mi, "story 30 reused: one instance across moves", #F.mids)
+    -- Re-style while focused: the tick puts the strong look back (same instance)
+    RS.setStyle(rows[1], { padding = "tight" })
+    ok(T.strip("r30r1"), "story 30 re-style: the row's own strip at once")
+    tick()
+    ok(T.strong("r30r1") and #F.mids == 1, "story 30 re-style: the tick puts the strong look back")
+    -- Instance collected (map change, GC): inside the OnNav hook the plain selection; the tick makes a new one
+    kill(mi)
+    T.key(wr, D.down, INV_ACT)
+    ok(T.agree("r30g2") and T.selected("r30r2") and T.tintIs(T.tagged("r30r2").matTint, g.rowTint) and #F.mids == 1,
+        "story 30 in a hook, no instance: the plain selection in rowTint, nothing created", #F.mids)
+    tick()
+    ok(T.strong("r30r2") and #F.mids == 2 and T.matOf("r30r2") == F.mids[2] and T.tintIs(T.tagged("r30r2").matTint, g.focusRowTint),
+        "story 30 collected: the tick makes a new instance and upgrades the row", #F.mids)
+    local n2 = T.tagged("r30r2").bgMatCalls or 0
+    tick()
+    ok((T.tagged("r30r2").bgMatCalls or 0) == n2, "story 30 tick: strong already, no widget call")
+    -- A click (a script hook) on another row with none alive: plain now, strong on the tick
+    kill(F.mids[2])
+    T.fire(T.CLICK, T.tagged("r30g3"))
+    ok(T.agree("r30g3") and T.selected("r30r3") and T.strip("r30r2") and #F.mids == 2, "story 30 click, no instance: the plain selection, nothing created in the hook", #F.mids)
+    tick()
+    ok(T.strong("r30r3") and #F.mids == 3, "story 30 click: the tick upgrades it", #F.mids)
+    -- Unfocus / close: the row's own background, no call on a dead row
+    local r3w = T.tagged("r30r3")
+    T.key(wr, D.down, INV_ACT)
+    ok(T.agree("#close:R30") and T.strip("r30r3") and rec.lookRowId == nil, "story 30 to BACK: the row's own strip")
+    T.key(wr, D.up, INV_ACT)
+    ok(T.agree("r30g3") and T.strong("r30r3"), "story 30 back up: strong again")
+    local calls = r3w.bgMatCalls
+    RS.remove(rows[3])
+    ok(rec.lookRowId ~= "r30r3" and r3w.bgMatCalls == calls, "story 30 row removed: no call on it", tostring(rec.lookRowId))
+    SC.close(R)
+    ok(rec.lookRowId == nil, "story 30 window closed: nothing recorded")
+    -- Creation fails (throws, returns nothing, a parameter setter throws): the plain selection, one WARN, not retried
+    for _, mode in ipairs({ "create", "nil", "set" }) do
+        AS._reset()
+        C.forgetWarning("asset:focus row")
+        F.midFail = mode
+        local nW = countLogs("strong look")
+        local made = #F.mids
+        local W = SC.open{ id = "R30" .. mode }
+        local Lf = LS.create{ id = "r30fl" .. mode, place = { screen = W, corner = "top-left" }, size = { 300, 200 } }
+        for i = 1, 2 do
+            local r = RS.create{ id = "r30f" .. mode .. i, place = { list = Lf } }
+            B.create{ id = "r30fg" .. mode .. i, place = { row = r }, icon = { icon = "gear" }, iconSize = 28, dimmed = true, onClick = T.rec("r30fg" .. mode .. i) }
+        end
+        tick()
+        ok(T.agree("r30fg" .. mode .. "1") and T.selected("r30f" .. mode .. "1") and T.tintIs(T.tagged("r30f" .. mode .. "1").matTint, g.rowTint),
+            "story 30 creation fails (" .. mode .. "): the plain selection")
+        tick(); T.key(T.screenOf("R30" .. mode), D.down, INV_ACT); tick()
+        ok(T.agree("r30fg" .. mode .. "2") and T.selected("r30f" .. mode .. "2") and countLogs("strong look") == nW + 1
+            and #F.mids - made == (mode == "set" and 1 or 0), "story 30 creation fails (" .. mode .. "): one WARN, not tried again", countLogs("strong look") - nW)
+        SC.close(W)
+    end
+    F.midFail = nil
+    -- Material missing: no row highlight (0.12.1 behaviour), assets.lua's WARN, no instance
+    AS._reset()
+    local SELP = "/Game/Graphics/MainMenu/Styles/Remaster/M_NN_CinematicSelection.M_NN_CinematicSelection"
+    F.missing[SELP] = true
+    local made = #F.mids
+    local M2 = SC.open{ id = "R30m" }
+    local Lm = LS.create{ id = "r30ml", place = { screen = M2, corner = "top-left" }, size = { 300, 200 } }
+    local rm = RS.create{ id = "r30mr", place = { list = Lm } }
+    B.create{ id = "r30mg", place = { row = rm }, icon = { icon = "gear" }, iconSize = 28, dimmed = true, onClick = T.rec("r30mg") }
+    tick()
+    ok(T.agree("r30mg") and T.strip("r30mr") and C.windows["R30m"].lookRowId == nil and #F.mids == made, "story 30 material missing: no row highlight, no instance")
+    SC.close(M2)
+    F.missing[SELP] = nil
+    AS._reset()
+    ok(FO.stats().faults == 0, "story 30: no fault in the focus path")
 end
 
 print(string.format("focus_test: %d passed, %d failed", pass, failN))
