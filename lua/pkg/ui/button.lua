@@ -324,13 +324,13 @@ function B._focusFace(el, w)
         local s, h, p = el.style, el.style.hover, el.style.pressed
         C.count(); w:SetColors(s.r, s.g, s.b, s.a, h.r, h.g, h.b, h.a, p.r, p.g, p.b, p.a, el.styledIconOnly and 0 or s.pad)
     end
-    el.faceOn = true -- only once the face is on: a failed one is tried again on the next tick
     if el.dimmed then
         local n, h = theme.white, theme.white
         if el.gameFace then n, h = g.text, g.textHover end
         el.colorKey = "focus"
         C.count(); w:SetContentColors(n.r, n.g, n.b, n.a, h.r, h.g, h.b, h.a)
     end
+    el.faceOn = true -- only once the whole face is on: a failed one is tried again on the next tick
     return true
 end
 
