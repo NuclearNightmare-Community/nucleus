@@ -63,8 +63,18 @@ C.SLIDER_SHORT = "WBP_" .. C.NAME .. "Slider_C"
 C.SLIDER_CLASS = C.SLIDER_PKG .. "." .. C.SLIDER_SHORT
 C.SLIDER_END_FN = C.SLIDER_CLASS .. ":" .. C.NAME .. "_OnSliderEnd"
 C.SLIDER_COMMIT_FN = C.SLIDER_CLASS .. ":" .. C.NAME .. "_OnSliderCommit"
-C.HOST_NAMES = "hud, journal, menu, screen" -- the hosts an intent can name (place.lua)
-C.CURSOR_HOSTS = "journal, menu, screen"    -- hosts with a cursor: buttons, lists and rows go there
+-- Core story 31 (UI-13, core 0.13.0): the game's own menu screens as hosts (game.lua), keyed by host name. The first
+-- and only one is the create-server screen, built new on every open from the menu's START GAME; its elements go in its
+-- root CanvasPanel (CanvasPanel_21). A later screen is one entry here plus its checks.
+C.CREATESERVER_PKG = "/Game/Graphics/MainMenu/CreateServer"
+C.CREATESERVER_SHORT = "CreateServer_C"
+C.CREATESERVER_CLASS = C.CREATESERVER_PKG .. "." .. C.CREATESERVER_SHORT
+C.GAME_SCREENS = { createServer = { pkg = C.CREATESERVER_PKG, short = C.CREATESERVER_SHORT, class = C.CREATESERVER_CLASS } }
+C.GAME_SCREEN_NAMES = "createServer"        -- the game screens game.watch / game.isOpen take
+C.HOST_NAMES = "createServer, hud, journal, menu, screen" -- the hosts an intent can name (place.lua)
+-- Hosts with a cursor: buttons, lists and rows go there. createServer has one too (X.checkHost refuses only hud); this
+-- text is kept as it was, since it appears in error texts that stay unchanged (story 31: add-only).
+C.CURSOR_HOSTS = "journal, menu, screen"
 
 -- An element's host key is "hud", "journal", "menu", or "screen#<window id>" for a window of the screen host: each
 -- window is a host of its own (its own canvas, corner stacks and settling), all of kind "screen".
@@ -73,8 +83,10 @@ function C.hostKind(host)
     return host
 end
 function C.windowHost(id) return "screen#" .. id end
--- Hosts whose elements default to the game's look (story 21) and that have a cursor.
-function C.gameHost(host) local k = C.hostKind(host) return k == "menu" or k == "screen" end
+-- Hosts whose elements default to the game's look (story 21) and that have a cursor; story 31: the game screens too.
+function C.gameHost(host) local k = C.hostKind(host) return k == "menu" or k == "screen" or C.gameScreen(k) end
+-- Core story 31: whether a host is one of the game's own screens (createServer).
+function C.gameScreen(host) return type(host) == "string" and rawget(C.GAME_SCREENS, host) ~= nil end
 
 -- Story 21: the windows of the screen host in this Lua state (screen.lua fills them; place.lua reads them to validate
 -- an intent's screen = <window handle>). id -> { id, handle, open, ref (the window widget's weak handle), z, ... }.

@@ -2,6 +2,22 @@
 
 All notable changes to Nucleus are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). From 0.5.0 a dependent's `need` and `dependsOn` are minimum versions (`>=0.5.0`), so a newer Nucleus never asks dependents to raise them. Up to 0.3.0, below 1.0.0 a dependent connected only to the same minor version (`need = "0.3.0"` accepted 0.3.x).
 
+## [0.13.0] - 2026-11-17
+
+Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
+
+For players: nothing changes on its own. Mods can now add their own text, buttons and controls to the game's create-server screen (START GAME), for example extra world settings.
+
+### Added
+
+- `core.ui.game`, the game's own menu screens as hosts, keyed by host name (core story 31, UI-13). The first and only one is `"createServer"`, the create-server screen that START GAME builds new on every open. `watch(host, fn)` returns a token; `fn(screen, info)` gets `info = { event, host, path, reason }` with `event` one of `opened` (the first 500 ms tick that sees a local player's screen in the viewport), `closed` (the screen left the viewport but still exists, as after Back) and `lost` (its object is gone, as after Create's map change, or a newer screen replaced it). The screen is passed only with `opened` and is valid only during that callback. A watcher added while a screen is open hears a synthetic `opened` on the next tick; a watcher that never heard `opened` hears no `closed` or `lost`; at most one event per host per tick; a throwing watcher is logged once and the others still run. `unwatch(token)` raises for a token `game.watch` never issued (an issued one again does nothing); `isOpen(host)`. Every function refuses before `connect` and off the game thread, and an unknown host raises `nucleus.ui.game.<fn>: unknown game screen <host> (valid: createServer)`.
+- The placement host `"createServer"`: text, buttons, panels, lists, rows, images, checkboxes, choices and sliders go on it with `corner` or `absolute` intents (`near` and `region` raise, `elements("createServer")` is empty). Every open gets new widgets in the screen's root canvas (`CanvasPanel_21`), in the game's look by default; on `closed` and `lost` only their handles are freed. Like the menu since 0.12.3, nothing is done inside one of the game's hooks: core registers no hook on the screen's class, and the elements arrive with `opened`, within about a second (one or two ticks) of the screen appearing.
+- Features `ui.game` and `ui.game.createServer` (`core.has`).
+
+### Changed
+
+- The `unknown host` error lists of `core.ui.place` and `core.ui.elements` now read `valid: createServer, hud, journal, menu, screen`. No other text changes (the "need a host with a cursor (journal, menu, screen)" texts stay as they were, although `createServer` has a cursor too).
+
 ## [0.12.3] - 2026-11-17
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.

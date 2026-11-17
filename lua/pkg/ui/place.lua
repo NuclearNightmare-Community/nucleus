@@ -94,7 +94,9 @@ local KEYS = {
 local ALL_KEYS = { host = true, corner = true, near = true, absolute = true, gap = true, side = true, align = true, offset = true, panel = true,
     region = true, inset = true, list = true, row = true, fill = true, screen = true }
 local ALL_KEY_NAMES = "absolute, align, corner, fill, gap, host, inset, list, near, offset, panel, region, row, screen, side"
+-- Core story 31: and the game screens (createServer).
 local HOSTS = { hud = true, journal = true, menu = true, screen = true }
+for k in pairs(C.GAME_SCREENS) do HOSTS[k] = true end
 -- Story 21: the containers an intent can name (one of them, alone; fill only with row) and a row child's fill weight.
 local CONTAINER_KEYS = { "panel", "list", "row" }
 local FILL_MIN, FILL_MAX = 0.1, 16
@@ -191,7 +193,7 @@ function P.validate(intent)
         if intent.region ~= nil then bad("region is not available on host '%s' (journal only)", host) end
         if intent.inset ~= nil then bad("inset is not available on host '%s' (journal only)", host) end
     end
-    if kind == "near" and (host == "menu" or host == "screen") then bad("near is not available on host '%s' (corner or absolute)", host) end
+    if kind == "near" and (host == "menu" or host == "screen" or C.gameScreen(host)) then bad("near is not available on host '%s' (corner or absolute)", host) end
 
     -- Story 21: each window is a host of its own ("screen#<id>"), so its corners stack apart from other windows'.
     local out = { host = win and C.windowHost(win.id) or host, window = win and win.id or nil }
@@ -1071,7 +1073,7 @@ function P.elements(...)
     if host == nil then host = "hud" end
     if type(host) ~= "string" or not HOSTS[host] then C.fail("%s.elements: unknown host %s (valid: %s)", C.UI, C.describe(host), C.HOST_NAMES) end
     local out = {}
-    if host == "menu" or host == "screen" then return out end -- story 21: no named elements there (corner, absolute)
+    if host == "menu" or host == "screen" or C.gameScreen(host) then return out end -- story 21, 31: no named elements there (corner, absolute)
     for k, v in pairs(host == "hud" and ELEMENTS or REGIONS) do out[k] = v.desc end
     return out
 end

@@ -22,7 +22,7 @@
 param(
     [string] $Instance,
     [string] $Log,
-    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'soak', 'manual', 'net-host', 'net-client', 'net-vanilla-host',
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'createserver', 'soak', 'manual', 'net-host', 'net-client', 'net-vanilla-host',
                  'presence-host', 'presence-client', 'presence-vanilla-host')]
     [string] $Scenario = 'skeleton',
     [ValidateSet('host', 'vm')] [string] $Target = 'host'
@@ -877,6 +877,54 @@ foreach ($id in 'gap-compact', 'gap-default', 'gap-row-compact', 'gap-tiny', 'ga
                 'has-focus', 'nav-offthread') {
     $menuChecks += "\[$T\] OK CASE menu3\.kb-$id "
 }
+# Core story 31 (UI-13, core 0.13.0): core.ui.game's bad-input group, in both worlds and off the game thread.
+$gameCaseIds = @('watch-nope', 'watch-num', 'watch-nil', 'watch-menu', 'watch-case', 'isopen-menu', 'isopen-nil', 'isopen-table', 'isopen-two',
+                 'watch-fn5', 'watch-nofn', 'watch-fnstr', 'watch-three', 'unwatch-forged', 'unwatch-menutoken', 'unwatch-float', 'unwatch-str',
+                 'unwatch-nil', 'unwatch-two', 'place-near', 'place-region', 'elements', 'isopen-ok', 'watch-ok', 'unwatch-ok', 'unwatch-again', 'has')
+foreach ($p in 'menu1', 'match1') {
+    foreach ($id in $gameCaseIds) { $badInput += "\[$T\] OK CASE $p\.ui-game-$id " }
+    foreach ($id in 'watch', 'unwatch', 'isopen') { $badInput += "\[$T\] OK CASE $p\.off-ui-game-$id " }
+}
+# Core story 31: the create-server screen as a host, one launch written for the VM at 1280x720 (run.ps1 -Scenario
+# createserver -Target vm). END result=PASS already means every check the test made passed; these name the ones the
+# acceptance criteria rest on.
+$createServer = $started + @(
+    "\[$T\] SCENARIO createserver "
+    "\[$T\] OK CSSETUP watcher, text and checkbox on host createServer before any key"
+    "\[$T\] OK CSNONE no create-server screen yet"
+    # AC 1: ten real opens and Backs: ten opened (each with the text and the checkbox in CanvasPanel_21, a new text
+    # widget each time), ten closed, ten distinct screens, no lost.
+    "#10|\[$T\] OK CSOPENED \d+ menu1: "
+    "#10|\[$T\] OK CSCLOSED-BACK \d+ closed "
+    "\[$T\] OK CSEVENTS 10 opens: opened=10 closed=10 lost=0"
+    "\[$T\] OK CSDISTINCT 10 opens, 10 distinct paths"
+    "\[$T\] OK CSNEWTEXT 10 opens, 10 distinct text widgets"
+    "\[$T\] OK CSNOLOST no lost before Create"
+    "\[$T\] OK CSCHECK a real click on the checkbox "
+    "#1|\[$T\] CSCHANGE 1 true"
+    # Poll-first (story 34): no hook on the screen's class.
+    "!Registered script hook .*CreateServer_C"
+    # AC 2: Create (friends-only only), the map change: closed or lost, no error after it; the next menu works.
+    "\[$T\] OK CSOPENED 11 create: "
+    "\[$T\] OK CSFRIENDS the screen is set to Friends-Only \(FriendsOnly=true, "
+    "\[$T\] WORLD match "
+    "\[$T\] OK CSCREATE after Create and the map change: (closed|lost) for the screen "
+    "\[$T\] OK CSMATCHNONE "
+    "\[$T\] CSMATCH window 1 "
+    "\[$T\] CSMATCH end "
+    "\[$T\] WORLD menu2 "
+    "\[$T\] OK CSOPENED 12 menu2: "
+    "\[$T\] OK CSMENU2 closed "
+    # AC 4: the bad-input group (before connect, on the game thread, off it).
+    "\[$T\] OK CASES game before-connect recorded=3"
+    "\[$T\] DEBUG hud tick n=\d+ "
+    "!\[$T\] WARN (?!$slowWarnOk)"
+    "!\[$T\] ERROR"
+    "\[$T\] END result=PASS"
+)
+foreach ($id in 'pre-game-watch', 'pre-game-unwatch', 'pre-game-isopen') { $createServer += "\[$T\] OK CASE $id " }
+foreach ($id in $gameCaseIds) { $createServer += "\[$T\] OK CASE menu1\.ui-game-$id " }
+foreach ($id in 'watch', 'unwatch', 'isopen') { $createServer += "\[$T\] OK CASE menu1\.off-ui-game-$id " }
 $manual = @(
     "\[$T\] SCENARIO manual "
     "\[$T\] CONNECT ok $N $Ver "
@@ -1000,6 +1048,7 @@ $expect = @{
     'ui'        = $ui
     'journal'   = $journal
     'menu'      = $menuChecks
+    'createserver' = $createServer
     'soak'      = $soak
     'manual'    = $manual
     'bad-input' = $badInput
@@ -1088,6 +1137,27 @@ if ($Scenario -eq 'menu') {
     $hooks = [Array]::FindIndex([string[]]$lines, [Predicate[string]]{ param($l) $l -match "\[$T\] ui menu hooks registered " })
     if ($startup -ge 0 -and $hooks -gt $startup) { Write-Host "ok:   core's menu hooks registered after the startup screen (line $($hooks + 1) > $($startup + 1))" }
     else { Write-Host "FAIL: core's menu hooks line ($($hooks + 1)) is not after the STARTUP line ($($startup + 1))"; $failed++ }
+}
+if ($Scenario -eq 'createserver') {
+    # Core story 31 AC 3: the poll's cost in the match after Create (no create-server screen, the game host still
+    # polled): the one-minute hud tick lines between "CSMATCH window 1" (logged after the first line in the match, which
+    # can hold ticks from before it) and "CSMATCH end" lie wholly in the match. UI-1's targets: poll avg < 100 us,
+    # steady max without a Lua GC step < 500 us; hard on the host, soft (warn) in the VM like the other timing checks.
+    $from = [Array]::FindIndex([string[]]$lines, [Predicate[string]]{ param($l) $l -match "\[$T\] CSMATCH window 1 " })
+    $to = [Array]::FindIndex([string[]]$lines, [Predicate[string]]{ param($l) $l -match "\[$T\] CSMATCH end " })
+    $windows = 0
+    if ($from -ge 0 -and $to -gt $from) {
+        foreach ($l in $lines[$from..$to]) {
+            if ($l -match "\[$T\] DEBUG hud tick n=(\d+) .*poll avg ([\d.]+) max (\d+), .*steady n=(\d+) avg ([\d.]+) max (\d+) us \(max (\d+) us without a Lua GC step; (\d+) tick\(s\) with one\), events n=(\d+)") {
+                $windows++
+                $ok = ([double]$Matches[2] -lt 100) -and ([int]$Matches[7] -lt 500)
+                $tag = if ($ok) { 'ok:  ' } elseif ($Target -eq 'vm') { 'warn:' } else { 'FAIL:' }
+                Write-Host ("{0} match window {1}: poll avg {2} max {3} us; steady n={4} avg {5} max {6} us, {7} us without a Lua GC step ({8} tick(s) with one); events n={9} (targets: poll avg < 100, steady max without GC < 500)" -f $tag, $windows, $Matches[2], $Matches[3], $Matches[4], $Matches[5], $Matches[6], $Matches[7], $Matches[8], $Matches[9])
+                if (-not $ok) { if ($Target -eq 'vm') { $warned++ } else { $failed++ } }
+            }
+        }
+    }
+    if ($windows -lt 1) { Write-Host "FAIL: no whole hud tick window in the match (between CSMATCH window 1 and CSMATCH end)"; $failed++ }
 }
 if ($Scenario -eq 'soak') {
     # Story 7 AC 7: the one-minute windows that lie wholly in the idle match (the first one after "SOAK idle" may

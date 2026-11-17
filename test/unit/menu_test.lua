@@ -684,7 +684,7 @@ raises(function() X.create{ id = "lc257", place = { list = l2 } } end, PL .. "li
 raises(function() X.create{ id = "t3", place = { host = "menu", near = "crosshair" } } end, PL .. "near is not available on host 'menu' (corner or absolute)", "near on menu")
 raises(function() X.create{ id = "t3", place = { screen = 5, corner = "top-left" } } end, PL .. "screen must be a window handle, got 5", "screen: not a window")
 raises(function() X.create{ id = "t3", place = { host = "screen", corner = "top-left" } } end, PL .. "host 'screen' needs screen = <window handle>", "host screen without a window")
-raises(function() X.create{ id = "t3", place = { host = "moon", corner = "top-left" } } end, PL .. "unknown host 'moon' (valid: hud, journal, menu, screen)", "unknown host")
+raises(function() X.create{ id = "t3", place = { host = "moon", corner = "top-left" } } end, PL .. "unknown host 'moon' (valid: createServer, hud, journal, menu, screen)", "unknown host")
 raises(function() X.create{ id = "t3", style = { look = "shiny" } } end, "nucleus.ui.text: unknown look 'shiny' (valid: game, plain)", "unknown look")
 raises(function() X.create{ id = "t3", style = { look = "game", font = "huge" } } end, "nucleus.ui.text: unknown font 'huge' (valid: title, heading, body, small)", "unknown font")
 raises(function() X.create{ id = "t3", style = { look = "plain", font = "title" } } end, "nucleus.ui.text: font needs look = 'game' (got look 'plain')", "font with the plain look")
