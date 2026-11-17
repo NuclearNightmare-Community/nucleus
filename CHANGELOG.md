@@ -2,6 +2,23 @@
 
 All notable changes to Nucleus are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). From 0.5.0 a dependent's `need` and `dependsOn` are minimum versions (`>=0.5.0`), so a newer Nucleus never asks dependents to raise them. Up to 0.3.0, below 1.0.0 a dependent connected only to the same minor version (`need = "0.3.0"` accepted 0.3.x).
 
+## [0.14.0] - 2026-11-17
+
+Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
+
+For players: nothing changes on its own. Mods can now put their own rows inside the create-server screen's world settings list, among the game's rows (for example right after Difficulty), instead of over the screen.
+
+### Added
+
+- A placement intent inside one of the game's own boxes on a game screen (core story 32, UI-14): `{ host = "createServer", container = "<game widget name>", after = "<name>" | before = "<name>" | index = n | at = "end" }`, for every element kind. `container` names a `VerticalBox`, `HorizontalBox` or `ScrollBox` in the open screen's widget tree by its widget name (never a path; for example `VerticalBox_202`, the world settings list); anchors name a direct child of it. Positions count the game's children only: `after` and `before` a named game child, `index = n` before the game's n-th child (1-based, 1 to 256), `at = "end"` after the last; several elements at one position keep their creation order, and another mod's core widgets in the box stay right after the game child they followed.
+- How it is done: box panels only append, so at the poll's `opened` (and on a create or place while the screen is open, never inside a hook of the game's) core attaches the elements of each box and rebuilds the box once: from the first child out of order, every child is removed and added back in the wanted order, each game child with its own slot values (padding, size, alignment) copied back. The game's rows are removed and re-added once per open that way and otherwise never changed; nothing is rebuilt when the order is already right.
+- Fallbacks: an anchor that isn't a child of the box puts the element at the end of the box, and an index past the box's last game child does the same; a container that isn't found (or isn't one of the three box classes) leaves the element unattached until the next open (`isShown` false). Each logs one `WARN` naming it, once per Lua state.
+- `core.ui.text.stats()` counts `containerRebuilds`. Feature `ui.place.container` (`core.has`).
+
+### Changed
+
+- The `unknown key` error of an intent lists the new keys: `valid keys: absolute, after, align, at, before, container, corner, fill, gap, host, index, inset, list, near, offset, panel, region, row, screen, side`. No other text changes. A `container` on the `hud`, `journal`, `menu` or `screen` host, with a corner, near or absolute key, or inside a core panel, list or row raises a clean `nucleus.ui.place: ...` error.
+
 ## [0.13.0] - 2026-11-17
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
