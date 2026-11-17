@@ -30,8 +30,9 @@
 -- back to the element's and the row's own style when focus leaves them (focus moves, the window widget takes it, the
 -- element goes, another window covers this one); the UI tick puts them back after a re-style. Core story 30 (0.12.2):
 -- with theme.game.focusRowStrong (default on) the row's highlight is a full-row band, an instance of that material with
--- its near-black fill lifted to theme colours (assets.lua A.focusRowMaterial); the instance is made only outside script
--- hooks, so inside one with none alive the row gets the plain selection and the UI tick upgrades it; off: 0.12.1's look.
+-- its near-black fill lifted to theme colours (assets.lua A.focusRowMaterial); the instance is never made inside core's
+-- own key and click handling, control dispatch or a Construct hook, so there, with none alive (after a map change or a
+-- garbage collection), the row gets the plain selection and the UI tick upgrades it; off: 0.12.1's look.
 -- A focused row inside a list is scrolled into view.
 -- Each window remembers its last-focused element (by id): after a close the next window down gets it back.
 local BASE = (...):gsub("%.ui%.focus$", "")
@@ -212,9 +213,11 @@ end
 -- clears the mark on any re-style); off: its own background (worn strip, colour or explicit background) through
 -- text.lua's own path. True when the row shows the highlight (on) or a live row was restored (off).
 -- Core story 30: with theme.game.focusRowStrong the highlight is the strong look (assets.lua A.focusRowMaterial, an
--- instance of the selection material with lifted fill colours, in focusRowTint); while that instance can't be had (a
--- hook with none alive, or it failed) the plain selection in rowTint. row.selBg records which ("strong" | "plain"), so
--- the UI tick (outside any hook) upgrades a plain one. hookDepth: inside this module's own script hooks (OnNav, a click).
+-- instance of the selection material with lifted fill colours, in focusRowTint); while that instance can't be had (none
+-- alive inside core's key or click handling, control dispatch or a Construct hook; or it failed) the plain selection in
+-- rowTint. row.selBg records which ("strong" | "plain"), so the UI tick upgrades a plain one. hookDepth: > 0 while this
+-- module's OnNav post-hook or F.used (a click, drag end, commit or arrow) runs; a dependent's callback after it is not
+-- counted.
 local hookDepth = 0
 local function rowLook(row, on)
     local w = widgetOf(row)
