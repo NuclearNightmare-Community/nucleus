@@ -596,10 +596,12 @@ $menuChecks = $started + @(
     "\[$T\] OK STARTUP before key: MainMenu_C in viewport=0 "
     "\[$T\] OK STARTUP menu\.isOpen=false, corner text isShown=false"
     # Core registers its menu hooks once, from a poll tick after the first MainMenu_C exists (line order checked below).
-    "#1|\[$T\] ui menu hooks registered \(MainMenu_C:Construct, CommonButtonBase:HandleButtonClicked\) after the first menu "
-    # The first menu gets its entry late (poll); the two menus after a map change inside Construct.
-    "#1|\[$T\] ui menu entry 'skel-entry' inserted between OPTIONS and QUIT in \S+ \(poll\), column grew "
-    "#2|\[$T\] ui menu entry 'skel-entry' inserted between OPTIONS and QUIT in \S+ \(construct\), column grew "
+    "#1|\[$T\] ui menu hooks registered \(CommonButtonBase:HandleButtonClicked\) after the first menu "
+    # Story 34: every menu gets its entry from the poll's opened (at most one 500 ms tick after it appears), the two
+    # menus after a map change too; no Lua runs inside MainMenu_C:Construct, so UE4SS never registers a hook on it.
+    "#3|\[$T\] ui menu entry 'skel-entry' inserted between OPTIONS and QUIT in \S+ \(poll\), column grew "
+    "!\[$T\] ui menu entry 'skel-entry' inserted .*\(construct\)"
+    "!Registered script hook .*MainMenu_C:Construct"
     "!\[$T\] WARN ui menu entry"
     "\[$T\] OK MOPEN menu\.isOpen\(\)=true"
     "\[$T\] OK MTEXT corner text isShown on the menu"

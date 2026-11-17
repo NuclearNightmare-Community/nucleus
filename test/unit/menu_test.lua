@@ -313,8 +313,10 @@ obj({ GetAsset = function(_, a)
     if F.missing[p] then return INVALID end
     return F.objects[p] or INVALID
 end }, "/Script/AssetRegistry.Default__AssetRegistryHelpers")
+F.creates = 0                    -- WidgetBlueprintLibrary:Create calls (story 34: none inside a menu's Construct)
 obj({
     Create = function(_, _, c)
+        F.creates = F.creates + 1
         if c == PANELCLASS then return newContainerW("WBP_NucleusPanel_C", "VBox", false) end
         if c == LISTCLASS then return newContainerW("WBP_NucleusList_C", "VBox", false) end
         if c == ROWCLASS then return newContainerW("WBP_NucleusRow_C", "HBox", true) end
@@ -366,6 +368,22 @@ local function tick() for _, f in ipairs(F.loops) do f() end end
 local function hookCount(sub) local n = 0 for _, h in ipairs(F.hooks) do if h.path:find(sub, 1, true) then n = n + 1 end end return n end
 local function fireHook(sub, w)
     for _, h in ipairs(F.hooks) do if h.path:find(sub, 1, true) then h.fn({ get = function() return w end }) end end
+end
+-- Story 34: counts every call that would change a menu's widget tree (column adds, a child taken out, page adds).
+local function spyMenu(m)
+    local spy = { n = 0 }
+    local vb = m.VerticalBox_104
+    for _, k in ipairs({ "AddChild", "AddChildToVerticalBox" }) do
+        local f = vb[k]
+        vb[k] = function(...) spy.n = spy.n + 1; return f(...) end
+    end
+    for _, c in ipairs(vb.children) do
+        local f = c.RemoveFromParent
+        c.RemoveFromParent = function(...) spy.n = spy.n + 1; return f(...) end
+    end
+    local f = m.page.AddChildToCanvas
+    if f then m.page.AddChildToCanvas = function(...) spy.n = spy.n + 1; return f(...) end end
+    return spy
 end
 
 C.bind{ mod = "TestMod", log = L, ref = ref, deref = deref, free = free, micros = micros }
@@ -423,11 +441,11 @@ ok(hookCount("MainMenu_C:Construct") == 0 and hookCount("HandleButtonClicked") =
 ok(#F.loadMap == 1, "startup: one LoadMap post-hook in the dependent's state")
 ok(#F.notify >= 1, "startup: menus learned from their creation")
 
--- ---------------------------------------------------------------- the first menu: hooks from the poll, entry late
+-- ---------------------------------------------------------------- the first menu: the click hook from the poll, entry late
 local m1 = build(1)
 tick()
-ok(hookCount("MainMenu_C:Construct") == 1 and hookCount("HandleButtonClicked") == 1, "first menu: both hooks registered from the poll")
-ok(countLogs("ui menu hooks registered (MainMenu_C:Construct, CommonButtonBase:HandleButtonClicked) after the first menu") == 1, "first menu: the hooks line")
+ok(hookCount("MainMenu_C:Construct") == 0 and hookCount("HandleButtonClicked") == 1, "first menu: the click hook from the poll, never a Construct hook (an entry and a menu text)")
+ok(countLogs("ui menu hooks registered (CommonButtonBase:HandleButtonClicked) after the first menu") == 1, "first menu: the hooks line names only the click hook")
 ok(column(m1) == "START GAME,JOIN GAME,CUSTOMIZE,OPTIONS,MANAGE MODS,QUIT", "first menu: the entry between OPTIONS and QUIT", column(m1))
 ok(countLogs("ui menu entry 'mods' inserted between OPTIONS and QUIT in MainMenu_C_1 (poll), column grew 50 units") == 1, "first menu: inserted late (poll), grew 50", logs[#logs])
 ok(m1.Overlay_0.Slot.size.Y == 300 and m1.NN_FieldNavigationBacking.Slot.size.Y == 332, "first menu: the backing grew by 50", m1.Overlay_0.Slot.size.Y)
@@ -443,10 +461,11 @@ ok(m1.page.children[1] and m1.page.children[1].text == "corner" and X.isShown(mt
 ok(m1.page.children[1].font and m1.page.children[1].font.__asset == "AlumniSans-Regular_Font" and m1.page.children[1].color[5] == 0, "game look: menu text in AlumniSans, no shadow")
 ok(M.isOpen(), "menu.isOpen")
 
--- poll and hook both see the menu: no second insert
+-- a Construct fires (no hook: nothing; the generic hook body: nothing of the entry's or the text's), then the poll
 fireHook("MainMenu_C:Construct", m1)
+M._onConstructHook({ get = function() return m1 end })
 tick()
-ok(#m1.VerticalBox_104.children == 6 and #m1.page.children == 1, "poll and hook: no second insert, no second widget")
+ok(#m1.VerticalBox_104.children == 6 and #m1.page.children == 1, "a Construct fires: nothing; the poll again: no second insert, no second widget")
 
 -- ---------------------------------------------------------------- clicks
 fireHook("HandleButtonClicked", ent)
@@ -532,24 +551,29 @@ ok(#events == 8 and events[1] == "lost:w8:the menu is gone (the menu is gone (a 
 ok(SC.top() == nil, "menu lost: no window")
 raises(function() SC.open{ id = "A" } end, "nucleus.ui.screen.open: the title-screen menu is not open (windows open only over it)", "screen.open without a menu raises")
 
--- ---------------------------------------------------------------- return from a match: the entry inside Construct
+-- ---------------------------------------------------------------- return from a match: nothing at Construct, the entry from the poll
 -- The match world: the old menu is gone; core's widget classes unloaded; the LoadMap post-hook loads them again.
 local before = F.getAssets
 for _, f in ipairs(F.loadMap) do f() end
 ok(F.getAssets > before, "LoadMap post-hook: assets loaded")
 local m2 = newMenu(2)
-local gaInHook = F.getAssets
--- The game constructs the new menu: the creation callback, then Construct's post-hook (before the poll sees it).
+local gaInHook, creates0 = F.getAssets, F.creates
+-- The game constructs the new menu: the creation callback, then its Construct (before the poll sees it). Story 34:
+-- no hook is registered; the generic hook body (as if a want had asked) runs no work of the entry's or the text's.
 for _, nt in ipairs(F.notify) do if nt.cls:find("MainMenu_C", 1, true) then nt.fn(m2) end end
+local spy2 = spyMenu(m2)
 fireHook("MainMenu_C:Construct", m2)
-ok(F.getAssets == gaInHook, "Construct hook: no asset load inside the hook")
-ok(column(m2) == "START GAME,JOIN GAME,CUSTOMIZE,OPTIONS,MANAGE MODS,QUIT", "return from a match: inserted inside Construct")
-ok(countLogs("in MainMenu_C_2 (construct)") == 1, "return from a match: reason construct")
-ok(#m2.page.children == 1, "return from a match: the menu text attached in Construct")
+M._onConstructHook({ get = function() return m2 end })
+ok(spy2.n == 0 and F.creates == creates0 and F.getAssets == gaInHook, "return from a match: a Construct makes no Create, RemoveFromParent or AddChild on the new menu, loads nothing", spy2.n)
+ok(column(m2) == "START GAME,JOIN GAME,CUSTOMIZE,OPTIONS,QUIT" and #m2.page.children == 0, "return from a match: nothing inserted or attached at Construct", column(m2))
+tick()
+ok(column(m2) == "START GAME,JOIN GAME,CUSTOMIZE,OPTIONS,MANAGE MODS,QUIT", "return from a match: inserted from the poll", column(m2))
+ok(countLogs("in MainMenu_C_2 (poll)") == 1 and countLogs("(construct)") == 0, "return from a match: reason poll, never construct")
+ok(#m2.page.children == 1, "return from a match: the menu text attached once, from the poll")
 fireHook("MainMenu_C:Construct", m2)
 tick(); tick()
-ok(#m2.VerticalBox_104.children == 6 and #m2.page.children == 1, "Construct twice and the poll: exactly one extra child, one widget")
-ok(countLogs("(poll)") == 1, "return from a match: no poll insert")
+ok(#m2.VerticalBox_104.children == 6 and #m2.page.children == 1, "a Construct again and two more ticks: exactly one extra child, one widget")
+ok(countLogs("in MainMenu_C_2 (poll)") == 1, "return from a match: one poll insert")
 
 -- removeEntry: out of the live menu, the backing shrinks back
 local grownTo = m2.Overlay_0.Slot.size.Y
@@ -558,16 +582,16 @@ ok(column(m2) == "START GAME,JOIN GAME,CUSTOMIZE,OPTIONS,QUIT" and m2.Overlay_0.
 ok(m2.UI_Button_Master_3.Slot.Padding.Top == 3, "removeEntry: QUIT's slot unchanged")
 ok(pcall(E.removeEntry, entryH), "removeEntry: again, nothing")
 
--- ---------------------------------------------------------------- column not measurable in Construct: QUIT's height + padding
+-- ---------------------------------------------------------------- column not measurable at the poll's insert: measured late
 local e2 = E.entry{ id = "m2", label = { en = "TWO" }, onClick = function() end, style = "primary" }
 F.unmeasured = true
 local m3 = newMenu(3)
 for _, nt in ipairs(F.notify) do if nt.cls:find("MainMenu_C", 1, true) then nt.fn(m3) end end
-fireHook("MainMenu_C:Construct", m3)
-ok(column(m3):find("OPTIONS,TWO,QUIT", 1, true) and countLogs("column grew (measured on the next tick)") == 1, "unmeasurable: inserted, growth deferred")
-F.unmeasured = false
 kill(m2)
-tick(); tick()
+tick(); tick() -- lost (m2), then opened (m3): the insert
+ok(column(m3):find("OPTIONS,TWO,QUIT", 1, true) and countLogs("in MainMenu_C_3 (poll), column grew (measured on the next tick)") == 1, "unmeasurable: inserted from the poll, growth deferred", column(m3))
+F.unmeasured = false
+tick()
 ok(m3.Overlay_0.Slot.size.Y == 300, "unmeasurable: grown on the next tick from the entry's height + padding", m3.Overlay_0.Slot.size.Y)
 local e2w = m3.VerticalBox_104.children[5]
 ok(e2w.styleSet == STYLE_SECONDARY and e2w["Button Type Selection"] == m3.UI_Button_Master["Button Type Selection"], "primary: the first button's properties")
@@ -607,14 +631,28 @@ ok(countLogs("WARN the menu's page 0 is Image, not a CanvasPanel") == 1 and not 
 ok(column(m6):find("FIVE,QUIT", 1, true), "page 0 not a canvas: the entry still inserts")
 E.removeEntry(e5)
 
--- ---------------------------------------------------------------- Construct hook body: odd contexts
+-- ---------------------------------------------------------------- the generic Construct machinery: a test-only want
+-- Story 34: no core module asks for Construct; the machinery stays as an opt-in, exercised here.
+ok(hookCount("MainMenu_C:Construct") == 0, "generic Construct: still no hook while nothing asks for one")
+local seen = {}
+M._wants(function() return true, false end)
+M._onConstruct(function(m, path) seen[#seen + 1] = path end)
+tick()
+ok(hookCount("MainMenu_C:Construct") == 1 and M._hooks().construct == true, "generic Construct: a want asking for it registers the hook from the poll")
 local before7 = #F.menus
 fireHook("MainMenu_C:Construct", nil)
 fireHook("MainMenu_C:Construct", newText())
 local remote = newMenu(7, { owner = obj({ IsLocalController = function() return false end }) })
 local e6 = E.entry{ id = "m6", label = { en = "SIX" }, onClick = function() end }
 fireHook("MainMenu_C:Construct", remote)
-ok(#remote.VerticalBox_104.children == 5 and #F.menus == before7 + 1, "Construct hook: nil, a foreign widget and a remote player's menu are ignored")
+ok(#seen == 0 and #remote.VerticalBox_104.children == 5 and #F.menus == before7 + 1, "Construct hook: nil, a foreign widget and a remote player's menu are ignored", #seen)
+local n6 = #m6.VerticalBox_104.children
+fireHook("MainMenu_C:Construct", m6)
+ok(#seen == 1 and seen[1] == m6.__path and #m6.VerticalBox_104.children == n6, "Construct hook: a local menu is tracked and the registered fn called; the entry is not inserted there", seen[1])
+M._onConstruct(function() error("boom", 0) end)
+fireHook("MainMenu_C:Construct", m6)
+fireHook("MainMenu_C:Construct", m6)
+ok(countLogs("WARN menu Construct hook work failed: boom") == 1 and #seen == 3, "Construct hook: a failing fn is caught under pcall and warned once", #seen)
 E.removeEntry(e6)
 
 -- ---------------------------------------------------------------- nesting and caps

@@ -17,11 +17,13 @@
 -- or was destroyed: a map change). While hidden, every menu element is collapsed (a transparent button would still
 -- take clicks); the entry lives in the game's column and hides with it.
 --
--- Hooks (MainMenu_C:Construct post-hook, CommonButtonBase:HandleButtonClicked) are registered from a poll tick once a
--- MainMenu_C exists, never at startup: both host launches of the mini-spike that registered hooks earlier crashed at
--- the first menu (research 9.3; the cause was a GetFName on a null property, 9.1, but registering after the menu
--- exists is the order proven in every VM launch). So the first menu gets its entry and elements late, from the
--- poll's opened; every later menu gets them inside Construct. UE4SS keys a script hook by the function's name chain
+-- Hooks (CommonButtonBase:HandleButtonClicked, and a MainMenu_C:Construct post-hook only when a want asks for it) are
+-- registered from a poll tick once a MainMenu_C exists, never at startup: both host launches of the mini-spike that
+-- registered hooks earlier crashed at the first menu (research 9.3; the cause was a GetFName on a null property, 9.1,
+-- but registering after the menu exists is the order proven in every VM launch). Every menu gets its entry and
+-- elements from the poll's opened, at most one 500 ms tick after the menu appears. No user asks for Construct today
+-- (story 34): widget work inside it, under the game's own CreateWidget/AddToViewport right after a world teardown and
+-- GC, once read a freed object and crashed the game; the machinery stays as a tested opt-in. UE4SS keys a script hook by the function's name chain
 -- (LuaMod.cpp, find_function_hook_data), so one registration also fires for the class reloaded after a match.
 local BASE = (...):gsub("%.ui%.menu$", "")
 local C = require(BASE .. ".ui.common")
@@ -175,7 +177,7 @@ local function pollOpen()
 end
 
 -- ---- hooks, registered from the poll once a menu exists
-local construct = {}             -- internal fn(menu, path) run inside the Construct post-hook (text.lua, entry.lua)
+local construct = {}             -- internal fn(menu, path) run inside the Construct post-hook (no user today)
 local wants = {}                 -- internal fn() -> needConstruct, needClick (text.lua, entry.lua)
 local clickers = {}              -- internal fn(widget) run inside the HandleButtonClicked hook (entry.lua)
 local HK = { construct = false, click = false, constructKey = nil, tries = 0 }
@@ -232,12 +234,12 @@ local function ensureHooks(menuPath)
                 did[#did + 1] = "MainMenu_C:Construct"
             else
                 HK.construct = "failed"
-                C.warnOnce("menu construct hook", "menu: RegisterHook(%s) failed: %s; menu elements and the entry attach when the poll sees each menu", CONSTRUCT_FN, tostring(err):match("^[^\n]*"))
+                C.warnOnce("menu construct hook", "menu: RegisterHook(%s) failed: %s; the poll handles each menu", CONSTRUCT_FN, tostring(err):match("^[^\n]*"))
             end
         else
             -- Never looked up again: a StaticFindObject miss scans every object (research 8.1, hud.lua).
             HK.construct = "missing"
-            C.warnOnce("menu construct fn", "menu: %s not found; menu elements and the entry attach when the poll sees each menu", CONSTRUCT_FN)
+            C.warnOnce("menu construct fn", "menu: %s not found; the poll handles each menu", CONSTRUCT_FN)
         end
     end
     if needK and not HK.click then

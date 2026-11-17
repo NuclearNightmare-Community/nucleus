@@ -1483,8 +1483,9 @@ X._attachNow = attachNow
 
 -- ---------------------------------------------------------------- story 21: the menu host and the windows
 -- Like the Journal: every menu is new (each return from a match builds one), so its elements get new widgets on each
--- (in its Construct post-hook from the second menu on, else at the poll's opened), and on lost only their handles are
--- freed. While the menu is hidden (opacity 0 under Create Server, another page) its elements are collapsed.
+-- from the poll's opened, at most one 500 ms tick after the menu appears (never inside MainMenu_C:Construct, story
+-- 34), and on lost only their handles are freed. While the menu is hidden (opacity 0 under Create Server, another
+-- page) its elements are collapsed.
 
 -- Frees the handles of every element on a host (children included) and marks them detached; never touches widgets
 -- (they went with their host). keepPath: elements attached to this host object stay (a newer menu's).
@@ -1516,60 +1517,28 @@ local function revisit(host)
     end
 end
 
-local menuConstructed = {}       -- menu path -> true: its elements were attached in its Construct post-hook
-local function anyMenuElement()
-    for _, el in ipairs(C.order) do
-        if not el.removed and C.hostOf(el) == "menu" then return true end
-    end
-    return false
-end
-
 -- The poll's events for the menu host.
 local function onMenu(m, info)
     if info.event == "opened" then
         local canvas = M._canvasOf(m)
         if not canvas then return end -- _canvasOf warned once; the host stays closed (the entry still inserts)
-        local cons = menuConstructed[info.path]
-        for p in pairs(menuConstructed) do if p ~= info.path then menuConstructed[p] = nil end end
         local t0 = C.micros()
-        local n, pending, report, _, did = attachHostEls("menu", m, canvas, {}, info.reason, cons == true, info.path)
+        local n, pending, report, _, did = attachHostEls("menu", m, canvas, {}, info.reason, false, info.path)
         if n == 0 then return end
-        if next(did) then placeAll("menu", m, canvas, true, false, cons and did or nil) end
+        if next(did) then placeAll("menu", m, canvas, true, false) end
         if info.hidden then revisit("menu") end
         if pending then
             C.log.info("ui menu attach left %s pending until the next menu (%d element(s))", table.concat(pending, ", "), n)
         elseif C.debugOn() then
-            C.log.debug("ui menu attach n=%d in %d us: %s (%s%s)", n, C.micros() - t0, table.concat(report, ", "), tostring(info.reason), cons and ", after Construct" or "")
+            C.log.debug("ui menu attach n=%d in %d us: %s (%s)", n, C.micros() - t0, table.concat(report, ", "), tostring(info.reason))
         end
     elseif info.event == "hidden" or info.event == "shown" then
         revisit("menu")
         if info.event == "shown" then P.settle("menu") end
     elseif info.event == "lost" then
-        menuConstructed[info.path] = nil
-        local newer = next(menuConstructed)
-        local freed = releaseHost("menu", newer)
+        local freed = releaseHost("menu", nil)
         if freed > 0 and C.debugOn() then C.log.debug("ui menu lost: freed %d widget handle(s) (%s)", freed, tostring(info.reason)) end
     end
-end
-
--- Inside MainMenu_C:Construct's post-hook (menu.lua runs it under pcall, with M._inHook set): every menu element whose
--- class is cached, placed; nothing loaded, no dependent's code called. The rest attach at the poll's opened.
-local function menuConstruct(m, path)
-    if not anyMenuElement() then return end
-    local canvas = M._canvasOf(m)
-    if not canvas then return end
-    local again = menuConstructed[path] == true
-    local byId = {}
-    if again then
-        local okS, b, orphans = pcall(scan, canvas, onHost("menu"))
-        if okS then
-            byId = b
-            for _, o in ipairs(orphans) do removeWidget(o.w) end
-        end
-    end
-    attachHostEls("menu", m, canvas, byId, "construct", false, path)
-    placeAll("menu", m, canvas, true)
-    menuConstructed[path] = true
 end
 
 local function onMenuTick(m)
@@ -1582,8 +1551,6 @@ ensureMenu = function()
     menuWatching = true
     M._watch(onMenu)
     M._ticker(onMenuTick)
-    M._onConstruct(menuConstruct)
-    M._wants(function() return anyMenuElement(), false end)
 end
 
 -- A window opened (screen.lua): every element on it gets a widget in its canvas, then placement.
@@ -1946,7 +1913,7 @@ end
 function X.tagOf(id) return tagOf(id) end
 
 -- Story 21: assets.lua reads the cache only inside a hook, and its LoadMap preload also loads core's widget classes
--- in use (they are unloaded after a map change, research 8.1), so a new menu's Construct finds them cached.
+-- in use (they are unloaded after a map change, research 8.1), so a new Journal's Construct finds them cached.
 A.setHookCheck(X._inHook)
 A.extra = function()
     local need = {}
