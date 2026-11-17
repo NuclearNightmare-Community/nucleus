@@ -4428,6 +4428,11 @@ local function buildMenu()
             img("ic.on", onW, "T_CheckboxOn", { 1, 1, 1, 1 })
             img("ic.gap", gapW, "none", { 1, 1, 1, 0 })
             for _, g in ipairs(GAME) do img("ic." .. g[1], cell(2, "ic." .. g[1]), g[3], { 1, 1, 1, 1 }) end
+            -- core story 28: the gear is window IC's first focusable, so it holds focus and shows its focus face (its
+            -- undimmed colours). Its own dimmed look is read with the window's focus look cleared (the next UI tick
+            -- puts the face back).
+            local LOc = CORE:lower()
+            pcall(function() require(LOc .. ".ui.focus").blur(require(LOc .. ".ui.common").windows["IC"]) end)
             local icon = prop(cfgW, "Icon")
             local ic = try(function() return icon.ColorAndOpacity end)
             check(resName(icon) == "T_Gear" and near4(ic, DIM), "IMG ic.cfg icon tex=%s tint=%s (dimmed)", resName(icon), col4(ic))
