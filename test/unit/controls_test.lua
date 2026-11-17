@@ -634,6 +634,26 @@ CH.create{ id = "ch", place = { row = T.row, fill = 2 }, options = { "P", "Q" },
 ok(T.tagged("ch") == chw and chw.value == "Q" and chw.arrows[1] == true and chw.arrows[2] == false, "choice: same id updates options and selection on the same widget")
 CH.create{ id = "ch", place = { row = T.row, fill = 2 }, options = T.OPTS, selected = 4, onChange = T.rec("ch") }
 
+-- ---------------------------------------------------------------- core story 37: the state's first slider made in a button's onClick
+-- (its class is cold and its hooks not registered yet): no load and no RegisterHook inside the click hook; attached and
+-- hooked on the next tick, with no "pak not installed" WARN.
+do
+    local made
+    local b = B.create{ id = "b37s", label = "MAKE", place = { row = T.row }, onClick = function()
+        made = SL.create{ id = "sl37", place = { row = T.row }, min = 0, max = 10, step = 1, value = 3, onChange = function() end }
+    end }
+    local g0, h0, p0 = F.getAssets, #F.hooks, countLogs("is Content/Paks/LogicMods/")
+    T.fire(T.CLICK, T.tagged("b37s"))
+    ok(made ~= nil and F.getAssets == g0 and #F.hooks == h0 and T.tagged("sl37") == nil, "story 37: first slider in onClick: no load, no hook, not attached inside the click hook")
+    ok(select(1, X._deferred()) == 1 and select(2, X._deferred()) ~= nil, "story 37: the cold-class element is queued with a keep token")
+    tick()
+    local w = T.tagged("sl37")
+    ok(w and w.barValue == 3 and hookCount(T.END) == 1 and hookCount(T.COMMIT) == 1, "story 37: first slider in onClick: attached and hooked on the next tick")
+    ok(select(1, X._deferred()) == 0 and select(2, X._deferred()) == nil and countLogs("is Content/Paks/LogicMods/") == p0, "story 37: queue drained, token released, no pak WARN")
+    SL.remove(made)
+    B.remove(b)
+end
+
 -- ---------------------------------------------------------------- slider
 local sl = SL.create{ id = "sl", place = { row = T.row, fill = 3 }, min = 0, max = 200, step = 1, value = 100, defaultValue = 50, hint = "DEFAULT (50)", onChange = T.rec("sl") }
 local slw = T.tagged("sl")
@@ -947,6 +967,71 @@ do
     ok(SL.get(h) == 1.5 and w.barValue == 1.5 and w.text == "1.5" and w.hint == "DEFAULT (1)" and w.boxW == SL._BOX_HINT_W, "slider: same id updates the value and the hint")
     w.text = "0.5"; T.fire(T.COMMIT, w)
     ok(SL.get(h) == 0.5 and T.ncalls("sls") == 0 and T.ncalls("sls2") == 1, "slider: same id, the new onChange hears the next commit")
+end
+
+-- ---------------------------------------------------------------- core story 37: a dependent's callback runs as "in a hook"
+-- (DW-69): inside onChange / onClick only cached textures and classes, no load; what missed is applied on the next tick.
+T.rp37 = { row = RS.create{ id = "r37", place = { list = T.list } } }
+T.img37 = IM.create{ id = "i37", place = T.rp37, image = { icon = "gear" } }
+T.imw37 = T.tagged("i37")
+-- The callback: records the flag, then draws a cold restart icon (as Mod Manager 0.2.0's first toggle did).
+function T.cb37(h) T.seen37 = { hook = X._inHook(), depth = C.inDispatch }; IM.set(T.img37, { image = { icon = "restart" } }) end
+-- One matrix row: the image back on gear (loaded outside any hook), the cache emptied and the LoadMap preload run (the
+-- game look's fonts and materials warm, as in game; the lazy icons cold), then fire() reaches the callback.
+function T.case37(name, fire)
+    IM.set(T.img37, { image = { icon = "gear" } })
+    A._reset()
+    A.preload()
+    T.seen37 = nil
+    local g0 = F.getAssets
+    fire()
+    ok(T.seen37 and T.seen37.hook == true and T.seen37.depth >= 1, "story 37 " .. name .. ": X._inHook() true inside the callback")
+    ok(F.getAssets == g0 and T.imw37.tex.__asset == "T_Gear", "story 37 " .. name .. ": no GetAsset inside the hook", F.getAssets - g0)
+    ok(C.inDispatch == 0 and not X._inHook(), "story 37 " .. name .. ": the flag is lowered after the callback")
+    tick()
+    ok(T.imw37.tex.__asset == "T_Restart", "story 37 " .. name .. ": the texture applied on the next tick")
+end
+T.cb37c = CK.create{ id = "cb37", place = T.rp37, onChange = T.cb37 }
+T.case37("checkbox click", function() T.fire(T.CLICK, T.tagged("cb37")) end)
+T.ch37 = CH.create{ id = "ch37", place = T.rp37, options = T.OPTS, onChange = T.cb37 }
+T.case37("choice arrow", function() T.fire(T.NEXT, T.tagged("ch37")) end)
+T.case37("choice Left/Right key", function() clock = clock + 300000; CH._stepEl(C.els.ch37, T.tagged("ch37"), 1) end)
+T.sl37 = SL.create{ id = "sl37b", place = T.rp37, min = 0, max = 10, step = 1, value = 1, onChange = T.cb37 }
+T.case37("slider commit", function() local w = T.tagged("sl37b"); w.text = "7"; T.fire(T.COMMIT, w) end)
+T.case37("slider drag end", function() local w = T.tagged("sl37b"); w.barValue = 2; T.fire(T.END, w) end)
+T.case37("slider nudge", function() SL._nudge(C.els.sl37b, T.tagged("sl37b"), 1) end)
+T.b37 = B.create{ id = "b37", label = "GO", place = T.rp37, onClick = T.cb37 }
+T.case37("button click", function() T.fire(T.CLICK, T.tagged("b37")) end)
+-- a throwing callback: logged once (unchanged text), the flag back at its prior value, also when nested
+do
+    local bt = B.create{ id = "b37t", label = "T", place = T.rp37, onClick = function() error("boom37") end }
+    T.fire(T.CLICK, T.tagged("b37t"))
+    ok(C.inDispatch == 0 and not X._inHook() and countLogs("WARN button 'b37t' onClick: ") == 1, "story 37: a throwing onClick leaves the flag lowered, one WARN")
+    C.inDispatch = 1
+    local okD, err = C.callDependent(function() error("inner") end)
+    ok(not okD and tostring(err):find("inner", 1, true) and C.inDispatch == 1, "story 37: callDependent restores the prior depth after a throw")
+    C.inDispatch = 0
+    local okR, v = C.callDependent(function(a, b) return a + b end, 2, 3)
+    ok(okR and v == 5 and C.inDispatch == 0, "story 37: callDependent passes the arguments and the result")
+    B.remove(bt)
+end
+-- the screen class: cold inside onClick is a clear error; the tick (menu elements exist) warms it, then onClick opens
+do
+    for k, o in pairs(handles) do if o == SCREENCLASS then handles[k] = nil end end
+    local opened
+    local bw = B.create{ id = "b37w", label = "OPEN", place = { host = "menu", corner = "top-left" }, onClick = function() opened = SC.open{ id = "W37" } end }
+    tick()
+    for k, o in pairs(handles) do if o == SCREENCLASS then handles[k] = nil end end -- cold again
+    local g0 = F.getAssets
+    T.fire(T.CLICK, T.tagged("b37w"))
+    ok(opened == nil and F.getAssets == g0 and countLogs("can't be loaded inside a control's callback") == 1 and countLogs("WARN button 'b37w' onClick: ") == 1,
+        "story 37: screen.open in onClick with the window class cold: a clear error, no load")
+    tick()
+    ok(F.getAssets > g0, "story 37: the UI tick warms the window class (menu elements exist)")
+    T.fire(T.CLICK, T.tagged("b37w"))
+    ok(opened and SC.isOpen(opened), "story 37: with the class warm, onClick opens a window")
+    if opened then SC.close(opened) end
+    B.remove(bw)
 end
 
 print(string.format("controls_test: %d passed, %d failed", pass, failN))

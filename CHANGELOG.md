@@ -2,6 +2,16 @@
 
 All notable changes to Nucleus are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). From 0.5.0 a dependent's `need` and `dependsOn` are minimum versions (`>=0.5.0`), so a newer Nucleus never asks dependents to raise them. Up to 0.3.0, below 1.0.0 a dependent connected only to the same minor version (`need = "0.3.0"` accepted 0.3.x).
 
+## [0.15.2] - 2026-11-17
+
+Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
+
+For players: a mod's checkbox, choice, slider or button can no longer freeze the game by drawing an icon or a control for the first time when it is clicked (Mod Manager 0.2.0's first toggle hung on the restart icon).
+
+### Fixed
+
+- A dependent's `onChange` (checkbox, choice, slider; also from Left / Right keys and slider nudges) and `onClick` (button) now run as "inside a hook" (core story 37, DW-69): core raises its dispatch flag around the callback (`C.callDependent`), so whatever the callback does there reads only cached textures and widget classes, registers no hook and no LoadMap hook. An uncached texture is applied on the next 500 ms UI tick; an element whose class isn't cached yet is attached on the next tick (a new deferred-attach queue, no "pak not installed" `WARN`); hooks and a LoadMap hook asked for there are registered by the next tick. Both pending queues keep the UI loop running until they are drained (DW-71). The window class is kept loaded while the mod has menu or window elements, so a button's `onClick` can open a window; when it is still cold there, `screen.open` raises an error that names the cause. Behaviour, counts, debounce and `WARN` texts of every control are unchanged; the menu entry's `onClick` is not affected. No public API change; Lua only (no new pak).
+
 ## [0.15.1] - 2026-11-17
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.

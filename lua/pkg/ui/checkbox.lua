@@ -67,7 +67,7 @@ B._kindDispatch.checkbox = function(el, w)
     C.inDispatch = C.inDispatch - 1
     if not okA then C.warnOnce("checkbox:" .. el.id, "checkbox '%s': showing its state failed: %s", el.id, firstLine(errA)) end
     if C.debugOn() then C.log.debug("ui checkbox '%s' clicked: %s", el.id, tostring(el.checked)) end
-    local ok, err = pcall(el.onChange, el.handle, el.checked)
+    local ok, err = C.callDependent(el.onChange, el.handle, el.checked) -- core story 37: no load inside the hook
     if not ok then
         S.throws = S.throws + 1
         if not el.warnedChange then

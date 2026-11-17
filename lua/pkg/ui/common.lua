@@ -204,6 +204,17 @@ end
 -- registered then (the poll does it) and core's own asset reads there use the cache only.
 C.inDispatch = 0
 
+-- Core story 37: a dependent's callback from a control's hook (checkbox, choice and slider onChange, button onClick),
+-- under pcall with C.inDispatch raised, so whatever it does there reads cached assets and classes only and registers no
+-- hook (X._inHook honours the flag; a miss is applied or attached on the next UI tick). Lowered in every case (a
+-- throw included); returns pcall's ok, err.
+function C.callDependent(fn, ...)
+    C.inDispatch = C.inDispatch + 1
+    local ok, err = pcall(fn, ...)
+    C.inDispatch = C.inDispatch - 1
+    return ok, err
+end
+
 -- Core story 27: fn(el) run (under pcall) when a click, a drag end or a commit reached one of this mod's elements, so a
 -- window's keyboard focus model follows the mouse (focus.lua sets it). nil: nothing.
 C.onUse = nil

@@ -184,7 +184,7 @@ function CH._stepEl(el, w, delta)
     C.inDispatch = C.inDispatch - 1
     if not okA then C.warnOnce("choice:" .. el.id, "choice '%s': showing its option failed: %s", el.id, firstLine(errA)) end
     if C.debugOn() then C.log.debug("ui choice '%s' -> %d", el.id, new) end
-    local ok, err = pcall(el.onChange, el.handle, new, el.options[new])
+    local ok, err = C.callDependent(el.onChange, el.handle, new, el.options[new]) -- core story 37: no load inside the hook
     if not ok then
         S.throws = S.throws + 1
         if not el.warnedChange then
@@ -356,9 +356,7 @@ local function gStep(ctx, delta)
     GS.clicks = GS.clicks + 1
     C.used(el)
     if C.debugOn() then C.log.debug("ui game choice '%s' -> %d", el.id, new) end
-    C.inDispatch = C.inDispatch + 1
-    local ok, err = pcall(el.onChange, el.handle, new, el.options[new])
-    C.inDispatch = C.inDispatch - 1
+    local ok, err = C.callDependent(el.onChange, el.handle, new, el.options[new])
     if not ok then
         GS.throws = GS.throws + 1
         if not el.warnedChange then

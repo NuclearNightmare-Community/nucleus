@@ -473,6 +473,11 @@ function SC.open(opts, ...)
     local okB, errB = pcall(ensureBack, rec) -- pending until the window is live below: attached with the rest
     if not okB then C.warnOnce("back button", "window '%s': its BACK button failed: %s", id, tostring(errB):match("^[^\n]*")) end
     local cls = X._classOf("screen")
+    if not cls and C.inDispatch > 0 then
+        -- Core story 37: inside a control's callback the class comes from the cache only (the UI tick keeps it warm
+        -- while this mod has menu or window elements).
+        C.fail("%s: %s is not loaded yet and can't be loaded inside a control's callback (onClick, onChange); open the window after the callback returns, or create a menu element first so it stays loaded", pre, C.SCREEN_CLASS)
+    end
     if not cls then C.fail("%s: %s is not loaded (is Content/Paks/LogicMods/%s.pak installed?)", pre, C.SCREEN_CLASS, C.NAME) end
     A.ensureLoadMapHook()
     local w = wbl():Create(mm, cls, ownerOf(mm))

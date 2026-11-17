@@ -189,10 +189,21 @@ function A.preload()
 end
 
 -- The dependent's own LoadMap post-hook (once per Lua state): preloads before the new map's widgets are constructed.
-local loadMapHooked = false
+-- Core story 37: asked inside a hook (a dependent's callback, a Construct): no RegisterLoadMapPostHook there; remembered,
+-- and the next UI tick (outside hooks) registers it (text.lua).
+local loadMapHooked, loadMapWanted = false, false
+A.onDeferred = nil -- fn(), set by text.lua: a request was remembered (keeps the UI loop running until it is done)
+function A._loadMapWanted() return loadMapWanted end
 function A.ensureLoadMapHook()
     if loadMapHooked then return end
-    loadMapHooked = true
+    if inHook() or C.inDispatch > 0 then
+        if not loadMapWanted then
+            loadMapWanted = true
+            if A.onDeferred then pcall(A.onDeferred) end
+        end
+        return
+    end
+    loadMapHooked, loadMapWanted = true, false
     local ok, err = pcall(RegisterLoadMapPostHook, function()
         local okP, errP = pcall(A.preload)
         if not okP then C.warnOnce("preload", "ui asset preload after a map load failed: %s", tostring(errP):match("^[^\n]*")) end
@@ -202,6 +213,6 @@ function A.ensureLoadMapHook()
     end
 end
 
-function A._reset() for k in pairs(refs) do refs[k] = nil end for k in pairs(used) do used[k] = nil end loadMapHooked = false; tmplRef, tmplMissing = nil, false; midRef, midFailed = nil, false end -- unit tests
+function A._reset() for k in pairs(refs) do refs[k] = nil end for k in pairs(used) do used[k] = nil end loadMapHooked, loadMapWanted = false, false; tmplRef, tmplMissing = nil, false; midRef, midFailed = nil, false end -- unit tests
 A._used = used -- unit tests
 return A
