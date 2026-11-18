@@ -1578,8 +1578,8 @@ end
 X._attachNow = attachNow
 
 -- Core story 37: the UI tick (outside any hook) attaches the elements deferred from a dependent's callback (each one not
--- removed and not live yet; the class loads normally here), registers a LoadMap hook asked for there, and keeps the
--- window class warm while this state has menu or window elements, so a button's onClick can open a window.
+-- removed and not live yet; the class loads normally here), registers a LoadMap hook asked for there, and reloads the
+-- window class (a weak handle) while this state has elements on the game's hosts, so a button's onClick can open a window.
 local function flushDeferred()
     if X._inHook() then return nil end
     if A._loadMapWanted() then A.ensureLoadMapHook() end
@@ -1592,10 +1592,7 @@ local function flushDeferred()
     end
     deferSync()
     for _, el in ipairs(C.order) do
-        if not el.removed then
-            local k = C.hostKind(C.hostOf(el))
-            if k == "menu" or k == "screen" then classOf("screen") break end
-        end
+        if not el.removed and C.gameHost(C.hostOf(el)) then classOf("screen") break end -- menu, windows, game screens
     end
     return nil
 end
