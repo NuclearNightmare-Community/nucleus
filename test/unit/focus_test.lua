@@ -387,6 +387,11 @@ function T.inner(vis)
     function i:SetHeightOverride(v) self.ho = v end
     function i:ClearWidthOverride() self.wo = nil end
     function i:ClearHeightOverride() self.ho = nil end
+    -- core story 39: a render scale (a button's Btn and Content); throwScale makes it raise
+    function i:SetRenderScale(v)
+        if self.throwScale then error("SetRenderScale: boom") end
+        self.scale = { v.X, v.Y }; self.scaleCalls = (self.scaleCalls or 0) + 1
+    end
     return i
 end
 function T.decorate(w)
@@ -394,7 +399,7 @@ function T.decorate(w)
         w.Text, w.Background = T.inner(4), T.inner(3) -- the generator's: Background HitTestInvisible, Text SelfHitTestInvisible
         w.Text.policy, w.Text.clip = 0, 0
     elseif w.__class == "WBP_NucleusButton_C" then
-        w.Btn, w.Box, w.Label, w.IconGap = T.inner(0), T.inner(4), T.inner(3), T.inner(1)
+        w.Btn, w.Box, w.Label, w.IconGap, w.Content = T.inner(0), T.inner(4), T.inner(3), T.inner(1), T.inner(3)
         function w:SetIcon(t, W, H) self.icon = { t, W, H } end
         function w:ClearIcon() self.icon = nil; self.cleared = (self.cleared or 0) + 1 end
         function w:SetContentColors(...) self.content = { ... } end
@@ -528,6 +533,7 @@ T.row = RS.create{ id = "row", place = { list = T.list } }
 -- window take it; SetFocusLook is recorded; the window's card parts (Card, Inner) record their calls; the viewport is
 -- the VM's 1280x720 at scale 1 unless a test changes it.
 local FO = require("nucleus.ui.focus")
+FO._noChip = true -- core story 39: the blocks before story 39's prove their looks without the focus chip
 local theme27 = require("nucleus.ui.theme")
 T.vp = { w = 1280, h = 720, scale = 1 }
 obj({ GetViewportSize = function() return vec(T.vp.w, T.vp.h) end, GetViewportScale = function() return T.vp.scale end },
@@ -970,8 +976,8 @@ do
         local w = base(self, world, c, owner)
         if w.__class == "WBP_NucleusButton_C" then
             local sc, sm = w.SetColors, w.SetMaterials
-            function w:SetColors(...) self.focusLook = false; self.colorCalls = (self.colorCalls or 0) + 1; return sc(self, ...) end
-            function w:SetMaterials(...) self.focusLook = false; self.matCalls = (self.matCalls or 0) + 1; return sm(self, ...) end
+            function w:SetColors(...) self.focusLook = false; self.colorCalls = (self.colorCalls or 0) + 1; self.lastFace = "colors"; return sc(self, ...) end
+            function w:SetMaterials(...) self.focusLook = false; self.matCalls = (self.matCalls or 0) + 1; self.lastFace = "mats"; return sm(self, ...) end
         end
         if w.SetBackgroundMaterial then
             local sbm = w.SetBackgroundMaterial
@@ -1542,6 +1548,247 @@ do
     ok(T.agree("r36g4") and T.strong("r36r4") and T.strip("r36r6") and rec.lookRowId == "r36r4", "story 36 window holds focus: the hover moves it to the row's focusable", SC.stats().focus)
     SC.close(R)
     ok(rec.lookRowId == nil, "story 36 window closed: nothing recorded")
+end
+
+-- ---------------------------------------------------------------- core story 39: a focus chip on the focused control
+-- A chip is a button's (a checkbox's) face from an instance of the selection material in the chip colours (normal and
+-- hover brush), its content white, an icon-only one's Btn scaled by s and its Content by 1 / s; a choice's or a
+-- slider's Background from that instance. T.chipMid(id): the instance a control shows, or nil.
+function T.isChipMid(m)
+    if not (m and m.__class == "MaterialInstanceDynamic" and m.Parent == T.SEL) then return false end
+    local c, t = m.params.CinematicBaseColor, theme.game.focusChipColors.CinematicBaseColor
+    return c ~= nil and T.near(c.R, t.r) and T.near(c.G, t.g) and T.near(c.B, t.b)
+end
+function T.chipMid(id)
+    local w = T.tagged(id)
+    if not w then return nil end
+    if w.Btn then return (w.lastFace == "mats" and w.mats and T.isChipMid(w.mats[1]) and w.mats[2] == w.mats[1]) and w.mats[1] or nil end
+    return T.isChipMid(w.mat) and w.mat or nil
+end
+function T.scaleIs(i, sx, sy) return i.scale ~= nil and T.near(i.scale[1], sx) and T.near(i.scale[2], sy or sx) end
+-- A chipped button: the instance as both brushes, the focus look on, white content, scale s (1: none set or 1).
+function T.chipped(id, s)
+    local w = T.tagged(id)
+    if not (w and T.chipMid(id) and w.focusLook == true and w.content) then return false end
+    for i = 1, 8 do if not T.near(w.content[i], 1) then return false end end
+    if s and s ~= 1 then return T.scaleIs(w.Btn, s) and T.scaleIs(w.Content, 1 / s) end
+    return w.Btn.scale == nil or T.scaleIs(w.Btn, 1)
+end
+-- A button without the chip: no chip brush, render scales 1 (or never set).
+function T.plainScale(w) return (w.Btn.scale == nil or T.scaleIs(w.Btn, 1)) and (w.Content.scale == nil or T.scaleIs(w.Content, 1)) end
+function T.noChip(id)
+    local w = T.tagged(id)
+    return w ~= nil and T.chipMid(id) == nil and (not w.Btn or T.plainScale(w)) and (C.els[id] and C.els[id].chipOn == nil)
+end
+function T.anyChip() for _, el in pairs(C.els) do if el.chipOn then return el.id end end return nil end
+-- The checkbox's own look (game look, icon only: no face, the game's text colours) after a chip.
+function T.cbOwn(id)
+    local w = T.tagged(id)
+    return w ~= nil and w.colors ~= nil and w.colors[4] == 0 and w.focusLook == false and T.plainScale(w)
+        and T.near(w.content[1], theme.game.text.r) and C.els[id].chipOn == nil
+end
+T.S39 = 36 / 28 -- iconSize 28, p = 4: (28 + 2 * 4) / 28
+do
+    local AS = require("nucleus.ui.assets")
+    AS._reset()
+    FO._noChip = false
+    local faults0 = FO.stats().faults
+    C.forgetWarning("focus chip")
+    local g = theme.game
+    local R = SC.open{ id = "R39" }
+    local wr = T.screenOf("R39")
+    local rec = C.windows["R39"]
+    local L = LS.create{ id = "r39l", place = { screen = R, corner = "top-left" }, size = { 600, 500 } }
+    local rows = {}
+    for i = 1, 4 do -- a checkbox and a gear, the row padded (tight: 4) in a tight gap (8): p = 4
+        rows[i] = RS.create{ id = "r39r" .. i, place = { list = L }, style = { padding = "tight" } }
+        CK.create{ id = "r39c" .. i, place = { row = rows[i] }, onChange = T.rec("r39c" .. i) }
+        X.create{ id = "r39n" .. i, text = "MOD " .. i, place = { row = rows[i], fill = 4 } }
+        B.create{ id = "r39g" .. i, place = { row = rows[i] }, icon = { icon = "gear" }, iconSize = 28, dimmed = true, onClick = T.rec("r39g" .. i) }
+    end
+    rows[5] = RS.create{ id = "r39r5", place = { list = L } }
+    CH.create{ id = "r39ch", options = { "LOW", "MID", "HIGH" }, selected = 1, place = { row = rows[5] }, onChange = T.rec("r39ch") }
+    rows[6] = RS.create{ id = "r39r6", place = { list = L } }
+    SL.create{ id = "r39sl", min = 0, max = 10, step = 1, defaultValue = 5, place = { row = rows[6] }, onChange = T.rec("r39sl") }
+    rows[7] = RS.create{ id = "r39r7", place = { list = L }, gap = "compact", style = { padding = "tight" } }
+    B.create{ id = "r39g7", place = { row = rows[7] }, icon = { icon = "gear" }, iconSize = 28, dimmed = true, onClick = T.rec("r39g7") }
+    rows[8] = RS.create{ id = "r39r8", place = { list = L } }
+    B.create{ id = "r39b8", label = "TOGGLE", place = { row = rows[8] }, onClick = T.rec("r39b8") }
+    B.create{ id = "r39lone", place = { screen = R, corner = "bottom-right" }, icon = { icon = "gear" }, iconSize = 28, dimmed = true, onClick = T.rec("r39lone") }
+    tick()
+    -- Keys on a row: the window opens on r1's checkbox: the chip (its own instance, not the band's), white, scaled
+    local cw = T.tagged("r39c1")
+    local mid = T.chipMid("r39c1")
+    ok(FO._owner() == "keys" and T.agree("r39c1") and T.chipped("r39c1", T.S39) and T.strong("r39r1"), "story 39 open: r1's checkbox has the chip (scale s, content 1 / s), r1 the band")
+    ok(mid and mid ~= T.matOf("r39r1") and mid.name == "None" and mid.flags == 1 and T.tintIs({ cw.mats[3], cw.mats[4], cw.mats[5], cw.mats[6] }, g.focusChipTint),
+        "story 39 open: an unnamed transient instance of its own, in focusChipTint")
+    local cbase = mid and mid.params.CinematicWearColor
+    ok(cbase and T.near(cbase.R, g.focusChipColors.CinematicWearColor.r), "story 39 open: the chip's wear colour is the theme's")
+    ok(cw.mats[7] == 0 and cw.mats[8] == 0 and cw.mats[9] == 0 and cw.mats[10] == 0 and cw.mats[11] == 0, "story 39 open: the icon-only face keeps its own padding and minimum height (0)")
+    ok(T.noChip("r39g1") and T.tagged("r39g1").mats == nil, "story 39 open: r1's gear keeps its own look")
+    -- Right / Left
+    ok(T.key(wr, D.right, INV_ACT) and T.agree("r39g1") and T.chipped("r39g1", T.S39) and T.cbOwn("r39c1"), "story 39 RIGHT: the gear gets the chip, the checkbox its own look and scale 1")
+    ok(T.chipMid("r39g1") == mid, "story 39 RIGHT: the same instance")
+    ok(T.key(wr, D.left, INV_ACT) and T.agree("r39c1") and T.chipped("r39c1", T.S39) and T.noChip("r39g1") and T.gearOwn("r39g1"), "story 39 LEFT: back on the checkbox; the gear's own dimmed look")
+    -- Up / Down: r2's control in the same column; r1's control and row restored
+    ok(T.key(wr, D.down, INV_ACT) and T.agree("r39c2") and T.chipped("r39c2", T.S39) and T.cbOwn("r39c1") and T.strong("r39r2") and T.strip("r39r1"),
+        "story 39 DOWN: r2's checkbox gets the chip, r1's checkbox and row their own look")
+    -- Hover: focus and band on r4, no chip anywhere (the mouse owns the focus)
+    T.move()
+    T.hover(T.tagged("r39r4"))
+    ok(T.agree("r39c4") and T.strong("r39r4") and FO._owner() == "mouse" and T.anyChip() == nil and T.cbOwn("r39c2"), "story 39 hover: focus and band on r4, no chip anywhere", T.anyChip())
+    local c4 = T.tagged("r39c4")
+    ok(c4.mats and c4.mats[1] == T.SEL and c4.focusLook == true and T.plainScale(c4), "story 39 hover: r4's checkbox shows story 28's face (selection, no scale)")
+    -- A key at a line end (LEFT from column 1): nothing moves, the chip comes back at once
+    ok(T.key(wr, D.left, INV_ACT) and T.agree("r39c4") and FO._owner() == "keys" and T.chipped("r39c4", T.S39), "story 39 key at a line end after a hover: the chip on the same element at once")
+    -- Hover into the row already holding focus: the mouse owns it, the chip goes
+    T.move()
+    T.hover(T.tagged("r39r4"))
+    ok(T.agree("r39c4") and FO._owner() == "mouse" and T.noChip("r39c4") and c4.focusLook == true, "story 39 same-row hover: the chip goes, the focus look stays")
+    -- Key after hover: DOWN brings the chip on the new element
+    T.move()
+    T.hover(T.tagged("r39r3"))
+    ok(T.agree("r39c3") and T.noChip("r39c3"), "story 39 hover r3: no chip")
+    ok(T.key(wr, D.down, INV_ACT) and T.agree("r39c4") and T.chipped("r39c4", T.S39) and T.noChip("r39c3"), "story 39 DOWN after a hover: the chip on the new element at once")
+    -- Click with a pointer move on r3's gear: focus there, no chip
+    T.move()
+    T.fire(T.CLICK, T.tagged("r39g3"))
+    ok(T.agree("r39g3") and FO._owner() == "mouse" and T.anyChip() == nil and T.cbOwn("r39c4"), "story 39 click with a move: focus on r3's gear, no chip", T.anyChip())
+    -- Accept with the pointer still (Enter / gamepad A clicks the Button): onChange as before, the chip stays
+    T.key(wr, D.left, INV_ACT)
+    ok(T.agree("r39c3") and T.chipped("r39c3", T.S39), "story 39 accept: the keys on r3's checkbox")
+    local nch = T.ncalls("r39c3")
+    ok(T.key(wr, INV_DIR, A.accept) == false, "story 39 accept: left to the Button")
+    T.fire(T.CLICK, T.tagged("r39c3"))
+    ok(T.ncalls("r39c3") == nch + 1 and T.agree("r39c3") and FO._owner() == "keys" and T.chipped("r39c3", T.S39), "story 39 accept with the pointer still: onChange once, the chip stays")
+    -- A click at the recorded spot moves the chip to the clicked control (keys)
+    T.fire(T.CLICK, T.tagged("r39g3"))
+    ok(T.agree("r39g3") and FO._owner() == "keys" and T.chipped("r39g3", T.S39) and T.cbOwn("r39c3"), "story 39 click with the pointer still: the chip on the clicked control")
+    -- Unreadable pointer: a click leaves the owner as it is
+    F.mouseFail = "nil"
+    T.fire(T.CLICK, T.tagged("r39c3"))
+    ok(T.agree("r39c3") and FO._owner() == "keys" and T.chipped("r39c3", T.S39), "story 39 click, pointer unreadable: the owner stays (keys)")
+    F.mouseFail = nil
+    T.key(wr, D.left, INV_ACT) -- records a readable pointer (nothing moves)
+    T.move()
+    T.fire(T.CLICK, T.tagged("r39g3"))
+    ok(FO._owner() == "mouse", "story 39 click with a move after a key: the mouse")
+    F.mouseFail = "throw"
+    T.fire(T.CLICK, T.tagged("r39c3"))
+    ok(T.agree("r39c3") and FO._owner() == "mouse" and T.noChip("r39c3"), "story 39 click, pointer unreadable: the owner stays (mouse)")
+    F.mouseFail = nil
+    T.key(wr, D.down, INV_ACT)
+    ok(T.agree("r39c4") and T.chipped("r39c4", T.S39), "story 39 keys again: r4's checkbox chipped")
+    -- Choice and slider in a row: their Background is the chip, no scale; their own look back after
+    ok(T.key(wr, D.down, INV_ACT) and T.agree("r39ch") and T.chipMid("r39ch") == mid and T.tagged("r39ch").pad == 0 and T.tintIs(T.tagged("r39ch").matTint, g.focusChipTint),
+        "story 39 choice in a row: its Background is the chip")
+    local chw = T.tagged("r39ch")
+    ok(chw.look and T.near(chw.look[3], 1) and T.near(chw.look[6], 1), "story 39 choice: its value white")
+    ok(T.key(wr, D.right, INV_ACT) and T.agree("r39ch") and T.chipMid("r39ch") == mid and T.last("r39ch") ~= nil, "story 39 choice: RIGHT steps it, the chip stays")
+    ok(T.key(wr, D.down, INV_ACT) and T.agree("r39sl") and T.chipMid("r39sl") == mid and T.tagged("r39sl").pad == 0, "story 39 slider in a row: its Background is the chip")
+    ok(T.matOf("r39ch") == T.STRIP and C.els["r39ch"].chipOn == nil and chw.look and T.near(chw.look[3], g.text.r), "story 39 choice unfocused: its own strip and text colour")
+    -- Narrow gap: a compact row (gap 4, padding 4): p = 2
+    ok(T.key(wr, D.down, INV_ACT) and T.agree("r39g7") and FO._chipPad(C.els["r39g7"]) == 2 and T.chipped("r39g7", 32 / 28), "story 39 narrow gap: p = 2", FO._chipPad(C.els["r39g7"]))
+    ok(T.matOf("r39sl") == T.STRIP and C.els["r39sl"].chipOn == nil, "story 39 slider unfocused: its own strip")
+    -- A labelled game button in a row: the chip with its own padding and minimum height, no scale
+    ok(T.key(wr, D.down, INV_ACT) and T.agree("r39b8") and T.chipped("r39b8"), "story 39 labelled button: the chip")
+    local bw = T.tagged("r39b8")
+    ok(bw.mats[7] == g.buttonPadding.l and bw.mats[8] == g.buttonPadding.t and bw.mats[11] == g.buttonMinHeight and bw.Btn.scale == nil, "story 39 labelled button: its own padding and minimum height, no scale")
+    -- An unpadded row (r5: padding none): p = 0
+    ok(FO._chipPad(C.els["r39ch"]) == 0, "story 39 unpadded row: p = 0")
+    -- Lone control and BACK: no chip (story 28's looks)
+    ok(T.key(wr, D.down, INV_ACT) and T.agree("r39lone") and T.noChip("r39lone") and T.gearFaced("r39lone"), "story 39 lone control: no chip, story 28's face")
+    ok(bw.mats[1] ~= mid and C.els["r39b8"].chipOn == nil and bw.focusLook == false, "story 39 labelled button unfocused: its own look")
+    ok(T.key(wr, D.down, INV_ACT) and T.agree("#close:R39") and T.anyChip() == nil and T.tagged("#close:R39").focusLook == true, "story 39 BACK: no chip, its own focus look")
+    -- Switch off: the plain band, the chip unchanged
+    for _ = 1, 9 do T.key(wr, D.up, INV_ACT) end
+    ok(T.agree("r39c1"), "story 39 back on r1's checkbox")
+    g.focusRowStrong = false
+    T.key(wr, D.down, INV_ACT)
+    ok(T.agree("r39c2") and T.selected("r39r2") and T.chipped("r39c2", T.S39) and T.chipMid("r39c2") == mid, "story 39 switch off: the plain band, the chip unchanged")
+    g.focusRowStrong = true
+    T.key(wr, D.up, INV_ACT)
+    -- Re-style while focused: its own look at once, scale 1; the tick puts the chip back
+    B.create{ id = "r39g1", place = { row = rows[1] }, icon = { icon = "gear" }, iconSize = 28, dimmed = true, onClick = T.rec("r39g1") }
+    T.key(wr, D.right, INV_ACT)
+    ok(T.agree("r39g1") and T.chipped("r39g1", T.S39), "story 39 re-style: on r1's gear, chipped")
+    B.create{ id = "r39g1", place = { row = rows[1] }, icon = { icon = "gear" }, iconSize = 28, dimmed = false, onClick = T.rec("r39g1") }
+    local g1 = T.tagged("r39g1")
+    ok(C.els["r39g1"].chipOn == nil and T.plainScale(g1) and T.chipMid("r39g1") == nil, "story 39 re-style: its own look at once, scale 1")
+    tick()
+    ok(T.chipped("r39g1", T.S39), "story 39 re-style: the tick puts the chip back")
+    local mc = g1.matCalls
+    tick()
+    ok(g1.matCalls == mc, "story 39 tick: chipped already, no widget call")
+    -- No instance in a hook: a solid chip now, no asset load; the instance chip after the tick
+    T.key(wr, D.left, INV_ACT)
+    kill(mid)
+    local loads, gets, made = AS.stats.loads, F.getAssets, #F.mids
+    T.key(wr, D.down, INV_ACT)
+    local c2 = T.tagged("r39c2")
+    local sol = g.focusChipSolid
+    ok(T.agree("r39c2") and C.els["r39c2"].chipOn == "solid" and c2.colors and T.near(c2.colors[1], sol.r) and T.near(c2.colors[4], sol.a) and c2.colors[13] == 0
+        and T.scaleIs(c2.Btn, T.S39) and T.near(c2.content[1], 1), "story 39 in a hook, no instance: a solid chip now (white, scaled)")
+    ok(AS.stats.loads == loads and F.getAssets == gets and #F.mids == made, "story 39 in a hook: no asset load, nothing made", AS.stats.loads - loads)
+    tick()
+    ok(T.chipped("r39c2", T.S39) and C.els["r39c2"].chipOn == "strong" and #F.mids >= made + 1, "story 39 in a hook: the tick upgrades it to the instance chip")
+    mid = T.chipMid("r39c2")
+    -- Element gone: the recovered element gets the chip; a dead widget is skipped without a call
+    local c2calls = c2.matCalls
+    CK.remove(C.els["r39c2"].handle)
+    ok(T.agree("r39g2") and T.chipped("r39g2", T.S39) and c2.matCalls == c2calls, "story 39 element removed: the chip on the recovered element, none on the dead one")
+    -- Cover: the covered window's control loses the chip; back on return
+    local R2 = SC.open{ id = "R39b" }
+    local g2 = T.tagged("r39g2")
+    ok(T.noChip("r39g2") and T.gearOwn("r39g2") and T.plainScale(g2), "story 39 cover: the covered control's own look, scale 1")
+    SC.close(R2)
+    ok(T.agree("r39g2") and T.chipped("r39g2", T.S39), "story 39 cover: the chip back after the close")
+    -- Widget call fails: SetRenderScale throws: one WARN, the chip's face on, focus unchanged
+    local nW, nR = countLogs("the focus chip failed"), countLogs("the focus chip could not be removed")
+    local faults = FO.stats().chipFaults
+    T.tagged("r39g3").Btn.throwScale = true
+    T.key(wr, D.down, INV_ACT) -- r2 has one control left: r3's first column
+    T.key(wr, D.right, INV_ACT)
+    T.key(wr, D.left, INV_ACT); T.key(wr, D.right, INV_ACT)
+    ok(T.agree("r39g3") and T.chipMid("r39g3") ~= nil and countLogs("the focus chip failed") == nW + 1 and FO.stats().chipFaults > faults,
+        "story 39 SetRenderScale throws: the chip's face, one WARN, focus moved", countLogs("the focus chip failed") - nW)
+    T.tagged("r39g3").Btn.throwScale = false
+    T.key(wr, D.up, INV_ACT)
+    ok(T.agree("r39g2") and T.noChip("r39g3") and T.plainScale(T.tagged("r39g3")) and T.gearOwn("r39g3") and countLogs("the focus chip could not be removed") == nR + 1,
+        "story 39 SetRenderScale fixed: the old control restored (its own look even when the scale failed, one WARN), scale 1 now")
+    -- Close: own look, scale 1
+    SC.close(R)
+    ok(rec.lookId == nil and rec.lookRowId == nil and C.els["r39g2"].ref == nil, "story 39 window closed: its widgets went with it, nothing recorded")
+    -- Reopened: the new widgets start without a chip; the keys put it on the first control
+    R = SC.open{ id = "R39" }
+    tick()
+    local first = SC.stats().focus
+    ok(first ~= nil and C.els[first].chipOn == "strong" and T.chipped(first, T.S39) and #T.tagged(first).Btn.scale == 2, "story 39 reopened: the first control chipped on its new widget", first)
+    SC.close(R)
+    -- Creation fails: a solid chip for the session, one WARN
+    AS._reset()
+    C.forgetWarning("asset:focus chip")
+    C.forgetWarning("asset:focus row")
+    F.midFail = "create"
+    local nC = countLogs("focus chip (an instance")
+    local W = SC.open{ id = "R39f" }
+    local Lf = LS.create{ id = "r39fl", place = { screen = W, corner = "top-left" }, size = { 300, 200 } }
+    for i = 1, 2 do
+        local r = RS.create{ id = "r39fr" .. i, place = { list = Lf } }
+        B.create{ id = "r39fg" .. i, place = { row = r }, icon = { icon = "gear" }, iconSize = 28, dimmed = true, onClick = T.rec("r39fg" .. i) }
+    end
+    tick(); T.key(T.screenOf("R39f"), D.down, INV_ACT); tick()
+    local fw = T.tagged("r39fg2")
+    ok(T.agree("r39fg2") and C.els["r39fg2"].chipOn == "solid" and fw.colors and T.near(fw.colors[1], g.focusChipSolid.r) and countLogs("focus chip (an instance") == nC + 1,
+        "story 39 creation fails: a solid chip, one WARN", countLogs("focus chip (an instance") - nC)
+    F.midFail = nil
+    tick()
+    ok(C.els["r39fg2"].chipOn == "solid", "story 39 creation fails: solid for the session")
+    SC.close(W)
+    AS._reset()
+    ok(FO.stats().faults == faults0 and C.inDispatch == 0, "story 39: no fault in the focus path", FO.stats().faults - faults0)
+    -- Mutation check (the owner rule): with the owner forced to the mouse the chip would never show
+    ok(FO.stats().chips > 0, "story 39: chips counted", FO.stats().chips)
 end
 
 print(string.format("focus_test: %d passed, %d failed", pass, failN))
