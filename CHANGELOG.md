@@ -2,6 +2,16 @@
 
 All notable changes to Nucleus are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). From 0.5.0 a dependent's `need` and `dependsOn` are minimum versions (`>=0.5.0`), so a newer Nucleus never asks dependents to raise them. Up to 0.3.0, below 1.0.0 a dependent connected only to the same minor version (`need = "0.3.0"` accepted 0.3.x).
 
+## [0.15.3] - 2026-11-17
+
+Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
+
+For players: a mod's title-menu entry (Mod Manager's MANAGE MODS) no longer pops in: the menu's button column stays invisible until the entry is in, so QUIT no longer jumps down a moment after the menu appears, on the first menu and on every return from a match.
+
+### Fixed
+
+- The menu entry's pop-in since 0.12.3 (core story 35). When a dependent with an entry learns of a new title menu (its creation callback, which only records the path and schedules), it hides the game's button column (`VerticalBox_104`) on the next engine tick (`ExecuteInGameThreadAfterFrames(1)`) with one write, its render opacity to 0, while the game still keeps the column's `Overlay_0` collapsed (0.25 s after the menu's Construct). The 500 ms poll writes the saved opacity back right after the entry's insert (or a failed one). Still no Lua inside `MainMenu_C:Construct`. Several dependents share one hold through a UE4SS shared variable (`nucleus.ui.menuHold`); the last one to insert shows the column. A hold older than 2 s on the open menu is shown anyway with one `WARN` (`... column ... still hidden ...`) naming the mods still waiting. Without `ExecuteInGameThreadAfterFrames` (no EngineTick hook) one `WARN` and the old behaviour. With debug on, a line for the hide (time since the menu's creation, `Overlay_0`'s visibility) and one for the show (ms hidden). No public API change; Lua only (no new pak).
+
 ## [0.15.2] - 2026-11-17
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.

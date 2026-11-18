@@ -60,6 +60,8 @@ local function widget(cls, path, h)
     function w:GetFName() return fn(self.__name or self.__path:match("[^.:]+$")) end
     function w:IsA(c) return c and c.__isClass == self.__class end
     function w:GetRenderOpacity() return self.opacity or 1 end
+    -- story 35: the entry hides the column with one write and shows it again with one more (counted per widget)
+    function w:SetRenderOpacity(o) self.opacity = o; self.opWrites = (self.opWrites or 0) + 1 end
     return w
 end
 
@@ -302,6 +304,15 @@ function LoopInGameThreadWithDelay(_, f) F.loops[#F.loops + 1] = f return #F.loo
 function CancelDelayedAction() return true end
 function LoopAsync() error("LoopAsync used") end
 function ExecuteInGameThread() error("ExecuteInGameThread used") end
+-- story 35: actions for the next engine tick, run by frame()
+F.frames = {}
+function ExecuteInGameThreadAfterFrames(n, f)
+    assert(math.type(n) == "integer" and type(f) == "function", "ExecuteInGameThreadAfterFrames(integer, function)")
+    F.frames[#F.frames + 1] = f
+    return #F.frames
+end
+local AFTER_FRAMES = ExecuteInGameThreadAfterFrames
+local function frame() local q = F.frames; F.frames = {}; for _, f in ipairs(q) do f() end end
 local shared = {}
 ModRef = { GetSharedVariable = function(_, k) return shared[k] end, SetSharedVariable = function(_, k, v) shared[k] = v end }
 function Nucleus_Deref() return nil end
@@ -443,7 +454,14 @@ ok(#F.notify >= 1, "startup: menus learned from their creation")
 
 -- ---------------------------------------------------------------- the first menu: the click hook from the poll, entry late
 local m1 = build(1)
+ok(#F.frames == 1 and (m1.VerticalBox_104.opWrites or 0) == 0, "first menu: the creation callback only schedules (no write)")
+frame()
+local h1 = E._hold()
+ok(m1.VerticalBox_104.opacity == 0 and m1.VerticalBox_104.opWrites == 1, "first menu: next frame the column is hidden, one write")
+ok(h1 and h1.path == m1.__path and h1.saved == 1 and #h1.ids == 1 and h1.ids[1] == "TestMod"
+    and shared[E._HOLD_KEY]:match("^[^|]+|1|%d+|TestMod$"), "first menu: hold path|1|t0|TestMod", shared[E._HOLD_KEY])
 tick()
+ok(m1.VerticalBox_104.opacity == 1 and m1.VerticalBox_104.opWrites == 2 and E._hold() == nil and shared[E._HOLD_KEY] == "", "first menu: shown right after the poll's insert, hold cleared")
 ok(hookCount("MainMenu_C:Construct") == 0 and hookCount("HandleButtonClicked") == 1, "first menu: the click hook from the poll, never a Construct hook (an entry and a menu text)")
 ok(countLogs("ui menu hooks registered (CommonButtonBase:HandleButtonClicked) after the first menu") == 1, "first menu: the hooks line names only the click hook")
 ok(column(m1) == "START GAME,JOIN GAME,CUSTOMIZE,OPTIONS,MANAGE MODS,QUIT", "first menu: the entry between OPTIONS and QUIT", column(m1))
@@ -566,7 +584,12 @@ fireHook("MainMenu_C:Construct", m2)
 M._onConstructHook({ get = function() return m2 end })
 ok(spy2.n == 0 and F.creates == creates0 and F.getAssets == gaInHook, "return from a match: a Construct makes no Create, RemoveFromParent or AddChild on the new menu, loads nothing", spy2.n)
 ok(column(m2) == "START GAME,JOIN GAME,CUSTOMIZE,OPTIONS,QUIT" and #m2.page.children == 0, "return from a match: nothing inserted or attached at Construct", column(m2))
+ok((m2.VerticalBox_104.opWrites or 0) == 0, "return from a match: nothing written before the next frame")
+frame()
+ok(m2.VerticalBox_104.opacity == 0 and m2.VerticalBox_104.opWrites == 1 and E._hold() and E._hold().path == m2.__path, "return from a match: hidden on the next frame (one write), held")
+ok(hookCount("MainMenu_C:Construct") == 0, "return from a match: still no Construct hook")
 tick()
+ok(m2.VerticalBox_104.opacity == 1 and m2.VerticalBox_104.opWrites == 2 and E._hold() == nil, "return from a match: shown after the poll's insert")
 ok(column(m2) == "START GAME,JOIN GAME,CUSTOMIZE,OPTIONS,MANAGE MODS,QUIT", "return from a match: inserted from the poll", column(m2))
 ok(countLogs("in MainMenu_C_2 (poll)") == 1 and countLogs("(construct)") == 0, "return from a match: reason poll, never construct")
 ok(#m2.page.children == 1, "return from a match: the menu text attached once, from the poll")
@@ -836,6 +859,147 @@ tick(); tick()
 local tw = m8.page.children[1]
 ok(tw and tw.text == "corner" and tw.font == nil, "asset missing: the text attaches in the plain look")
 ok(countLogs("WARN the game font AlumniSans-Regular_Font (/Game/Fonts/Remaster/AlumniSans-Regular_Font.AlumniSans-Regular_Font) could not be loaded") == 1, "asset missing: one WARN")
+
+-- ---------------------------------------------------------------- story 35: no pop-in (the column hidden until the entry is in)
+local KEY = E._HOLD_KEY
+local function col(m) return m.VerticalBox_104 end
+local function swap(old) kill(old); tick(); tick() end -- lost (old), then opened (the new one): the insert
+F.frames = {}
+-- no entry in this state: nothing scheduled, nothing written, no hold
+ok(E.stats().entry == nil, "pop-in: no entry at the start")
+local p10 = build(10)
+ok(#F.frames == 0, "pop-in: no entry -> no action scheduled")
+swap(m8)
+ok((col(p10).opWrites or 0) == 0 and E._hold() == nil, "pop-in: no entry -> no write, no hold")
+local e10 = E.entry{ id = "p10", label = { en = "POP" }, onClick = function() end }
+ok(column(p10):find("OPTIONS,POP,QUIT", 1, true) and (col(p10).opWrites or 0) == 0, "pop-in: entry() on an open menu inserts at once, no hide")
+
+-- saved opacity not 1: restored to it; the debug lines
+L.debugEnabled = true
+local p11 = build(11)
+col(p11).opacity = 0.5
+p11.Overlay_0.vis = 1 -- the game keeps Overlay_0 Collapsed for 0.25 s after Construct
+frame()
+ok(col(p11).opacity == 0 and col(p11).opWrites == 1 and E._hold().saved == 0.5 and shared[KEY]:find("|0.5|", 1, true), "pop-in: saved opacity 0.5 in the hold", shared[KEY])
+ok(countLogs("hid the column of MainMenu_C_11 until the entry is in (1 frame, ") == 1 and countLogs("Overlay_0 Collapsed, opacity was 0.50)") == 1, "pop-in: debug line for the hide (frames, ms, Overlay_0)", logs[#logs])
+swap(p10)
+ok(col(p11).opacity == 0.5 and col(p11).opWrites == 2 and E._hold() == nil, "pop-in: restored to the saved 0.5 after the insert", col(p11).opacity)
+ok(countLogs("showed the column of MainMenu_C_11 again (hidden ") == 1, "pop-in: debug line for the show (ms hidden)")
+ok(countLogs("ui menu entry 'p10' inserted between OPTIONS and QUIT in MainMenu_C_11 (poll)") == 1, "pop-in: the insert's info line unchanged")
+L.debugEnabled = false
+
+-- two dependents: another mod holds the same path -> join, no second write; stays hidden until it lets go; the cap
+local p12 = build(12)
+col(p12).opacity = 0 -- the other dependent's hide (set directly: not one of ours)
+shared[KEY] = p12.__path .. "|1|" .. clock .. "|Other.Mod"
+frame()
+local h12 = E._hold()
+ok((col(p12).opWrites or 0) == 0 and h12 and #h12.ids == 2 and h12.ids[1] == "Other.Mod" and h12.ids[2] == "TestMod", "pop-in: a hold on the same path -> joined, no write", shared[KEY])
+swap(p11)
+ok(column(p12):find("OPTIONS,POP,QUIT", 1, true) and col(p12).opacity == 0 and (col(p12).opWrites or 0) == 0, "pop-in: after our insert the column stays hidden (the other still holds)")
+ok(E._hold() and #E._hold().ids == 1 and E._hold().ids[1] == "Other.Mod", "pop-in: only the other id left in the hold")
+tick()
+ok(col(p12).opacity == 0 and countLogs("still hidden") == 0, "pop-in: under 2 s no cap")
+clock = clock + 2100000
+tick()
+ok(col(p12).opacity == 1 and col(p12).opWrites == 1 and E._hold() == nil, "pop-in: cap -> shown with the saved opacity, hold cleared")
+ok(countLogs("WARN ui menu entry: the menu column of MainMenu_C_12 was still hidden 2.1 s after the menu appeared, waiting for Other.Mod; shown anyway") == 1, "pop-in: one WARN naming the waiting ids", logs[#logs])
+shared[KEY] = p12.__path .. "|1|" .. (clock - 3000000) .. "|Other.Mod"
+tick(); tick()
+ok(countLogs("still hidden") == 1, "pop-in: one WARN per menu")
+shared[KEY] = ""
+
+-- insert fails (QUIT not in the column) and insert raises (QUIT's slot unreadable): shown right after
+local p13 = newMenu(13)
+p13.UI_Button_Master_3:RemoveFromParent()
+for _, nt in ipairs(F.notify) do if nt.cls:find("MainMenu_C", 1, true) then nt.fn(p13) end end
+frame()
+ok(col(p13).opacity == 0, "pop-in: insert fails -> hidden first")
+swap(p12)
+ok(col(p13).opacity == 1 and E._hold() == nil and E._records[p13.__path] and E._records[p13.__path].failed, "pop-in: insert fails -> shown right after (no stuck hide)")
+local p14 = build(14)
+p14.UI_Button_Master_3.Slot = nil
+frame()
+ok(col(p14).opacity == 0, "pop-in: insert raises -> hidden first")
+swap(p13)
+ok(col(p14).opacity == 1 and E._hold() == nil and countLogs("QUIT's slot could not be read") == 1, "pop-in: insert raises -> shown right after", logs[#logs])
+
+-- menu lost before its insert: released for this state, no write on the dead menu
+local p15 = build(15)
+frame()
+ok(col(p15).opacity == 0 and E._held()[p15.__path], "pop-in: held before it opens")
+kill(p15)
+tick()
+ok(col(p15).opWrites == 1 and E._hold() == nil and not E._held()[p15.__path], "pop-in: lost before the insert -> released, no write on it")
+-- a hold this state shares on a menu that opened, then was lost: our id out on lost, no write
+local p16 = build(16)
+swap(p14)
+shared[KEY] = p16.__path .. "|1|" .. clock .. "|Other.Mod,TestMod"
+E._held()[p16.__path] = true
+kill(p16); tick()
+ok(E._hold() and #E._hold().ids == 1 and E._hold().ids[1] == "Other.Mod" and not E._held()[p16.__path] and (col(p16).opWrites or 0) == 0, "pop-in: lost while held -> our id out, no write")
+shared[KEY] = ""
+
+-- the scheduled action after the insert: a record for the path -> nothing written
+F.frames = {}
+local p17 = build(17)
+tick()
+ok(column(p17):find("OPTIONS,POP,QUIT", 1, true), "pop-in: inserted before the scheduled action ran")
+frame()
+ok((col(p17).opWrites or 0) == 0 and E._hold() == nil, "pop-in: the scheduled action after the insert writes nothing")
+
+-- removeEntry and unload while held: released, shown if no other holder
+local p18 = build(18)
+frame()
+ok(col(p18).opacity == 0, "pop-in: held before removeEntry")
+E.removeEntry(e10)
+ok(col(p18).opacity == 1 and col(p18).opWrites == 2 and E._hold() == nil, "pop-in: removeEntry -> released and shown")
+E.entry{ id = "p11", label = { en = "POP" }, onClick = function() end }
+local p19 = build(19)
+shared[KEY] = p19.__path .. "|1|" .. clock .. "|Other.Mod"
+col(p19).opacity = 0
+frame()
+E._unload()
+ok(col(p19).opacity == 0 and E._hold() and #E._hold().ids == 1 and E._hold().ids[1] == "Other.Mod", "pop-in: unload with another holder -> our id out, still hidden")
+shared[KEY] = ""
+E.entry{ id = "p12", label = { en = "POP" }, onClick = function() end }
+local p20 = build(20)
+frame()
+E._unload()
+ok(col(p20).opacity == 1 and col(p20).opWrites == 2 and E._hold() == nil, "pop-in: unload as the only holder -> shown")
+
+-- bad shared values: no hold, overwritten by the next hide
+local bad = { 5, "garbage", "a|b|c", "/p|2|1|X", "/p|0.5|x|X", "/p|1|1|", "/p|1|1|bad id", "/p|1|1|" .. string.rep("a,", 16) .. "a", "/p|1|1|X" .. string.rep("x", 4096) }
+for i, v in ipairs(bad) do ok(E._parseHold(v) == nil, "pop-in: bad hold value " .. i .. " -> no hold") end
+local ids16 = {}
+for i = 1, 16 do ids16[i] = "m" .. i end
+ok(E._parseHold("/p|1|1|" .. table.concat(ids16, ",")) ~= nil, "pop-in: 16 ids is a hold")
+local e13 = E.entry{ id = "p13", label = { en = "POP" }, onClick = function() end }
+local p21 = build(21)
+shared[KEY] = "garbage|||"
+frame()
+ok(col(p21).opacity == 0 and col(p21).opWrites == 1 and E._hold() and E._hold().path == p21.__path, "pop-in: a garbage value -> treated as no hold, overwritten")
+-- a hold on another path is replaced by the new menu's
+local p22 = build(22)
+frame()
+ok(col(p22).opacity == 0 and E._hold().path == p22.__path, "pop-in: a hold on another path is replaced")
+for _, mm in ipairs({ p17, p18, p19, p20, p21 }) do kill(mm) end
+tick(); tick()
+ok(col(p22).opacity == 1 and E._hold() == nil and next(E._held()) == nil, "pop-in: the dead menu's hold released, the open one shown")
+
+-- scheduler missing or raising: one WARN, no hide, the entry still inserts
+ExecuteInGameThreadAfterFrames = nil
+local p23 = build(23)
+ok(#F.frames == 0 and countLogs("WARN ui menu entry: can't schedule the column hide (ExecuteInGameThreadAfterFrames is not available)") == 1, "pop-in: scheduler missing -> one WARN", logs[#logs])
+swap(p22)
+ok((col(p23).opWrites or 0) == 0 and column(p23):find("OPTIONS,POP,QUIT", 1, true), "pop-in: scheduler missing -> no hide, the entry inserted")
+ExecuteInGameThreadAfterFrames = function() error("EngineTick hook is not available") end
+local p24 = build(24)
+swap(p23)
+ok((col(p24).opWrites or 0) == 0 and column(p24):find("OPTIONS,POP,QUIT", 1, true) and countLogs("can't schedule the column hide") == 1, "pop-in: scheduler raising -> no hide, no second WARN, entry inserted")
+ExecuteInGameThreadAfterFrames = AFTER_FRAMES
+E.removeEntry(e13)
+ok(hookCount("MainMenu_C:Construct") == 1, "pop-in: no new Construct hook (only the generic test want's)")
 
 print(string.format("menu_test: %d passed, %d failed", pass, failN))
 if failN > 0 then os.exit(1) end

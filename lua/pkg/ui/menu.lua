@@ -21,7 +21,9 @@
 -- registered from a poll tick once a MainMenu_C exists, never at startup: both host launches of the mini-spike that
 -- registered hooks earlier crashed at the first menu (research 9.3; the cause was a GetFName on a null property, 9.1,
 -- but registering after the menu exists is the order proven in every VM launch). Every menu gets its entry and
--- elements from the poll's opened, within about a second (one or two 500 ms ticks) of the menu appearing. No user
+-- elements from the poll's opened, within about a second (one or two 500 ms ticks) of the menu appearing; a state with
+-- an entry keeps the game's button column invisible until then (story 35: the creation callback only schedules, via
+-- _onCreated, a one-write hide for the next engine tick, before the game first draws the column). No user
 -- asks for Construct today (story 34): widget work inside it, under the game's own CreateWidget/AddToViewport right
 -- after a world teardown and GC, once read a freed object and crashed the game; the machinery stays as a tested
 -- opt-in. UE4SS keys a script hook by the function's name chain (LuaMod.cpp, find_function_hook_data), so one
@@ -71,15 +73,36 @@ local function track(p, obj)
 end
 M._track = track
 
+-- Internal fn(path) run from the creation callback once the new menu is tracked (story 35: entry.lua schedules its
+-- column hide for the next engine tick). Only the path: nothing in the callback touches the new widget's properties.
+local created = {}
+function M._onCreated(fn) created[#created + 1] = fn end
+
 -- Learn new menus from their creation (only the path and a weak handle; nothing is called on the widget). Registered
 -- at the first use of the menu host in this Lua state, before the first menu exists. Never returns true.
 local function ensureNotify()
     if notified then return end
     notified = true
     okNotify, errNotify = pcall(NotifyOnNewObject, C.MENU_CLASS, function(obj)
-        pcall(function() track(C.pathOf(obj), obj) end)
+        pcall(function()
+            local p = C.pathOf(obj)
+            track(p, obj)
+            if not rec[p] then return end
+            for _, f in ipairs(created) do
+                local ok, err = pcall(f, p)
+                if not ok then C.warnOnce("menu created", "menu creation work failed: %s (further failures not logged)", tostring(err):match("^[^\n]*")) end
+            end
+        end)
         return false
     end)
+end
+
+-- The live menu of a tracked path, re-found by its weak handle (valid only in the current game-thread callback), or nil.
+function M._menuOf(path)
+    local r = type(path) == "string" and rec[path] or nil
+    if not (r and r.h) then return nil end
+    local ok, w = pcall(C.deref, r.h)
+    return ok and w or nil
 end
 
 local function seed()
