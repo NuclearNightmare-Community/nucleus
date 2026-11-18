@@ -1037,6 +1037,25 @@ do
     if opened then SC.close(opened) end
     B.remove(bw)
 end
+-- the warm-up per host kind: a mod with elements only on the menu, only on a game screen, only on a window, or only on the HUD
+do
+    local function warmWith(list)
+        for k, o in pairs(handles) do if o == SCREENCLASS then handles[k] = nil end end
+        local saved = C.order
+        C.order = list
+        X._flushDeferred()
+        C.order = saved
+        C.inDispatch = 1
+        local cls = X._classOf("screen")
+        C.inDispatch = 0
+        return cls ~= nil
+    end
+    ok(warmWith{ { place = { host = "menu" } } }, "story 37: the tick warms the window class with only menu elements")
+    ok(warmWith{ { place = { host = "createServer" } } }, "story 37: the tick warms the window class with only game-screen elements")
+    ok(warmWith{ { place = { host = "hud" } }, { panel = { place = { host = "screen#W" } }, place = {} } }, "story 37: the tick warms the window class with only a window's elements")
+    ok(not warmWith{ { place = { host = "hud" } }, { removed = true, place = { host = "menu" } } }, "story 37: no warm-up with only HUD or removed elements")
+    X._classOf("screen") -- warm again for the cases below
+end
 
 -- the state's first button made inside a callback: its click hook is registered by the next UI tick (no journal element)
 do

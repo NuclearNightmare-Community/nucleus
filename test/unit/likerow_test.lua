@@ -1085,6 +1085,17 @@ do
     m:click(1)
     ok(#LOG == n0 + 1 and LOG[#LOG].i == 4, "after a throwing onChange: a later click with a good callback runs it")
     CH.set(gch, 3)
+    -- core story 37: the game picker's onChange runs as inside a hook: a cold window class is not loaded there
+    do
+        for k, o in pairs(handles) do if o == SCREENCLASS then handles[k] = nil end end
+        local inside, cls, g0
+        C.els["nr.c"].onChange = function() inside = X._inHook() and C.inDispatch > 0; g0 = F.getAssets; cls = X._classOf("screen") end
+        m:click(1)
+        ok(inside and cls == nil and F.getAssets == g0, "story 37: the game picker's onChange runs as inside a hook (cache only, no load)")
+        ok(C.inDispatch == 0 and not X._inHook(), "story 37: the flag is lowered after the game picker's onChange")
+        C.els["nr.c"].onChange = good
+        CH.set(gch, 3)
+    end
     -- setLabel / setHelp while live
     local t1 = X.stats().gameTips
     RS.setLabel(like1, "Enemy Dmg")
