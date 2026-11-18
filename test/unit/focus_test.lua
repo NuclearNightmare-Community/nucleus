@@ -1741,6 +1741,12 @@ do
     clock = clock + 2000000
     T.fire(T.CLICK, T.tagged("r39c3"))
     ok(FO._mode() == "mouse" and T.noChip("r39c3"), "story 39 accept, a click 2 s later: mouse")
+    -- Another key after an accept cancels it: a click on that element then is the mouse's
+    T.key(wr, D.left, INV_ACT)
+    T.key(wr, INV_DIR, A.accept)
+    T.key(wr, D.right, INV_ACT); T.key(wr, D.left, INV_ACT)
+    T.fire(T.CLICK, T.tagged("r39c3"))
+    ok(FO._mode() == "mouse" and T.noChip("r39c3"), "story 39 accept, another key, then a click: mouse")
     -- A key left to a text box (keyboard focus on something else in the window) is still an input of the keys
     local keep = F.focus
     F.focus = { HasKeyboardFocus = function() return true end }
