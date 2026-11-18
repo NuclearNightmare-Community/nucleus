@@ -626,17 +626,17 @@ end
 
 -- A mouse click (or drag, or commit) on an element of a window: the model's focus moves there.
 local used
-function F.used(el)
+function F.used(el, noClick)
     hookDepth = hookDepth + 1 -- always inside a click, drag end, commit or arrow hook
-    local ok, err = pcall(used, el)
+    local ok, err = pcall(used, el, noClick)
     hookDepth = hookDepth - 1
     if not ok then error(err, 0) end
 end
 local navDepth = 0 -- > 0 while a key is handled (a step it causes reaches F.used: still the key's)
-used = function(el)
+used = function(el, noClick)
     -- Story 39: a click is the mouse's (on any host: the menu's elements too), unless it is a key's (the Accept key's
     -- click, a step inside the key's own handling).
-    if navDepth == 0 then clickInput(el and el.id) end
+    if navDepth == 0 and not noClick then clickInput(el and el.id) end
     if not F.focusable(el) then return end
     local host = C.hostOf(el)
     if type(host) ~= "string" or C.hostKind(host) ~= "screen" then return end
@@ -781,15 +781,16 @@ local function hoverBody(ctx)
     local rec = C.windows[host:sub(8)]
     if not (rec and rec.open) or not globalTop(rec) then return ignore() end
     if samePointer() then return ignore() end -- content moved under a still pointer
-    -- Story 39: a real pointer move into a row of the top window is an input of the mouse: no chip from here on.
-    acceptKey = nil
-    input("mouse")
     local lines = F.lines(host, backIdOf(rec))
     local li = nil
     for i, l in ipairs(lines) do if l.owner == row.id then li = i break end end
     if not li then return ignore() end -- no focusable in the row
     local cur = focusedIn(rec, lines)
     if cur == nil then return ignore() end -- a text box (or something outside the window) holds keyboard focus
+    -- Story 39: a real pointer move into a focusable row of the top window is an input of the mouse: no chip from here
+    -- on (an ignored hover, above, changes nothing).
+    acceptKey = nil
+    input("mouse")
     if cur ~= "window" and F.find(lines, cur) == li then -- the row already holds focus: the pointer owns it now
         rememberPointer()
         return ignore()

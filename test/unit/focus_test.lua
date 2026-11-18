@@ -1650,6 +1650,11 @@ do
     B.create{ id = "r39lone", place = { screen = R, corner = "bottom-right" }, icon = { icon = "gear" }, iconSize = 28, dimmed = true, onClick = T.rec("r39lone") }
     local rowOff = RS.create{ id = "r39off", place = { screen = R, corner = "top-right" } } -- a row outside a list
     X.create{ id = "r39offt", text = "NOT IN A LIST", place = { row = rowOff } }
+    -- Plain-look list rows (the solid background branch): unstyled (padding 0) and padded (tight 4)
+    local rp0 = RS.create{ id = "r39p0", place = { list = L }, style = { look = "plain" } }
+    X.create{ id = "r39p0t", text = "PLAIN", place = { row = rp0 } }
+    local rp4 = RS.create{ id = "r39p4", place = { list = L }, style = { look = "plain", padding = "tight" } }
+    X.create{ id = "r39p4t", text = "PLAIN 4", place = { row = rp4 } }
     tick()
     -- Taller list rows: the row's Background padding is its style's (0) plus listRowPadX / listRowPadY; not outside a list
     local rb = T.tagged("r39r2").Background
@@ -1657,6 +1662,12 @@ do
         "story 39 list row: its padding grows by listRowPadX / listRowPadY", rb.pad and table.concat(rb.pad, ","))
     local op = T.tagged("r39off").Background.pad
     ok((op == nil or (op[1] == 0 and op[2] == 0)) and select(2, X._rowPad(C.els["r39off"])) == 0, "story 39 a row outside a list: no extra padding")
+    local function padIs(id, p) local q = T.tagged(id).Background.pad return q ~= nil and q[1] == p and q[2] == p and q[3] == p and q[4] == p end
+    ok(padIs("r39p0", 4) and padIs("r39p4", 8), "story 39 plain list rows: style padding plus listRowPadX / Y on the first build",
+        table.concat(T.tagged("r39p0").Background.pad or {}, ",") .. " / " .. table.concat(T.tagged("r39p4").Background.pad or {}, ","))
+    X._backgroundStyle(C.els["r39p0"], T.tagged("r39p0"), false)
+    X._backgroundStyle(C.els["r39p4"], T.tagged("r39p4"), false)
+    ok(padIs("r39p0", 4) and padIs("r39p4", 8) and T.tagged("r39p4").mat == nil, "story 39 plain list rows: the same after a re-style (solid background)")
     -- Keys on a row: the window opens (keys mode) on r1's checkbox: the chip (its own instance, not the band's), white, scaled
     local cw = T.tagged("r39c1")
     local mid = T.chipMid("r39c1")
@@ -1748,6 +1759,18 @@ do
         "story 39 keys, slider in a row: its Background is the chip, its number white")
     ok(T.matOf("r39ch") == T.STRIP and C.els["r39ch"].chipOn == nil and chw.look and T.near(chw.look[3], g.text.r), "story 39 choice unfocused: its own strip and text colour")
     ok(T.key(wr, D.right, INV_ACT) and T.agree("r39sl") and T.whiteNumber("r39sl") and T.chipMid("r39sl") == mid, "story 39 keys, slider: RIGHT nudges it, the chip and white number stay")
+    -- A hover while a text box of the window holds keyboard focus (typing in the slider's number box) changes nothing:
+    -- the mode stays keys, the chip stays
+    local keepF = F.focus
+    F.focus = { HasKeyboardFocus = function() return true end }
+    T.move()
+    T.hover(T.tagged("r39r5"))
+    ok(FO._mode() == "keys" and C.els["r39sl"].chipOn == "strong" and T.whiteNumber("r39sl"), "story 39 hover while a text box holds focus: mode keys, the chip stays")
+    F.focus = keepF
+    -- A commit of the number box (Enter) is no click: keys mode, the chip stays
+    T.tagged("r39sl").text = "7"
+    T.fire(T.COMMIT, T.tagged("r39sl"))
+    ok(T.agree("r39sl") and FO._mode() == "keys" and C.els["r39sl"].chipOn == "strong" and T.chipMid("r39sl") == mid, "story 39 slider commit: keys mode, the chip stays")
     -- The same controls in mouse mode: no chip, their own look with the focus look (story 27)
     T.move()
     T.hover(T.tagged("r39r5"))
@@ -1784,15 +1807,22 @@ do
     T.key(wr, D.down, INV_ACT)
     ok(T.key(wr, D.down, INV_ACT) and T.agree("r39lone") and T.noChip("r39lone") and T.gearFaced("r39lone"), "story 39 lone control: no chip, story 28's face")
     ok(T.key(wr, D.down, INV_ACT) and T.agree("#close:R39") and T.anyChip() == nil and T.tagged("#close:R39").focusLook == true, "story 39 BACK: no chip, its own focus look")
-    -- Accept on BACK, then its click (an internal button): the key's; a click without one: the mouse's
-    T.key(wr, INV_DIR, A.accept)
-    C.clickInput("#close:R39")
-    ok(FO._mode() == "keys", "story 39 accept on BACK, its click: keys mode")
-    C.clickInput("#close:R39")
-    ok(FO._mode() == "mouse", "story 39 a click on BACK: mouse mode")
     -- Switch off: the plain band, the chip unchanged
     for _ = 1, 12 do T.key(wr, D.up, INV_ACT) end
     ok(T.agree("r39c1") and FO._mode() == "keys", "story 39 back on r1's checkbox")
+    -- BACK of a window over this one, clicked for real (its internal button): after the Accept key, the key's (the chip
+    -- below stays); without it, the mouse's (no chip on the window below)
+    SC.open{ id = "R39x" }
+    ok(T.agree("#close:R39x") and FO._mode() == "keys", "story 39 upper window: its BACK holds focus")
+    T.key(T.screenOf("R39x"), INV_DIR, A.accept)
+    T.fire(T.CLICK, T.tagged("#close:R39x"))
+    ok(C.windows["R39x"] == nil or not C.windows["R39x"].open, "story 39 accept on BACK, its real click: the upper window closed")
+    ok(FO._mode() == "keys" and T.agree("r39c1") and T.chipped("r39c1", T.S39), "story 39 accept on BACK, its real click: keys mode, the chip below")
+    SC.open{ id = "R39x" }
+    T.fire(T.CLICK, T.tagged("#close:R39x"))
+    ok(FO._mode() == "mouse" and T.agree("r39c1") and T.noChip("r39c1") and T.anyChip() == nil, "story 39 a real click on BACK: mouse mode, no chip on the window below", T.anyChip())
+    T.key(wr, D.left, INV_ACT)
+    ok(FO._mode() == "keys" and T.chipped("r39c1", T.S39), "story 39 a key after: the chip back")
     g.focusRowStrong = false
     T.key(wr, D.down, INV_ACT)
     ok(T.agree("r39c2") and T.selected("r39r2") and T.chipped("r39c2", T.S39) and T.chipMid("r39c2") == mid, "story 39 switch off: the plain band, the chip unchanged")
