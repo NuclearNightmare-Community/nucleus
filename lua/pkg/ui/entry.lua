@@ -30,10 +30,11 @@
 -- hide for the next engine tick: one write, the column's render opacity to 0, while the game still keeps Overlay_0
 -- collapsed (0.25 s after Construct); the poll's opened writes the saved opacity back right after the insert. Holds of
 -- several dependents are shared through one UE4SS shared variable; a 2 s cap shows the column anyway with one WARN
--- (see "no pop-in" below). Each insertion is recorded per Lua state as menu path -> the entry widget's name; a menu with a record is
--- skipped, so repeated opened events never insert twice. The record goes with the menu. Clicks come through one
--- RegisterHook per Lua state on CommonButtonBase:HandleButtonClicked, filtered by the clicked widget's name against
--- the live menu's record (never a kept UObject); a match runs onClick(handle) under pcall, once per click.
+-- (see "no pop-in" below). Each insertion is recorded per Lua state as menu path -> the entry widget's name; a menu
+-- with a record is skipped, so repeated opened events never insert twice. The record goes with the menu. Clicks come
+-- through one RegisterHook per Lua state on CommonButtonBase:HandleButtonClicked, filtered by the clicked widget's
+-- name against the live menu's record (never a kept UObject); a match runs onClick(handle) under pcall, once per
+-- click.
 local BASE = (...):gsub("%.ui%.entry$", "")
 local C = require(BASE .. ".ui.common")
 local M = require(BASE .. ".ui.menu")
@@ -447,8 +448,10 @@ local function readHold()
     return ok and parseHold(v) or nil
 end
 local function writeHold(h)
-    local v = h and string.format("%s|%.4g|%d|%s", h.path, h.saved, h.t0, table.concat(h.ids, ",")) or ""
-    pcall(function() ModRef:SetSharedVariable(HOLD_KEY, v) end)
+    pcall(function()
+        local v = h and string.format("%s|%.4g|%d|%s", h.path, h.saved, h.t0, table.concat(h.ids, ",")) or ""
+        ModRef:SetSharedVariable(HOLD_KEY, v)
+    end)
 end
 local function hasId(h, id)
     for _, x in ipairs(h.ids) do if x == id then return true end end
@@ -486,11 +489,12 @@ local function hideNow(path)
     local ov = prop(mm, "Overlay_0")
     local okV, vis = false, nil
     if C.valid(ov) then okV, vis = pcall(C.call0, ov, "GetVisibility") end
+    local okT, t0 = pcall(C.micros)
+    if not (okT and math.type(t0) == "integer") then return end -- no clock: no hide (nothing could time it out)
     local okW = pcall(function() vb:SetRenderOpacity(0) end)
     if not okW then return end
-    local t0 = C.micros()
-    writeHold({ path = path, saved = op, t0 = t0, ids = { C.modTag } })
     held[path] = true
+    writeHold({ path = path, saved = op, t0 = t0, ids = { C.modTag } })
     if C.debugOn() then
         C.log.debug("ui menu entry '%s': hid the column of %s until the entry is in (1 frame, %s ms after its creation; Overlay_0 %s, opacity was %.2f)",
             ent.id, path:match("[^.]+$"), b and string.format("%.1f", (t0 - b) / 1000) or "?",
