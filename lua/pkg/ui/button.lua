@@ -270,6 +270,13 @@ X.KIND.button = {
 style = function(el, w, fresh)
     if fresh then el.colorKey = "plain" end -- the generator's white label
     el.faceOn = nil -- core story 28: a re-style draws the button's own look (the UI tick puts a focus face back)
+    -- Core story 39: and no focus chip (its render scales back to 1; the UI tick puts the chip back while it is wanted).
+    el.chipOn = nil
+    if fresh then el.chipScaled = nil end -- a new widget has scale 1
+    if el.chipScaled then
+        local okS, errS = pcall(B._chipOff, el, w)
+        if not okS then C.warnOnce("focus chip scale", "button '%s': the focus chip's scale was not reset: %s", el.id, firstLine(errS)) end
+    end
     local s, h, p = el.style, el.style.hover, el.style.pressed
     local only = iconOnly(el)
     el.styledIconOnly = only
@@ -340,6 +347,54 @@ function B._focusFace(el, w)
     end
     el.faceOn = true -- only once the whole face is on: a failed one is tried again on the next tick
     return true
+end
+
+-- Core story 39 (0.15.4): the focus chip. While the keyboard or gamepad owns the focus, focus.lua draws a focused button
+-- or checkbox inside a row with the chip: mid (the chip instance, assets.lua A.focusChipMaterial) as its face (normal and
+-- hover brush, theme.game.focusChipTint) with the padding and minimum height its own style gives it, or, without an
+-- instance, the solid theme.game.focusChipSolid (SetColors, which has one padding and no minimum height: a game-look
+-- labelled button keeps its focus face then, so its layout never moves); its label and icon white (el.colorKey =
+-- "focus": its own style puts its colours back). An icon-only one also gets a render scale: Btn s = (size + 2p) / size
+-- per axis, Content 1 / s, so the chip reaches p units beyond the icon while the icon and the layout stay as they are.
+-- Sets el.chipOn ("strong" | "solid") once the face is on. False when no chip can be drawn now. Raises on a failed
+-- widget call (the caller logs it once).
+function B._chip(el, w, mid, p)
+    local g = theme.game
+    if mid then
+        local t = g.focusChipTint
+        local l, tp, r, b, mh
+        if el.gameLook then
+            local pd = g.buttonPadding
+            l, tp, r, b, mh = pd.l, pd.t, pd.r, pd.b, g.buttonMinHeight
+        else
+            local pad = el.styledIconOnly and 0 or el.style.pad
+            l, tp, r, b, mh = pad, pad, pad, pad, 0
+        end
+        C.count(); w:SetMaterials(mid, mid, t.r, t.g, t.b, t.a, l, tp, r, b, mh)
+    else
+        if el.gameLook then return false end
+        local c = g.focusChipSolid
+        C.count(); w:SetColors(c.r, c.g, c.b, c.a, c.r, c.g, c.b, c.a, c.r, c.g, c.b, c.a, el.styledIconOnly and 0 or el.style.pad)
+    end
+    el.chipOn, el.faceOn = mid and "strong" or "solid", nil
+    local wh = theme.white
+    el.colorKey = "focus"
+    C.count(); w:SetContentColors(wh.r, wh.g, wh.b, wh.a, wh.r, wh.g, wh.b, wh.a)
+    if el.styledIconOnly and p and p > 0 and el.iconSize and el.iconSize.w > 0 and el.iconSize.h > 0 then
+        local sx, sy = (el.iconSize.w + 2 * p) / el.iconSize.w, (el.iconSize.h + 2 * p) / el.iconSize.h
+        el.chipScaled = true
+        C.count(); w.Btn:SetRenderScale({ X = sx, Y = sy })
+        C.count(); w.Content:SetRenderScale({ X = 1 / sx, Y = 1 / sy })
+    end
+    return true
+end
+
+-- The chip's render scales back to 1 (the kind's own style then draws the face again). Raises on a failed call.
+function B._chipOff(el, w)
+    if not el.chipScaled then return end
+    C.count(); w.Btn:SetRenderScale({ X = 1, Y = 1 })
+    C.count(); w.Content:SetRenderScale({ X = 1, Y = 1 })
+    el.chipScaled = nil -- only once both are back: a failed one is tried again on the next restore
 end
 
 -- Whether a container holds an element of a kind in set, at any depth (story 21: a row in a list).
