@@ -6,7 +6,7 @@ All notable changes to Nucleus are recorded here. The format follows [Keep a Cha
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
 
-For players: a mod's checkbox, choice, slider or button can no longer freeze the game by drawing an icon or a control for the first time when it is clicked (Mod Manager 0.2.0's first toggle hung on the restart icon).
+For players: a mod's checkbox, choice, slider or button can no longer freeze the game by drawing an icon or a control for the first time when it is clicked (Mod Manager 0.2.0's first toggle hung on the restart icon). A mod's title-menu entry is not covered yet.
 
 ### Fixed
 
