@@ -204,7 +204,7 @@ local function chainVisible(el)
 end
 
 -- The element whose live widget fired, or nil (another mod's, a stale widget, disabled or hidden).
-local function target(ctx)
+local function target(ctx, commit)
     local w = ctx:get()
     if not C.valid(w) then return nil end
     local tag = X._readTag(w, "slider")
@@ -215,7 +215,7 @@ local function target(ctx)
     local cur = el.ref and C.deref(el.ref)
     if not cur or cur:GetAddress() ~= w:GetAddress() then S.ignored = S.ignored + 1 return nil end -- not its live widget
     if not el.enabled or not chainVisible(el) then S.dropped = S.dropped + 1 return nil end
-    C.used(el) -- core story 27: a window's focus follows the mouse
+    C.used(el, commit) -- core story 27: a window's focus follows the mouse (story 39: a commit is no click)
     return el, w
 end
 
@@ -253,7 +253,7 @@ local function onEnd(ctx)
 end
 
 local function onCommit(ctx)
-    local el, w = target(ctx)
+    local el, w = target(ctx, true) -- a commit (Enter, or focus lost) moves the focus model but is no click
     if not el then return end
     S.commits = S.commits + 1
     local okT, text = pcall(function() return w.Box:GetText():ToString() end)

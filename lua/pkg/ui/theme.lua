@@ -91,14 +91,15 @@ M.game = {
     -- material, its fill clearly brighter than the band (focusChipColors, in focusChipTint), its icon or text white.
     -- Without an instance (none alive inside core's key and click handling, or creating it failed) the chip is the solid
     -- focusChipSolid (a brush colour, no asset). An icon-only control's chip reaches focusChipPad units beyond its icon
-    -- (at most half the row's gap and the row's own padding, listRowPadX / listRowPadY included). The colours are the
-    -- story's start values. Shown only while the input mode is keys (focus.lua).
+    -- (at most half the row's gap and the row's own padding, listRowPadX / listRowPadY included). The colours were
+    -- retuned from the first VM shots (2026-11-18): a light red, clearly lighter than the band and the game's tick red.
+    -- Shown only while the input mode is keys (focus.lua).
     focusChipColors = {                                    -- the material's vector parameters, set on the chip instance
-        CinematicBaseColor = { r = 0.42, g = 0.06, b = 0.03, a = 1 },
-        CinematicWearColor = { r = 0.58, g = 0.09, b = 0.05, a = 1 },
+        CinematicBaseColor = { r = 1.0, g = 0.32, b = 0.16, a = 1 },
+        CinematicWearColor = { r = 1.0, g = 0.45, b = 0.25, a = 1 },
     },
     focusChipTint = { r = 1, g = 1, b = 1, a = 1 },
-    focusChipSolid = { r = 0.50, g = 0.08, b = 0.04, a = 1 },
+    focusChipSolid = { r = 1.0, g = 0.38, b = 0.20, a = 1 },
     focusChipPad = 4,
     buttonPadding = { l = 12, t = 4, r = 12, b = 4 },
     buttonMinHeight = 44,

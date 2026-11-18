@@ -83,10 +83,10 @@ local function dispatch(ctx)
     if id:sub(1, 1) == "#" then
         local f = B._internal[id]
         if not f then S.ignored = S.ignored + 1 return end
-        C.clickInput(id) -- core story 39: a click on a window's BACK is the mouse's (unless the Accept key's)
         local now = C.micros()
         if lastInternal[id] and now - lastInternal[id] < DEBOUNCE_US then S.debounced = S.debounced + 1 return end
         lastInternal[id] = now
+        C.clickInput(id) -- core story 39: a click on a window's BACK is the mouse's (unless the Accept key's)
         local ok, err = pcall(f)
         if not ok then C.warnOnce("internal click " .. id, "core button %s: %s", id, firstLine(err)) end
         return

@@ -215,13 +215,14 @@ function C.callDependent(fn, ...)
     return ok, err
 end
 
--- Core story 27: fn(el) run (under pcall) when a click, a drag end or a commit reached one of this mod's elements, so a
--- window's keyboard focus model follows the mouse (focus.lua sets it). nil: nothing.
+-- Core story 27: fn(el, noClick) run (under pcall) when a click, a drag end or a commit reached one of this mod's elements, so a
+-- window's keyboard focus model follows the mouse (focus.lua sets it). noClick (core story 39: a slider box's commit,
+-- which Enter makes too): not a click input. nil: nothing.
 C.onUse = nil
-function C.used(el)
+function C.used(el, noClick)
     local f = C.onUse
     if not f then return end
-    local ok, err = pcall(f, el)
+    local ok, err = pcall(f, el, noClick)
     if not ok then C.warnOnce("focus use", "moving the focus to a clicked element failed: %s", (tostring(err):match("^[^\n]*"))) end
 end
 
