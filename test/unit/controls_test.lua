@@ -1026,12 +1026,46 @@ do
     T.fire(T.CLICK, T.tagged("b37w"))
     ok(opened == nil and F.getAssets == g0 and countLogs("can't be loaded inside a control's callback") == 1 and countLogs("WARN button 'b37w' onClick: ") == 1,
         "story 37: screen.open in onClick with the window class cold: a clear error, no load")
+    ok(C.windows.W37 == nil and countLogs("is Content/Paks") == 0, "story 37: the failed open leaves no window record, and doesn't blame the pak")
     tick()
-    ok(F.getAssets > g0, "story 37: the UI tick warms the window class (menu elements exist)")
+    C.inDispatch = 1
+    local warm = X._classOf("screen")
+    C.inDispatch = 0
+    ok(F.getAssets > g0 and warm ~= nil, "story 37: the UI tick reloads the window class (menu elements exist); cached inside a callback")
     T.fire(T.CLICK, T.tagged("b37w"))
     ok(opened and SC.isOpen(opened), "story 37: with the class warm, onClick opens a window")
     if opened then SC.close(opened) end
     B.remove(bw)
+end
+
+-- the state's first button made inside a callback: its click hook is registered by the next UI tick (no journal element)
+do
+    local BS = B._S
+    local saved, savedId, n0 = BS.hooked, BS.hookId, #F.hooks
+    BS.hooked = false
+    local clicks, hb = 0, nil
+    C.callDependent(function() hb = B.create{ id = "b37h", label = "H", place = T.rp37, onClick = function() clicks = clicks + 1 end } end)
+    ok(#F.hooks == n0 and not BS.hooked, "story 37: a button created inside a callback registers no click hook there")
+    tick()
+    ok(#F.hooks == n0 + 1 and hookCount(T.CLICK) >= 1 and F.hooks[#F.hooks].path:find(T.CLICK, 1, true) and BS.hooked, "story 37: the next UI tick registers it, once")
+    tick()
+    ok(#F.hooks == n0 + 1, "story 37: not registered twice")
+    T.fire(T.CLICK, T.tagged("b37h"))
+    ok(clicks == 1, "story 37: a click then runs onClick")
+    table.remove(F.hooks) -- back to one click hook for any later case
+    BS.hooked, BS.hookId = saved, savedId
+    B.remove(hb)
+end
+-- an element deferred from a callback (its class cold) and removed before the tick: dropped, nothing attached
+do
+    for k, o in pairs(handles) do if o == T.CHOICECLASS then handles[k] = nil end end
+    local hc
+    C.callDependent(function() hc = CH.create{ id = "ch37r", place = T.rp37, options = T.OPTS, onChange = function() end } end)
+    ok(select(1, X._deferred()) == 1, "story 37: a cold-class choice made in a callback is queued")
+    CH.remove(hc)
+    tick()
+    local n, keep = X._deferred()
+    ok(T.tagged("ch37r") == nil and n == 0 and keep == nil, "story 37: removed before the tick: not attached, the queue empty, its token released")
 end
 
 print(string.format("controls_test: %d passed, %d failed", pass, failN))

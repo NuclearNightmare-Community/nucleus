@@ -10,7 +10,15 @@ For players: a mod's checkbox, choice, slider or button can no longer freeze the
 
 ### Fixed
 
-- A dependent's `onChange` (checkbox, choice, slider; also from Left / Right keys and slider nudges) and `onClick` (button) now run as "inside a hook" (core story 37, DW-69): core raises its dispatch flag around the callback (`C.callDependent`), so whatever the callback does there reads only cached textures and widget classes, registers no hook and no LoadMap hook. An uncached texture is applied on the next 500 ms UI tick; an element whose class isn't cached yet is attached on the next tick (a new deferred-attach queue, no "pak not installed" `WARN`); hooks and a LoadMap hook asked for there are registered by the next tick. Both pending queues keep the UI loop running until they are drained (DW-71). The window class is kept loaded while the mod has menu or window elements, so a button's `onClick` can open a window; when it is still cold there, `screen.open` raises an error that names the cause. Behaviour, counts, debounce and `WARN` texts of every control are unchanged; the menu entry's `onClick` is not affected. No public API change; Lua only (no new pak).
+- A dependent's `onChange` (checkbox, choice, slider; also from Left / Right keys and slider nudges) and `onClick` (button) now run as "inside a hook" (core story 37, DW-69): core raises its dispatch flag around the callback (`C.callDependent`), so whatever the callback does there reads only cached textures and widget classes, registers no hook and no LoadMap hook. An uncached texture is applied on the next 500 ms UI tick; an element whose class isn't cached yet is attached on the next tick (a new deferred-attach queue, no "pak not installed" `WARN`); hooks and a LoadMap hook asked for there are registered by the next tick. Both pending queues keep the UI loop running until they are drained (DW-71). The window class is reloaded on each UI tick while the mod has elements on the menu, a window or a game screen, so a button's `onClick` can usually open a window (it is a weak handle: a garbage collection between ticks can still drop it); when it is cold there, `screen.open` raises an error that names the cause, before any window record is made. Behaviour, counts, debounce and `WARN` texts of every control are unchanged; the menu entry's `onClick` is not affected. No public API change; Lua only (no new pak).
+
+### Changed
+
+What a dependent sees inside a control's `onChange` or a button's `onClick`:
+
+- An element created there whose widget class isn't cached yet attaches on the next UI tick (`isShown` is false until then).
+- A texture set there (`image.set`, a button icon) may appear up to 500 ms later.
+- `screen.open` there can raise when the window class is cold; call it again after the callback returns (for example on the next UI tick).
 
 ## [0.15.1] - 2026-11-17
 
