@@ -44,17 +44,20 @@
 -- scrolling) is ignored; an unreadable position doesn't block. No focus steal: while a text box in the window or
 -- anything outside it holds keyboard focus a hover does nothing. The hook body runs with C.inDispatch and hookDepth
 -- raised (cached assets only: the tick completes a plain band or a missing face).
--- Core story 39 (0.15.4): a focus chip on the focused control. Whichever input owns the focus (one owner per Lua state):
--- the keys after a handled key, F.focusWindow (open, return, the tick's refocus) and a click with the pointer still since
--- its last record (gamepad A and Enter click the Button that way); the mouse after an applied hover, a hover into the row
--- already holding focus, and a click with a real pointer move (both readings readable, |dx| or |dy| >= 1; unreadable:
--- the owner stays). While the keys own it, the focused button, checkbox, choice or slider inside a row draws its own face
--- (button.lua B._chip) or background (a choice's, a slider's) with a second instance of the selection material
--- (assets.lua A.focusChipMaterial), brighter than the band, its icon or text white; an icon-only one's chip reaches a
--- small padding beyond the icon through a render scale (the layout never moves). Without an instance (none alive inside
--- core's key and click handling or a dispatch, or it failed) the chip is solid and the UI tick upgrades it (el.chipOn
--- "strong" | "solid"). A change of owner re-applies the current element's look at once. Off (focus leaves, the mouse
--- owns it, the window is covered or closed, a re-style): render scales back to 1 and the kind's own style draws it.
+-- Core story 39 (0.15.4): a focus chip on the focused control. One input mode per Lua state, "keys" or "mouse", set by
+-- the last input: keys by a navigation key on a window (handled or left to the focused widget; the click the Accept key
+-- makes a focused Button do is the key's); mouse by a real pointer move into a row of the top window (story 36's rule)
+-- and by every click (an element on any host, a window's BACK, the menu entry). Opening or returning to a window keeps
+-- the mode: a window opened by a mouse click shows no chip, one opened from the keys the chip on its first control.
+-- Every focus look is decided in one place (lookOf) from the mode: in keys mode the focused button, checkbox, choice or
+-- slider inside a row draws its own face (button.lua B._chip) or background (a choice's, a slider's) with a second
+-- instance of the selection material (assets.lua A.focusChipMaterial), brighter than the band, its icon or text white (a
+-- slider's number through its box's content tint); an icon-only one's chip reaches a small padding beyond the icon
+-- through a render scale (the layout never moves; a list row is a little taller for it: text.lua X._rowPad). Without an
+-- instance (none alive inside core's key and click handling or a dispatch, or it failed) the chip is solid and the UI
+-- tick upgrades it (el.chipOn "strong" | "solid"; "pending" while a failed one waits for the tick). In mouse mode only
+-- the band and story 27/28's looks show. A change of mode re-applies the current looks at once. Off (focus leaves, the
+-- mode changes, the window is covered or closed, a re-style): render scales back to 1 and the kind's own style draws it.
 -- Lone controls and BACK keep story 27/28's looks; focusRowStrong doesn't affect the chip.
 -- Each window remembers its last-focused element (by id): after a close the next window down gets it back.
 local BASE = (...):gsub("%.ui%.focus$", "")
@@ -220,27 +223,47 @@ local function rowOf(el)
     return nil
 end
 
--- Core story 39: the input that owns the focus ("keys" | "mouse"), one per Lua state; the chip shows only under "keys".
--- hookDepth: > 0 while this module's OnNav post-hook or F.used (a click, drag end, commit or arrow) runs; a dependent's
--- callback after it is not counted (story 30).
-local owner = "keys"
+-- Core story 39: the input mode ("keys" | "mouse"), one per Lua state, set by the last input (F.input). Every focus
+-- look is decided in one place from it (lookOf below). hookDepth: > 0 while this module's OnNav post-hook or F.used (a
+-- click, drag end, commit or arrow) runs; a dependent's callback after it is not counted (story 30).
+local mode = "keys"
 local hookDepth = 0
 F._noChip = false -- unit tests only: earlier stories' blocks prove their looks without the chip
 local CHIP_KINDS = { button = true, checkbox = true, choice = true, slider = true }
-local function chipWanted(el)
-    return not F._noChip and owner == "keys" and CHIP_KINDS[el.kind] == true and rowOf(el) ~= nil
+-- The one place a focus look is decided: what el shows (on: it holds the window's focus) in the current input mode.
+--   "off"   its own look (not focused)
+--   "chip"  keys mode, a button, checkbox, choice or slider inside a row: the focus chip (and its focus look)
+--   "face"  a dimmed button or a faceless game-look icon-only one (story 28): the focus face, then its focus look
+--   "hover" anything else focused: its focus look (story 27's hover look) only
+-- The mouse mode never shows a chip; lone controls and BACK never do.
+local function lookOf(el, on)
+    if not on then return "off" end
+    if not F._noChip and mode == "keys" and CHIP_KINDS[el.kind] == true and rowOf(el) ~= nil then return "chip" end
+    if B._needsFace(el) then return "face" end
+    return "hover"
 end
--- An icon-only control's chip padding: theme.game.focusChipPad, at most half the row's gap and the row's own padding.
+F._lookOf = lookOf
+-- An icon-only control's chip padding: theme.game.focusChipPad, at most half the row's gap and the row's own padding
+-- (X._rowPad: a list row's listRowPadX / listRowPadY included), never below 0.
 local function chipPad(el)
     local row = rowOf(el)
     if not row then return 0 end
-    local p = math.min(theme.game.focusChipPad, math.floor((row.gapUnits or 0) / 2), (row.style and row.style.pad) or 0)
+    local px, py = X._rowPad(row)
+    local p = math.min(theme.game.focusChipPad, math.floor((row.gapUnits or 0) / 2), px, py)
     return math.max(p, 0)
 end
 F._chipPad = chipPad
+-- The content tint that draws the game's text colour (theme.game.text, the slider box's generated colour) white: a
+-- Border's content tint multiplies its content (as the generated FocusTint, which reaches the hover colour).
+local function whiteTint()
+    local t, wh = theme.game.text, theme.white
+    return { R = wh.r / t.r, G = wh.g / t.g, B = wh.b / t.b, A = 1 }
+end
 -- A choice's or a slider's chip: its own Background (padding 0, as its look's) from the instance, else solid; a
--- choice's value white. lookKey "chip": its own look is drawn again by its style.
+-- choice's value white (its font from the cache; a miss leaves the chip "solid", so the tick completes it). lookKey
+-- "chip": its own look is drawn again by its style. A slider's number turns white after its focus look (setLook).
 local function chipControl(el, w, mid)
+    el.lookKey = "chip"
     if mid then
         local t = theme.game.focusChipTint
         C.count(); w:SetBackgroundMaterial(mid, t.r, t.g, t.b, t.a, 0)
@@ -249,12 +272,14 @@ local function chipControl(el, w, mid)
         C.count(); w:SetBackgroundSolid()
         C.count(); w:SetBackground(c.r, c.g, c.b, c.a)
     end
-    el.chipOn, el.lookKey = mid and "strong" or "solid", "chip"
+    local whole = mid ~= nil
     if el.kind == "choice" then
         local game = el.gameText
         local font = A.get(game and ("font:" .. theme.game.controlFont.font) or "font:Engine", true)
-        if font then C.count(); w:SetValueLook(font, game and theme.game.controlFont.size or theme.plainControlFont, 1, 1, 1, 1) end
+        if font then C.count(); w:SetValueLook(font, game and theme.game.controlFont.size or theme.plainControlFont, 1, 1, 1, 1)
+        else whole = false end
     end
+    el.chipOn = whole and "strong" or "solid"
     return true
 end
 local function chipOn(el, w)
@@ -262,48 +287,60 @@ local function chipOn(el, w)
     local okM, mid = pcall(A.focusChipMaterial, w, hookDepth > 0)
     if not okM then mid = nil end
     if el.chipOn == "solid" and not mid then return end -- solid already; the tick tries the instance again
+    el.chipOn = "pending" -- until the whole chip is on: a failed one is restored on unfocus and tried again by the tick
     local ok, res = pcall(function()
         if el.kind == "button" or el.kind == "checkbox" then return B._chip(el, w, mid, chipPad(el)) end
         return chipControl(el, w, mid)
     end)
     if ok and res then S.chips = S.chips + 1
-    elseif not ok then
+    elseif ok then el.chipOn = nil -- nothing drawn (a game-look labelled button without an instance keeps its face)
+    else
         S.chipFaults = S.chipFaults + 1
         C.warnOnce("focus chip", "'%s': the focus chip failed (is %s's pak current?): %s", el.id, C.NAME, firstLine(res))
     end
 end
+-- The chip goes: the kind's own style draws it again (a button's style also puts its render scales back to 1).
 local function chipOff(el, w)
-    local okS, errS = true, nil
-    if el.kind == "button" or el.kind == "checkbox" then okS, errS = pcall(B._chipOff, el, w)
-    else el.lookKey = nil end -- a choice's or a slider's own look is drawn again
+    if el.kind == "choice" or el.kind == "slider" then el.lookKey = nil end -- its own look is drawn again
     local ok, err = pcall(X.KIND[el.kind].style, el, w, false)
     el.chipOn, el.faceOn = nil, nil
-    if not (okS and ok) then
+    if not ok then
         S.chipFaults = S.chipFaults + 1
-        C.warnOnce("focus chip restore", "'%s': the focus chip could not be removed: %s", el.id, firstLine(okS and err or errS))
+        C.warnOnce("focus chip restore", "'%s': the focus chip could not be removed: %s", el.id, firstLine(err))
     end
 end
 
 local function setLook(el, on)
     local w = el and widgetOf(el)
-    if not w then return end
-    -- Core story 39: the chip while the keys own the focus inside a row; else the element's own look first.
-    local chip = on and chipWanted(el)
-    if el.chipOn and not chip then chipOff(el, w) end
-    if chip then chipOn(el, w) end
+    if not w then
+        if el then el.chipOn = nil end -- its widget is gone (a new one starts without a chip)
+        return
+    end
+    local look = lookOf(el, on)
+    -- Core story 39: a look that isn't wanted goes first (unfocused, the other input mode, outside a row): the kind's own
+    -- style draws it again (SetColors / SetMaterials turn FocusLook off, so SetFocusLook below sets it afresh).
+    if el.chipOn and look ~= "chip" then chipOff(el, w) end
+    if el.faceOn and look ~= "face" then
+        local okS, errS = pcall(X.KIND[el.kind].style, el, w, false) -- it clears faceOn
+        el.faceOn = nil
+        if not okS then C.warnOnce("focus face restore", "button '%s': restoring its own look failed: %s", el.id, firstLine(errS)) end
+    end
+    if look == "chip" then chipOn(el, w) end
     -- Core story 28: a face first where the hover look shows nothing (SetMaterials / SetColors turn FocusLook off).
-    if on and not el.chipOn and not el.faceOn and B._needsFace(el) then
+    if look == "face" and not el.faceOn then
         local okF, res = pcall(B._focusFace, el, w)
         if okF and res then S.faces = S.faces + 1
         elseif not okF then C.warnOnce("focus face", "button '%s': its focus face failed (is %s's pak current?): %s", el.id, C.NAME, firstLine(res)) end
     end
     local ok, err = pcall(function() C.count(); w:SetFocusLook(on) end)
     if not ok then C.warnOnce("focus look", "the focus look failed (is %s's pak current?): %s", C.NAME, firstLine(err)) end
-    if not on and el.faceOn then
-        -- the kind's own style draws it again (it clears faceOn)
-        local okS, errS = pcall(X.KIND[el.kind].style, el, w, false)
-        el.faceOn = nil
-        if not okS then C.warnOnce("focus face restore", "button '%s': restoring its own look failed: %s", el.id, firstLine(errS)) end
+    if look == "chip" and el.kind == "slider" and el.chipOn then
+        -- after SetFocusLook (it sets the number box's content tint): the number white
+        local okT, errT = pcall(function() C.count(); w.Background:SetContentColorAndOpacity(whiteTint()) end)
+        if not okT then
+            S.chipFaults = S.chipFaults + 1
+            C.warnOnce("focus chip", "'%s': the focus chip failed (is %s's pak current?): %s", el.id, C.NAME, firstLine(errT))
+        end
     end
 end
 
@@ -332,6 +369,7 @@ local function rowLook(row, on)
         if not m then return false end
         local ok, err = pcall(function() C.count(); w:SetBackgroundMaterial(m, t.r, t.g, t.b, t.a, row.style.pad) end)
         if not ok then C.warnOnce("focus row", "row '%s': the focus highlight failed (is %s's pak current?): %s", row.id, C.NAME, firstLine(err)) return false end
+        X._applyRowPad(row, w) -- story 39: a list row keeps its taller padding
         row.matBg, row.selBg = true, look
         S.rowLooks = S.rowLooks + 1
         return true
@@ -490,28 +528,41 @@ local function samePointer()
     if not p then return false end -- unreadable: never blocks a hover
     return math.abs(p.x - pointerAt.x) < 1 and math.abs(p.y - pointerAt.y) < 1
 end
--- Core story 39: whether the pointer really moved since its last record: true / false, nil when either reading is
--- unreadable.
-local function pointerMoved()
-    if not pointerAt then return nil end
-    local p = pointerNow()
-    if not p then return nil end
-    return math.abs(p.x - pointerAt.x) >= 1 or math.abs(p.y - pointerAt.y) >= 1
+-- Core story 39: the input mode becomes m ("keys" | "mouse"): the last input sets it. A change re-applies the current
+-- element's look of every open window of this state that shows one (chip on or off at once). Returns whether it changed.
+local function reapply()
+    for _, rec in pairs(C.windows) do
+        local el = rec.open and rec.lookId and C.els[rec.lookId] or nil
+        if el and not el.removed then setLook(el, true) end
+    end
 end
--- Core story 39: the owner becomes o; a change re-applies rec's current element's look at once (chip on or off).
-local function setOwner(o, rec)
-    if owner == o then return end
-    owner = o
-    local el = rec and rec.lookId and C.els[rec.lookId] or nil
-    if el and not el.removed then setLook(el, true) end
+local function input(m)
+    if mode == m then return false end
+    mode = m
+    reapply()
+    return true
 end
-F._owner = function() return owner end
+F._mode = function() return mode end
+F._input = input
+-- The Accept key on a focused button or checkbox is left to its Button, which clicks itself (on the key's release):
+-- that click is the key's, not a mouse click. { id, t }: the element and when (C.micros); any other input clears it.
+local acceptKey = nil
+local ACCEPT_US = 1500000
+-- A click on id (F.used, or C.clickInput: the menu entry (nil), a window's BACK): the mouse, unless it is the click of
+-- the Accept key just pressed on that element.
+local function clickInput(id)
+    local a = acceptKey
+    acceptKey = nil
+    if a and id ~= nil and a.id == id and C.micros and (C.micros() - a.t) < ACCEPT_US then return end
+    input("mouse")
+end
+C.onClickInput = clickInput
 
 -- Focus on open (fresh: its first focusable), and back on a window after the one above it closed (its remembered
--- element, else its first focusable); else the window widget. With the UI input mode.
+-- element, else its first focusable); else the window widget. With the UI input mode. Story 39: the input mode stays
+-- (a window opened by a mouse click shows no chip; by keys, the chip on its first control).
 function F.focusWindow(rec, fresh)
     rememberPointer() -- story 36: a window opening under a still pointer doesn't take the band
-    owner = "keys" -- story 39: the element focused below gets the chip
     local lines = F.lines(C.windowHost(rec.id), backIdOf(rec))
     if fresh then rec.focusId, rec.focusPos, rec.lookId, rec.lookRowId = nil, nil, nil, nil end
     -- A dependent opens a window, then builds it: until the next UI tick (or the first key or click) focus follows the
@@ -581,27 +632,22 @@ function F.used(el)
     hookDepth = hookDepth - 1
     if not ok then error(err, 0) end
 end
+local navDepth = 0 -- > 0 while a key is handled (a step it causes reaches F.used: still the key's)
 used = function(el)
+    -- Story 39: a click is the mouse's (on any host: the menu's elements too), unless it is a key's (the Accept key's
+    -- click, a step inside the key's own handling).
+    if navDepth == 0 then clickInput(el and el.id) end
     if not F.focusable(el) then return end
     local host = C.hostOf(el)
     if type(host) ~= "string" or C.hostKind(host) ~= "screen" then return end
     local rec = C.windows[host:sub(8)]
     if not (rec and rec.open) then return end
     rec.openFresh = false
-    -- Story 39: a click with a real pointer move is the mouse's; with the pointer still (gamepad A, Enter) the keys'.
-    local moved = pointerMoved()
-    local to = owner
-    if moved == true then to = "mouse" elseif moved == false then to = "keys" end
     rememberPointer() -- story 36: a click (and the scroll it can cause) under a still pointer keeps the band
-    if rec.focusId == el.id and hasFocus(targetOf(el)) then setOwner(to, rec) return end
+    if rec.focusId == el.id and hasFocus(targetOf(el)) then return end
     -- Keyboard focus moves too: a choice's arrows and a slider's bar aren't focusable, so a click on them leaves Slate's
     -- focus where it was, and the next key would start from there.
-    local prev = owner
-    owner = to -- the clicked element's look comes with the new owner, the old one's goes
-    if not focusEl(rec, el, F.lines(host, backIdOf(rec)), false) then
-        owner = prev
-        setOwner(to, rec)
-    end
+    focusEl(rec, el, F.lines(host, backIdOf(rec)), false)
 end
 
 -- ---------------------------------------------------------------- one navigation event
@@ -641,7 +687,11 @@ function F.nav(rec, dir, act)
     end
     if aOk then
         -- Accept: a Button clicks itself (its own Accept); on a choice or a slider nothing changes.
-        return not (el.kind == "button" or el.kind == "checkbox")
+        if el.kind == "button" or el.kind == "checkbox" then
+            acceptKey = { id = el.id, t = C.micros and C.micros() or 0 } -- story 39: its click is this key's
+            return false
+        end
+        return true
     end
     if dir == F.DIR.left or dir == F.DIR.right then
         local delta = dir == F.DIR.left and -1 or 1
@@ -677,16 +727,25 @@ local function navBody(ctx)
     if not live or live:GetAddress() ~= w:GetAddress() then S.ignored = S.ignored + 1 return end -- not its live widget
     local okV, dir, act = pcall(function() return w.NavDir, w.NavAction end)
     if not okV then S.ignored = S.ignored + 1 return end
-    local prev = owner
-    owner = "keys" -- story 39: an element the key moves to gets the chip at once
-    if F.nav(rec, dir, act) then
+    -- Story 39: a navigation key is an input of the keys (handled or left to the focused widget); an element the key
+    -- moves to gets its look in keys mode at once, and the current look is re-applied after (a key that moves nothing,
+    -- at the end of a line, brings the chip back too).
+    local changed = false
+    if validDir(math.tointeger(tonumber(dir) or -1)) or validAct(math.tointeger(tonumber(act) or -1)) then
+        acceptKey = nil
+        changed = mode ~= "keys"
+        mode = "keys"
+    end
+    navDepth = navDepth + 1
+    local okN, handled = pcall(F.nav, rec, dir, act)
+    navDepth = navDepth - 1
+    if changed then reapply() end
+    if not okN then error(handled, 0) end
+    if handled then
         S.handled = S.handled + 1
         rememberPointer() -- story 36: the keys own the band until the pointer really moves
-        if prev ~= "keys" then owner = prev; setOwner("keys", rec) end -- a key that moves nothing brings the chip back too
         local okH, errH = pcall(function() w.NavHandled = true end)
         if not okH then C.warnOnce("nav handled", "window keys: setting NavHandled failed: %s", firstLine(errH)) end
-    else
-        owner = prev -- a key left to the focused widget: the owner stays
     end
 end
 local function onNav(ctx)
@@ -722,6 +781,9 @@ local function hoverBody(ctx)
     local rec = C.windows[host:sub(8)]
     if not (rec and rec.open) or not globalTop(rec) then return ignore() end
     if samePointer() then return ignore() end -- content moved under a still pointer
+    -- Story 39: a real pointer move into a row of the top window is an input of the mouse: no chip from here on.
+    acceptKey = nil
+    input("mouse")
     local lines = F.lines(host, backIdOf(rec))
     local li = nil
     for i, l in ipairs(lines) do if l.owner == row.id then li = i break end end
@@ -730,14 +792,11 @@ local function hoverBody(ctx)
     if cur == nil then return ignore() end -- a text box (or something outside the window) holds keyboard focus
     if cur ~= "window" and F.find(lines, cur) == li then -- the row already holds focus: the pointer owns it now
         rememberPointer()
-        setOwner("mouse", rec) -- story 39: no chip under the mouse
         return ignore()
     end
     local els = lines[li].els
     local to = els[math.min((rec.focusPos and rec.focusPos.ci) or 1, #els)]
-    local prev = owner
-    owner = "mouse" -- story 39: the hovered element without a chip, the old one's chip off
-    if not focusEl(rec, to, lines, false, true) then owner = prev return ignore() end -- no live target
+    if not focusEl(rec, to, lines, false, true) then return ignore() end -- no live target
     rec.openFresh = false
     S.hovers = S.hovers + 1
     rememberPointer()

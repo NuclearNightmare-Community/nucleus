@@ -30,6 +30,12 @@ M.disabledOpacity = 0.45
 -- Story 21 (Mod Manager story 2): lists, rows and windows.
 M.listDefault = { background = "dim", padding = "normal" } -- an unstyled list is a visible box, like a panel
 M.listInset = 4 -- core story 27: a list's children keep 4 units clear of its right edge (nothing cut at the scrollbar side)
+-- Core story 39 (0.15.4, the user's answer 2026-11-18): a row in a list is a little taller, so a 28-unit icon no longer
+-- fills it: listRowPadY more padding above and below its content than its style gives, and listRowPadX on each side
+-- (the list's scroll area clips at its edge, so the focus chip on a row's first control needs room there too). The
+-- focus chip uses that room.
+M.listRowPadY = 4
+M.listRowPadX = 4
 M.backdrop = { r = 0, g = 0, b = 0, a = 0.85 }               -- a window's backdrop over the whole viewport
 -- Core story 27 (core 0.12.0): the card a window's content sits on, centred and hugging the content plus padding.
 -- Internal: dependents can't set it. background.game in the game look, background.plain when the game look's assets
@@ -85,7 +91,8 @@ M.game = {
     -- material, its fill clearly brighter than the band (focusChipColors, in focusChipTint), its icon or text white.
     -- Without an instance (none alive inside core's key and click handling, or creating it failed) the chip is the solid
     -- focusChipSolid (a brush colour, no asset). An icon-only control's chip reaches focusChipPad units beyond its icon
-    -- (at most half the row's gap and the row's own padding). The colours are the story's start values.
+    -- (at most half the row's gap and the row's own padding, listRowPadX / listRowPadY included). The colours are the
+    -- story's start values. Shown only while the input mode is keys (focus.lua).
     focusChipColors = {                                    -- the material's vector parameters, set on the chip instance
         CinematicBaseColor = { r = 0.42, g = 0.06, b = 0.03, a = 1 },
         CinematicWearColor = { r = 0.58, g = 0.09, b = 0.05, a = 1 },

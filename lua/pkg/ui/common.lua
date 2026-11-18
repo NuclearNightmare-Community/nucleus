@@ -225,6 +225,16 @@ function C.used(el)
     if not ok then C.warnOnce("focus use", "moving the focus to a clicked element failed: %s", (tostring(err):match("^[^\n]*"))) end
 end
 
+-- Core story 39: a click on one of this mod's widgets that isn't an element (the menu entry, a window's BACK): the
+-- input mode becomes "mouse" (focus.lua sets C.onClickInput). Never raises.
+C.onClickInput = nil
+function C.clickInput(id)
+    local f = C.onClickInput
+    if not f then return end
+    local ok, err = pcall(f, id)
+    if not ok then C.warnOnce("focus input", "the input mode after a click was not set: %s", (tostring(err):match("^[^\n]*"))) end
+end
+
 -- One log line per key for the life of this Lua state.
 local warned = {}
 function C.warnOnce(key, fmt, ...)

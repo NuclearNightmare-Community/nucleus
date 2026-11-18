@@ -83,6 +83,7 @@ local function dispatch(ctx)
     if id:sub(1, 1) == "#" then
         local f = B._internal[id]
         if not f then S.ignored = S.ignored + 1 return end
+        C.clickInput(id) -- core story 39: a click on a window's BACK is the mouse's (unless the Accept key's)
         local now = C.micros()
         if lastInternal[id] and now - lastInternal[id] < DEBOUNCE_US then S.debounced = S.debounced + 1 return end
         lastInternal[id] = now
@@ -349,7 +350,7 @@ function B._focusFace(el, w)
     return true
 end
 
--- Core story 39 (0.15.4): the focus chip. While the keyboard or gamepad owns the focus, focus.lua draws a focused button
+-- Core story 39 (0.15.4): the focus chip. In the keys input mode (focus.lua), focus.lua draws a focused button
 -- or checkbox inside a row with the chip: mid (the chip instance, assets.lua A.focusChipMaterial) as its face (normal and
 -- hover brush, theme.game.focusChipTint) with the padding and minimum height its own style gives it, or, without an
 -- instance, the solid theme.game.focusChipSolid (SetColors, which has one padding and no minimum height: a game-look
@@ -376,7 +377,7 @@ function B._chip(el, w, mid, p)
         local c = g.focusChipSolid
         C.count(); w:SetColors(c.r, c.g, c.b, c.a, c.r, c.g, c.b, c.a, c.r, c.g, c.b, c.a, el.styledIconOnly and 0 or el.style.pad)
     end
-    el.chipOn, el.faceOn = mid and "strong" or "solid", nil
+    el.faceOn = nil
     local wh = theme.white
     el.colorKey = "focus"
     C.count(); w:SetContentColors(wh.r, wh.g, wh.b, wh.a, wh.r, wh.g, wh.b, wh.a)
@@ -386,6 +387,7 @@ function B._chip(el, w, mid, p)
         C.count(); w.Btn:SetRenderScale({ X = sx, Y = sy })
         C.count(); w.Content:SetRenderScale({ X = 1 / sx, Y = 1 / sy })
     end
+    el.chipOn = mid and "strong" or "solid" -- only once the whole chip is on: a failed one is tried again by the tick
     return true
 end
 

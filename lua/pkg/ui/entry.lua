@@ -587,6 +587,7 @@ M._onClick(function(w)
     local now = C.micros()
     if ent.lastClick and now - ent.lastClick < DEBOUNCE_US then T.debounced = T.debounced + 1 return end
     ent.lastClick = now
+    C.clickInput() -- core story 39: a click is the mouse's, so the window it opens shows no focus chip
     ent.clicks = ent.clicks + 1
     T.clicks = T.clicks + 1
     if C.debugOn() then C.log.debug("ui menu entry '%s' clicked (%d)", ent.id, ent.clicks) end

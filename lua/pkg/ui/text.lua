@@ -169,6 +169,27 @@ local function gameAsset(key) return A.get(key) end
 -- in the game look; an explicit background is a colour in both looks. el.matBg: the widget shows a material now.
 -- Core story 28: el.selBg marks a row showing focus.lua's selection highlight; any re-style draws its own background
 -- again, so the mark goes (the UI tick puts the highlight back while the row holds focus).
+-- Core story 39 (0.15.4): a row in a list (not a game-style row) is a little taller: theme.listRowPadY more padding
+-- above and below its content, theme.listRowPadX on each side (the focus chip's room). X._rowPad(el) -> x, y: the
+-- padding its Background gets ({ 0, 0 } more than its style for any other element); X._applyRowPad(el, w) writes it
+-- after the style's own uniform padding (the Background Border's SetPadding). A widget without a Background is skipped.
+function X._rowPad(el)
+    local p = el.style and el.style.pad or 0
+    if el.kind ~= "row" or el.like or not (el.panel and el.panel.kind == "list" and not el.panel.removed) then return p, p end
+    return p + (theme.listRowPadX or 0), p + (theme.listRowPadY or 0)
+end
+function X._applyRowPad(el, w)
+    local x, y = X._rowPad(el)
+    local p = el.style and el.style.pad or 0
+    if x == p and y == p then return end
+    local ok, err = pcall(function()
+        local bg = w.Background
+        if bg == nil then return end
+        C.count(); bg:SetPadding({ Left = x, Top = y, Right = x, Bottom = y })
+    end)
+    if not ok then warnFirst("rowpad:" .. el.id, "%s '%s': the list row's padding was not applied (is %s's pak current?): %s", err, el.kind, el.id, C.NAME) end
+end
+
 local function backgroundStyle(el, w, fresh)
     local s = el.style
     el.selBg = nil
@@ -178,17 +199,19 @@ local function backgroundStyle(el, w, fresh)
         if mat then
             local t = theme.game.rowTint
             local ok, err = pcall(function() C.count(); w:SetBackgroundMaterial(mat, t.r, t.g, t.b, t.a, s.pad) end)
-            if ok then el.matBg = true return end
+            if ok then el.matBg = true; X._applyRowPad(el, w) return end
             warnFirst("style:" .. el.id, "%s '%s': the game look's background failed (is %s's pak current?): %s", err, el.kind, el.id, C.NAME)
         end
     end
-    if fresh and s.a == 0 and s.pad == 0 and not el.matBg then return end -- the unstyled widget already looks like this
+    local px, py = X._rowPad(el)
+    if fresh and s.a == 0 and px == 0 and py == 0 and not el.matBg then return end -- the unstyled widget already looks like this
     local ok, err = pcall(function()
         if el.matBg then C.count(); w:SetBackgroundSolid(); el.matBg = nil end
         C.count(); w:SetBackground(s.r, s.g, s.b, s.a)
         C.count(); w:SetBackgroundPadding(s.pad)
     end)
-    if not ok then warnFirst("style:" .. el.id, "%s '%s': style not applied (is %s's pak current?): %s", err, el.kind, el.id, C.NAME) end
+    if not ok then warnFirst("style:" .. el.id, "%s '%s': style not applied (is %s's pak current?): %s", err, el.kind, el.id, C.NAME) return end
+    X._applyRowPad(el, w)
 end
 X._backgroundStyle = backgroundStyle -- core story 28: focus.lua restores a row's own background
 
