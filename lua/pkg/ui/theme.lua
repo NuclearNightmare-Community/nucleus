@@ -80,6 +80,19 @@ M.game = {
         CinematicWearColor = { r = 0.16, g = 0.02, b = 0.01, a = 1 },
     },
     focusRowTint = { r = 1, g = 1, b = 1, a = 1 },         -- the workspace's docs/game-ui-components.md 3.3: hovered M_NN_CinematicSelection, tint alpha 1.0
+    -- Core story 39 (0.15.4): the focus chip. While the keyboard or gamepad owns the focus, the focused control inside a
+    -- row draws its own face (button, checkbox) or background (choice, slider) with a second instance of the selection
+    -- material, its fill clearly brighter than the band (focusChipColors, in focusChipTint), its icon or text white.
+    -- Without an instance (none alive inside core's key and click handling, or creating it failed) the chip is the solid
+    -- focusChipSolid (a brush colour, no asset). An icon-only control's chip reaches focusChipPad units beyond its icon
+    -- (at most half the row's gap and the row's own padding). The colours are the story's start values.
+    focusChipColors = {                                    -- the material's vector parameters, set on the chip instance
+        CinematicBaseColor = { r = 0.42, g = 0.06, b = 0.03, a = 1 },
+        CinematicWearColor = { r = 0.58, g = 0.09, b = 0.05, a = 1 },
+    },
+    focusChipTint = { r = 1, g = 1, b = 1, a = 1 },
+    focusChipSolid = { r = 0.50, g = 0.08, b = 0.04, a = 1 },
+    focusChipPad = 4,
     buttonPadding = { l = 12, t = 4, r = 12, b = 4 },
     buttonMinHeight = 44,
     -- Mod Manager story 4: the controls. A choice's value and arrows and a slider's number box in AlumniSans (the
