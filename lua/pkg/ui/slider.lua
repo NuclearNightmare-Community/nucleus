@@ -173,7 +173,6 @@ X.KIND.slider = {
         X._applyTooltip(el, w, fresh)
     end,
     style = function(el, w)
-        el.chipOn = nil -- core story 39: a re-style draws its own background (the UI tick puts a focus chip back)
         local ok, err = pcall(look, el, w)
         if not ok then C.warnOnce("look:" .. el.id, "slider '%s': its look was not applied (is %s's pak current?): %s", el.id, C.NAME, firstLine(err)) end
     end,

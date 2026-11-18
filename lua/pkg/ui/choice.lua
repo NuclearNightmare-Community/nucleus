@@ -122,7 +122,6 @@ X.KIND.choice = {
     end,
     style = function(el, w, fresh)
         if fresh then el.lookKey, el.arrowKey = nil, nil end
-        el.chipOn = nil -- core story 39: a re-style draws its own background (the UI tick puts a focus chip back)
         local ok, err = pcall(look, el, w)
         if not ok then C.warnOnce("look:" .. el.id, "choice '%s': its look was not applied (is %s's pak current?): %s", el.id, C.NAME, firstLine(err)) end
         applyArrows(el, w) -- the arrows' colour follows the look

@@ -850,7 +850,7 @@ $menuChecks = $started + @(
     "\[$T\] OK KLOOK face off: the unfocused gear kbm\.g4 has no face "
     "\[$T\] OK KHOVER the band followed the mouse \(hooked true, hovers [1-9]"
     "\[$T\] OK KBEND every window closed"
-    "!\[$T\] WARN .*(window key|focus look|focus face|focus highlight|restoring its own|focus window|focus tick|focusing it failed|focused row|keyboard focus|input mode|clicked element|card|re-fit|BACK button|NavHandled|window rows|hover handling|focus chip)"
+    "!\[$T\] WARN .*(window key|focus look|focus face|focus highlight|restoring its own|focus window|focus tick|focusing it failed|focused row|keyboard focus|input mode|clicked element|card|re-fit|BACK button|NavHandled|window rows|hover handling)"
     "\[$T\] END result=PASS"
 )
 # Core story 24: the ic-* group, on window IC (menu3), and every new function off the game thread.

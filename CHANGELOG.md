@@ -2,16 +2,6 @@
 
 All notable changes to Nucleus are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). From 0.5.0 a dependent's `need` and `dependsOn` are minimum versions (`>=0.5.0`), so a newer Nucleus never asks dependents to raise them. Up to 0.3.0, below 1.0.0 a dependent connected only to the same minor version (`need = "0.3.0"` accepted 0.3.x).
 
-## [0.15.4] - 2026-11-17
-
-Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
-
-For players: in a mod's window (Mod Manager's list), with the keyboard or a gamepad you now see which control of the highlighted row is focused: it sits on a bright red chip, its icon or text white. Using the mouse shows only the row's band, as before.
-
-### Added
-
-- A focus chip on the focused control (core story 39). While the keyboard or gamepad owns the focus, the focused button, checkbox, choice or slider inside a row of a core window draws its own face (button, checkbox) or background (choice, slider) with a second unnamed, transient instance of the game's selection material whose fill is brighter than the band (`theme.game.focusChipColors`, tint `focusChipTint`), its icon or label white. An icon-only control's chip reaches up to 4 units beyond its icon (`focusChipPad`, at most half the row's gap and the row's own padding) through a render scale, so the layout never moves; a labelled one keeps the padding and minimum height of its own style. The instance follows the band's rules (one per Lua state behind a weak handle, never made inside core's key and click handling or a dispatch); until it can be had the chip is the solid `focusChipSolid` and the UI tick upgrades it; a creation failure keeps the solid chip for the session with one `WARN` (a game-look labelled button keeps its focus face then). Who owns the focus: the keys after a handled key, when a window takes focus, and after a click with the pointer still (Enter, gamepad A); the mouse after a hover into a row and a click with a real pointer move; an unreadable pointer leaves it as it was. A change of owner shows or removes the chip at once. Lone controls and BACK keep their 0.12.1 looks; the band's switch `focusRowStrong` doesn't affect the chip. Any failure is one `WARN` naming the focus chip; focus keeps working. No public API change; Lua only (no new pak).
-
 ## [0.15.3] - 2026-11-17
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.

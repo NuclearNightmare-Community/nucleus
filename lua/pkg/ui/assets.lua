@@ -140,24 +140,17 @@ end
 -- instance per Lua state, shared by every row while it lives, kept only as a weak handle: made again after a map
 -- change or a garbage collection that took it while no row showed it.
 -- Unnamed (OptionalName None: a reused name collides) and transient. w: the world context (the row's widget).
--- Core story 39 (0.15.4): the focus chip is a second such instance (theme.game.focusChipColors), under the same rules,
--- with its own handle and failed flag (A.focusChipMaterial).
 local KML = "/Script/Engine.Default__KismetMaterialLibrary"
 local MID_TRANSIENT = 1 -- EMIDCreationFlags::Transient: the transient package is its outer
-local mids = {
-    row = { colors = "focusRowColors", key = "asset:focus row",
-        what = "the focused row's strong look", after = "focused rows show the plain selection" },
-    chip = { colors = "focusChipColors", key = "asset:focus chip",
-        what = "the focus chip", after = "focused controls show a solid focus chip" },
-}
-local function instance(slot, w, cachedOnly)
-    if slot.ref then
-        local ok, o = pcall(C.deref, slot.ref)
+local midRef, midFailed = nil, false
+function A.focusRowMaterial(w, cachedOnly)
+    if midRef then
+        local ok, o = pcall(C.deref, midRef)
         if ok and o then return o end
-        pcall(C.free, slot.ref)
-        slot.ref = nil
+        pcall(C.free, midRef)
+        midRef = nil
     end
-    if slot.failed then return nil, "failed" end
+    if midFailed then return nil, "failed" end
     if cachedOnly or inHook() or C.inDispatch > 0 then return nil, "uncached" end
     local m, why = A.get("mat:selection")
     if not m then return nil, why end
@@ -167,25 +160,23 @@ local function instance(slot, w, cachedOnly)
         C.count()
         local o = lib:CreateDynamicMaterialInstance(w, m, FName("None"), MID_TRANSIENT)
         if not C.valid(o) then error("CreateDynamicMaterialInstance returned nothing", 0) end
-        for name, c in pairs(theme.game[slot.colors]) do
+        for name, c in pairs(theme.game.focusRowColors) do
             C.count(); o:SetVectorParameterValue(FName(name), { R = c.r, G = c.g, B = c.b, A = c.a })
         end
         return o
     end)
     if not ok then
-        slot.failed = true
-        C.warnOnce(slot.key, "%s (an instance of %s) could not be made; %s: %s",
-            slot.what, theme.game.materials.selection.name, slot.after, (tostring(mid):match("^[^\n]*")))
+        midFailed = true
+        C.warnOnce("asset:focus row", "the focused row's strong look (an instance of %s) could not be made; focused rows show the plain selection: %s",
+            theme.game.materials.selection.name, (tostring(mid):match("^[^\n]*")))
         return nil, "failed"
     end
     if C.ref then
         local okR, h = pcall(C.ref, mid)
-        if okR then slot.ref = h end
+        if okR then midRef = h end
     end
     return mid
 end
-function A.focusRowMaterial(w, cachedOnly) return instance(mids.row, w, cachedOnly) end
-function A.focusChipMaterial(w, cachedOnly) return instance(mids.chip, w, cachedOnly) end
 
 -- Loads every game-look asset (fonts and materials), the engine font and the textures in use; extra(), when set,
 -- loads more (text.lua: core's widget classes in use). Never raises.
@@ -222,6 +213,6 @@ function A.ensureLoadMapHook()
     end
 end
 
-function A._reset() for k in pairs(refs) do refs[k] = nil end for k in pairs(used) do used[k] = nil end loadMapHooked, loadMapWanted = false, false; tmplRef, tmplMissing = nil, false; for _, m in pairs(mids) do m.ref, m.failed = nil, false end end -- unit tests
+function A._reset() for k in pairs(refs) do refs[k] = nil end for k in pairs(used) do used[k] = nil end loadMapHooked, loadMapWanted = false, false; tmplRef, tmplMissing = nil, false; midRef, midFailed = nil, false end -- unit tests
 A._used = used -- unit tests
 return A
