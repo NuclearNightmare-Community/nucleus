@@ -923,6 +923,18 @@ frame()
 ok(col(p14).opacity == 0, "pop-in: insert raises -> hidden first")
 swap(p13)
 ok(col(p14).opacity == 1 and E._hold() == nil and countLogs("QUIT's slot could not be read") == 1, "pop-in: insert raises -> shown right after", logs[#logs])
+-- the hide lands after a record-less opened (the insert raised first): the ticker shows it again, no cap
+local p25 = build(25)
+p25.UI_Button_Master_3.Slot = nil
+col(p25).opacity = 0.7
+local capped = countLogs("still hidden")
+swap(p14)
+ok(E._records[p25.__path] == nil and E._hold() == nil, "pop-in: late hide: opened ran the failing insert first (no record, no hold)")
+frame()
+ok(col(p25).opacity == 0 and E._hold() and E._hold().path == p25.__path, "pop-in: late hide: the scheduled action hides after opened")
+tick()
+ok(col(p25).opacity == 0.7 and E._hold() == nil and countLogs("still hidden") == capped, "pop-in: late hide: the ticker restores the saved opacity, no cap", col(p25).opacity)
+p14 = p25 -- the open menu for the next swap
 
 -- menu lost before its insert: released for this state, no write on the dead menu
 local p15 = build(15)
