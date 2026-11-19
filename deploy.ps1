@@ -7,13 +7,14 @@
   core (and of the test dependent) is removed first.
   Refuses unless the installed UE4SS.dll is byte-identical to the pinned zip's, and BPModLoaderMod is present.
   -Test also installs the walking-skeleton test dependent (test/SkelTest, installed as Mods/<name>SkelTest) above Keybinds,
-  and for scenarios ui, bad-input and menu (Mod Manager story 4: a second mod's checkbox) the second test dependent (test/SkelPeer, as Mods/<name>SkelPeer; story 15: a button of
+  and for scenarios ui, bad-input, menu (Mod Manager story 4: a second mod's checkbox) and intercept (core story 43: a second mod's rule) the second test dependent (test/SkelPeer, as Mods/<name>SkelPeer; story 15: a button of
   another mod; Mod Manager story 5: a settings change from another Lua state, with a corrupt settings.json of its own).
   Each test dependent's mod.json (settings declarations) is installed with it.
   For scenario bad-input it also installs core's test-only C++ part (test/SkelNative, built by build.ps1 as
   build/native-out/test/main.dll, never packaged) as Mods/<name>SkelNative: the forced missing struct member case.
   -Scenario breaks one part on purpose: skeleton (all parts), no-native (no dlls/main.dll), no-pak (no LogicMods pak);
-  bad-input, ui, journal, menu, createserver (core story 31), gameinsert (core story 32), nativerow (core story 33), soak and manual install all parts like skeleton. The scenario goes to the test dependent's Scripts/scenario.txt.
+  bad-input, ui, journal, menu, createserver (core story 31), gameinsert (core story 32), nativerow (core story 33), intercept
+  (core story 43, with the second test dependent), soak and manual install all parts like skeleton. The scenario goes to the test dependent's Scripts/scenario.txt.
   net-host and net-client (core story 22) are the pair-run roles of test/pair/nucleus-scenarios.ps1 (all parts, the
   test dependent only; its mod.json "id" is skeltest, the id its core.net keys use); they run in a pair.ps1 session.
   presence-host, presence-client and presence-vanilla-host (core story 23) are the presence pair-run roles, installed
@@ -31,7 +32,7 @@
 param(
     [Parameter(Mandatory)] [string] $Instance,
     [switch] $Test,
-    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'createserver', 'gameinsert', 'nativerow', 'soak', 'manual', 'net-host', 'net-client',
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'createserver', 'gameinsert', 'nativerow', 'intercept', 'soak', 'manual', 'net-host', 'net-client',
                  'presence-host', 'presence-client', 'presence-vanilla-host')]
     [string] $Scenario = 'skeleton',
     [switch] $Remove,
@@ -105,7 +106,7 @@ if ($Test) {
     Set-Content (Join-Path $modsDir "$testName\Scripts\scenario.txt") $Scenario -NoNewline
     $i = [Array]::FindIndex([string[]]$lines, [Predicate[string]]{ param($l) $l -match '^\s*Keybinds\s*:' })
     $lines = if ($i -ge 0) { @($lines[0..($i-1)]) + "$testName : 1" + @($lines[$i..($lines.Count-1)]) } else { @($lines) + "$testName : 1" }
-    if ($Scenario -in 'ui', 'bad-input', 'menu') {
+    if ($Scenario -in 'ui', 'bad-input', 'menu', 'intercept') {
         Copy-Item (Join-Path $here 'test\SkelPeer') (Join-Path $modsDir $peerName) -Recurse -Force
         Set-Content (Join-Path $modsDir "$peerName\Scripts\scenario.txt") $Scenario -NoNewline
         # Mod Manager story 5: bad-input starts the peer with a corrupt settings.json (core must use the defaults and log
@@ -128,5 +129,5 @@ Set-Content $modsTxt $lines
 Write-Host "$name deployed (scenario $Scenario) on the shipped UE4SS.dll (sha256 $($installedHash.Substring(0,12))...):"
 Get-ChildItem (Join-Path $modsDir $name) -Recurse -File | ForEach-Object { Write-Host "  Mods/$name/$($_.FullName.Substring((Join-Path $modsDir $name).Length + 1)) ($($_.Length) bytes)" }
 Get-ChildItem $logicMods -Filter "$name.pak" | ForEach-Object { Write-Host "  LogicMods/$($_.Name) ($($_.Length) bytes)" }
-if ($Test) { Write-Host "  Mods/$testName (test dependent)$(if ($Scenario -in 'ui', 'bad-input', 'menu') { " and Mods/$peerName (second test dependent)" })$(if ($Scenario -eq 'bad-input') { " and Mods/$nativeTestName (core's test-only DLL)" })" }
+if ($Test) { Write-Host "  Mods/$testName (test dependent)$(if ($Scenario -in 'ui', 'bad-input', 'menu', 'intercept') { " and Mods/$peerName (second test dependent)" })$(if ($Scenario -eq 'bad-input') { " and Mods/$nativeTestName (core's test-only DLL)" })" }
 Write-Host "mods.txt: $(($lines | Where-Object { $_ -match '^\s*\w+\s*:\s*1' }) -join ', ')"

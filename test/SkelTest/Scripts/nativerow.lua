@@ -43,7 +43,7 @@ return function(X, GS)
             local L65 = string.rep("a", 65)
             local function mk(o) o.id = o.id or "gnr"; if o.place == false then o.place = nil else o.place = o.place or IN end return function() return U.row.create(o) end end
             local rows = {
-                { "key", "nope = 1", { like = "Overlay_28", nope = 1 }, "unknown key 'nope' (valid: control, gap, help, id, label, like, place, style)" },
+                { "key", "nope = 1", { like = "Overlay_28", nope = 1 }, "unknown key 'nope' (valid: control, gap, help, id, label, like, locked, place, style)" },
                 { "like-num", "like = 28", { like = 28 }, "like must be a game widget's name (a string), got 28" },
                 { "like-empty", "like = ''", { like = "" }, "like must not be empty" },
                 { "like-65", "like of 65 characters", { like = L65 }, "like is 65 characters, at most 64" },

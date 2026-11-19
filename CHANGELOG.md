@@ -2,6 +2,16 @@
 
 All notable changes to Nucleus are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). From 0.5.0 a dependent's `need` and `dependsOn` are minimum versions (`>=0.5.0`), so a newer Nucleus never asks dependents to raise them. Up to 0.3.0, below 1.0.0 a dependent connected only to the same minor version (`need = "0.3.0"` accepted 0.3.x).
 
+## [0.18.0] - 2026-11-19
+
+Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
+
+For players: nothing changes by itself. Mods can now take over a few of the game's own buttons, starting with the enemy cards on the create-world screen (Difficulty uses this).
+
+### Added
+
+- Function interception (core story 43, CAP-13; README "Function interception"). Core's native part can cancel a Blueprint function or replace what it returns, which Lua can't (UE4SS hooks on Blueprint functions run after the body). A dependent installs a rule as data with `core.fn.intercept{ fn, target, action = "skip" | "replace", value, onCall } -> id` on a function of a compiled-in allowlist (the enemy cards' click and `GetToolTipWidget` on `EnemySlot_Button_C` and `BatSlot_Button1_C`, each pinned to its signature and re-validated at install), for one target object or any instance; `release(id)`, `runOriginal(id, f, ...)` (the game's function runs for every call `f` makes) and `list()`. One `ProcessLocalScriptFunction` pre-callback, registered once, applies the rules on the game thread for every caller (delegate broadcasts, UMG bindings, Lua calls, Blueprint bytecode) and never calls Lua; with no rule it costs one atomic load per Blueprint call. An exact-target rule beats an `any` rule; one owner per (function, target), another mod is refused by name. `onCall(obj)` hears about each applied call on the next frame through the mod's own post-hook. Replacement objects are rooted while held. A mod's rules go when its Lua stops (`native: intercept: released <n> rule(s) of <Mod> (Lua stopped)`), and whatever is left when core unloads (`unloading: ... released <n> intercepts`). New natives `Nucleus_FnIntercept`, `Nucleus_FnRelease`, `Nucleus_FnSuspend` and `Nucleus_FnList`, each with bad-input cases (`fn-*`, `fn-live-*`). `core.has`: `fn`, `fn.intercept`. New test scenario `intercept` (VM, two passes around a Ctrl+R; `run.ps1` serves a `hotreload` request).
+
 ## [0.17.1] - 2026-11-19
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.

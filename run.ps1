@@ -18,7 +18,8 @@
   "drag <x1> <y1> <x2> <y2>" (the left button down at the first point, ten moves to the second, up there; to the front
   first, like a click), "type <text>" (1-16 of 0-9 . , a-z -, each posted as WM_CHAR to the game window) and
   "key BACK", "key TAB", "key ESCAPE" (posted like Enter). Core story 27's window keys add "key LEFT" and "key RIGHT"
-  (arrow keys, extended, like UP and DOWN). Core story 38 (a row dragged and held in steps) adds "press <x> <y>" (the
+  (arrow keys, extended, like UP and DOWN). Core story 43 (intercept) adds "hotreload": the game window to the front,
+  then Ctrl+R pressed (UE4SS's hot reload). Core story 38 (a row dragged and held in steps) adds "press <x> <y>" (the
   left button down there, kept), "glide <x> <y>" (ten real moves there from where the cursor is, the buttons as they
   are), "release <x> <y>" (the left button up there), "rrelease <x> <y>" (a right press and release there while the left
   button is held; each to the front first, like a click) and "keydown <KEY>" / "keyup <KEY>" (only that half of a
@@ -39,14 +40,14 @@
 #>
 param(
     [Parameter(Mandatory)] [string] $Instance,
-    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'createserver', 'gameinsert', 'nativerow', 'soak')]
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'createserver', 'gameinsert', 'nativerow', 'intercept', 'soak')]
     [string] $Scenario = 'skeleton',
     [int] $TimeoutSec = 0, # 0: 420 s, 900 s for ui (it travels four times and waits for layout), menu (about 40 requests and three map loads), createserver (about 30 clicks, a hosted session, a minute in it), gameinsert (about 35 clicks, twelve opens) and nativerow (about 30 clicks, eleven opens, a hover), 1200 s for journal (24 key presses, a revive, a map change), 1000 s for soak (10 min idle); x1.5 in the VM
     [ValidateSet('host', 'vm')] [string] $Target = 'host',
     [switch] $AllowOtherDrivers # run even when another runner's test mod is enabled in the copy (tools/run-guard)
 )
 $ErrorActionPreference = 'Stop'
-$hostTimeout = switch ($Scenario) { 'ui' { 900 } 'menu' { 900 } 'createserver' { 900 } 'gameinsert' { 900 } 'nativerow' { 900 } 'journal' { 1200 } 'soak' { 1000 } default { 420 } }
+$hostTimeout = switch ($Scenario) { 'ui' { 900 } 'menu' { 900 } 'createserver' { 900 } 'gameinsert' { 900 } 'nativerow' { 900 } 'intercept' { 900 } 'journal' { 1200 } 'soak' { 1000 } default { 420 } }
 if ($TimeoutSec -le 0 -and $Target -eq 'host') { $TimeoutSec = $hostTimeout }
 $here     = $PSScriptRoot
 $name     = (Get-Content (Join-Path $here 'mod.json') -Raw | ConvertFrom-Json).name
@@ -69,7 +70,7 @@ if ($Target -eq 'vm') {
     # A refusal of the guard (the VM copy's mods.txt, in the stage) ends the run before anything is installed there.
     try {
         $run = Invoke-NNBSpRun -Instance $inst -TestMod $testName -Mods $name, $testName, "${name}SkelPeer", "${name}SkelNative" -Paks "$name.pak" `
-            -EndPattern "\[$testName\] END result=" -TimeoutSec (Get-NNBSpTimeout $hostTimeout $TimeoutSec) -LogOut $kept -Prepare {
+            -EndPattern "\[$testName\] END result=" -TimeoutSec (Get-NNBSpTimeout $hostTimeout $TimeoutSec) -LogOut $kept -HotReload:($Scenario -eq 'intercept') -Prepare {
                 param($stage)
                 $refusal = Get-RunGuardRefusal -Workspace $root -Instance $stage -Owner $name -Bypass:$AllowOtherDrivers -Vm
                 if ($refusal) { throw $refusal }
@@ -246,6 +247,17 @@ function Invoke-Request([string] $cmd) {
         return
     }
     if ($cmd -cmatch '^shot [A-Za-z0-9._-]{1,40}$') { Write-Host "  $cmd skipped (screenshots only in the VM)"; return }
+    if ($cmd -ceq 'hotreload') {
+        # Core story 43: UE4SS's hot reload (Ctrl+R, which UE4SS reads only while the game window is in front), as
+        # mods/cpp-spike/run.ps1 presses it: Lua mods stop, core's DLL unloads, everything starts again.
+        $h = Get-FrontGameWindow 'hotreload'
+        if ($h -eq [IntPtr]::Zero) { return }
+        [CoreRun.Win]::keybd_event(0x11, 0x1D, 0, [UIntPtr]::Zero); [CoreRun.Win]::keybd_event(0x52, 0x13, 0, [UIntPtr]::Zero)
+        Start-Sleep -Milliseconds 80
+        [CoreRun.Win]::keybd_event(0x52, 0x13, 2, [UIntPtr]::Zero); [CoreRun.Win]::keybd_event(0x11, 0x1D, 2, [UIntPtr]::Zero)
+        Write-Host '  pressed Ctrl+R'
+        return
+    }
     $vk, $scan, $label = $null, $null, $null
     $ext = 0
     # Core story 38: "keydown <KEY>" / "keyup <KEY>" post only that half of "key <KEY>".

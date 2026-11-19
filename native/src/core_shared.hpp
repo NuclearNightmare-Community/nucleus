@@ -14,6 +14,7 @@
 #include <Helpers/String.hpp>
 #include <LuaMadeSimple/LuaMadeSimple.hpp>
 #include <LuaType/LuaUObject.hpp>
+#include <Unreal/FWeakObjectPtr.hpp>
 #include <Unreal/Hooks/Hooks.hpp>
 #include <Unreal/UObject.hpp>
 
@@ -88,6 +89,10 @@ namespace core_native
     };
     int object_flags(int32_t index, const void* target, uint32_t* bits, unsigned long* fault);
 
+    // FWeakObjectPtr::Get() under SEH. Reads only GUObjectArray (by the stored index), never the object. nullptr when
+    // the object is gone or its slot was reused, or on a fault (*fault set).
+    RC::Unreal::UObject* weak_get(const RC::Unreal::FWeakObjectPtr* weak, unsigned long* fault);
+
     // One log line per fault (the first 16; then every 256th), so a fault is never silent and never floods the log.
     void log_fault(const std::string& fn, const char* what, unsigned long code, uint64_t detail);
 
@@ -95,8 +100,9 @@ namespace core_native
     // What a body hands back; guarded() pushes it onto the Lua stack after leaving the try block.
     struct Result
     {
-        enum class Kind { None, Integer, Object, Nil, Strings, String } kind = Kind::None;
+        enum class Kind { None, Integer, Object, Nil, Strings, String, Bool } kind = Kind::None;
         int64_t integer{};
+        bool boolean{}; // Kind::Bool
         RC::Unreal::UObject* object{};
         const char* s1{};
         const char* s2{};
@@ -152,6 +158,9 @@ namespace core_native
             return 2;
         case Result::Kind::String:
             lua.set_string(std::string_view{r.text});
+            return 1;
+        case Result::Kind::Bool:
+            lua.set_bool(r.boolean);
             return 1;
         default:
             return 0;

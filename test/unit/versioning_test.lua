@@ -101,7 +101,10 @@ ok(S.parse("1.2.3").major == 1 and S.parse(">=1.2.3") == nil and S.parse(5) == n
 -- ---------------------------------------------------------------- features
 local F = require("nucleus.features")
 local declared = F.declared()
-local want = { "call", "clock", "deref", "free", "map.setup",
+local want = { "call", "clock", "deref",
+    -- core story 43 (0.18.0): core.fn, a module, its entry point hand-named
+    "fn", "fn.intercept",
+    "free", "map.setup",
     -- core story 22 (0.11.0): core.net, a module, its functions hand-named; core story 23 (0.12.0): presence, netCompat
     "net", "net.compatible", "net.presence", "net.publish", "net.read", "net.role", "net.unwatch", "net.versionsCompatible", "net.watch",
     "net.watchPresence",
@@ -132,7 +135,14 @@ local want = { "call", "clock", "deref", "free", "map.setup",
     "ui.slider", "ui.slider.create", "ui.slider.get", "ui.slider.isShown", "ui.slider.remove", "ui.slider.set", "ui.slider.setDefault", "ui.slider.setEnabled",
     "ui.slider.setTooltip", "ui.slider.setVisible",
     "ui.text", "ui.text.setTooltip" }
-eq(table.concat(declared, ","), table.concat(want, ","), "declared(): the 0.16.0 feature list (map.setup, ui.journal.regions, ui.look, story 24's, story 4's, story 22's, story 23's, story 27's, story 31's, story 32's, story 33's and story 38's names hand-named; settings, net), sorted")
+eq(table.concat(declared, ","), table.concat(want, ","), "declared(): the 0.18.0 feature list (map.setup, ui.journal.regions, ui.look, story 24's, story 4's, story 22's, story 23's, story 27's, story 31's, story 32's, story 33's, story 38's and story 43's names hand-named; settings, net, fn), sorted")
+-- Core story 43: a 0.17.x core's list answers false for fn and fn.intercept; this one true.
+do
+    local old = {}
+    for _, n in ipairs(want) do if not n:match("^fn") then old[#old + 1] = n end end
+    ok(F.set(old)["fn"] == nil and F.set(old)["fn.intercept"] == nil, "a 0.17.x core: core.has('fn.intercept') is false")
+    ok(F.set(declared)["fn"] == true and F.set(declared)["fn.intercept"] == true, "0.18.0: fn and fn.intercept are features")
+end
 -- Core story 38: a 0.15.x core's list answers false for reorderable lists and row.setLocked; this one true.
 do
     local new = { ["ui.list.reorderable"] = true, ["ui.row.setLocked"] = true }

@@ -14,6 +14,8 @@ local deprecate = require(BASE .. ".deprecate")
 local setOk, settingsm = pcall(require, BASE .. ".settings.client")
 -- core.net (core story 22). The same: a failure here costs core.net, not connect.
 local netOk, netm = pcall(require, BASE .. ".net.client")
+-- core.fn (core story 43). The same: a failure here costs core.fn, not connect.
+local fnOk, fnm = pcall(require, BASE .. ".fn")
 -- UI helpers (ui-helpers-contract.md). Loading them registers the HUD creation callback (ui/hud.lua) in this Lua state.
 -- A failure here must not stop connect for mods that use no UI: core.ui is then missing and onReady is told why.
 local uiOk, uiErr = pcall(function()
@@ -282,6 +284,15 @@ function C.connect(opts)
             if not okP then log.warn("%s.net presence: registration failed: %s", NAME, tostring(errP)) end
         else
             log.error("%s's net client failed to load (%s); core.net is not available.", NAME, tostring(netm))
+        end
+        -- Core story 43: core.fn, function interception over core's natives (rules are the mod's own; its Lua stopping
+        -- releases them).
+        if fnOk then
+            local okB, errB = pcall(fnm.bind, { log = log })
+            if okB then api.fn = fnm.API
+            else log.error("%s's fn client could not start (%s); core.fn is not available.", NAME, tostring(errB)) end
+        else
+            log.error("%s's fn client failed to load (%s); core.fn is not available.", NAME, tostring(fnm))
         end
         -- Story 18: feature checks, generated from this api table (features.lua). Optional for dependents: the
         -- minimum version is the normal way to depend on a feature.

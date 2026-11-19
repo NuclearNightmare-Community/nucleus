@@ -23,6 +23,8 @@
 -- ui also runs story 15 at its end: on the Journal (map opened by the real key), a panel with two buttons and a text,
 --            real OS clicks on each (run.ps1 "click x y"), Enter on a focused button, a throwing onClick, a disabled
 --            button, a button of a second test dependent (<Core>SkelPeer), and two calls in a row (the 250 ms debounce).
+-- intercept: core story 43 (function interception) on the create-world screen's enemy cards, two passes around a
+--            Ctrl+R hot reload; written for the VM (intercept.lua next to this file).
 -- manual:    for hand testing. Never travels, requests keys, runs timed checks or logs FAIL. Keeps a
 --            "<Core> manual: <n>" element in the top-right corner of the HUD through core.ui.text (core re-attaches it
 --            whenever the HUD is rebuilt, replaced or put back in the viewport; n counts attaches), and logs reports
@@ -630,6 +632,7 @@ local function offThreadCases(phase)
                 SETS.NET.offThread(P) -- core story 22
                 SETS.PRES.offThread(P) -- core story 23
                 SETS.GAME.offThread(P) -- core story 31
+                SETS.FN.offThread(P) -- core story 43
             end)
             if not ok then check(false, "CASE %s off-thread block threw: %s", P .. "off", firstLine(err)) end
             doneOff = true
@@ -943,7 +946,7 @@ local function mmCases(P, f)
     local jp = { host = "journal", corner = "top-left" }
     local sz = { w = 400, h = 300 }
     mcase("mm-list-none", "ui.list.create()", f(LS.create), E.err(LC .. "expected a table"))
-    mcase("mm-list-unknown", "ui.list.create{ ..., rows = 3 }", f(LS.create, { id = "bl", place = jp, size = sz, rows = 3 }), E.err(LC .. "unknown key 'rows' (valid: gap, id, place, size, style)"))
+    mcase("mm-list-unknown", "ui.list.create{ ..., rows = 3 }", f(LS.create, { id = "bl", place = jp, size = sz, rows = 3 }), E.err(LC .. "unknown key 'rows' (valid: gap, id, onReorder, place, reorderable, size, style)"))
     mcase("mm-list-size-nil", "ui.list.create{ no size }", f(LS.create, { id = "bl", place = jp }), E.err(LC .. "size must be a table { w = 32..4096, h = 32..4096 }, got nil"))
     mcase("mm-list-size-str", "ui.list.create{ size = '400x300' }", f(LS.create, { id = "bl", place = jp, size = "400x300" }), E.err(LC .. "size must be a table { w = 32..4096, h = 32..4096 }, got '400x300'"))
     mcase("mm-list-size-w31", "ui.list.create{ size = { w = 31, h = 300 } }", f(LS.create, { id = "bl", place = jp, size = { w = 31, h = 300 } }), E.err(LC .. "size.w must be a number from 32 to 4096, got 31"))
@@ -962,7 +965,7 @@ local function mmCases(P, f)
     mcase("mm-list-in-panel", "ui.list.create{ place = { panel = <panel> } }", f(LS.create, { id = "bl", place = { panel = pj }, size = sz }), E.err(LC .. "a list can't go inside a panel, list or row"))
     -- rows
     local RS, RC = U.row, UI .. ".row.create: "
-    mcase("mm-row-unknown", "ui.row.create{ ..., size = 1 }", f(RS.create, { id = "br", place = { list = la }, size = 1 }), E.err(RC .. "unknown key 'size' (valid: gap, id, place, style)"))
+    mcase("mm-row-unknown", "ui.row.create{ ..., size = 1 }", f(RS.create, { id = "br", place = { list = la }, size = 1 }), E.err(RC .. "unknown key 'size' (valid: control, gap, help, id, label, like, locked, place, style)"))
     mcase("mm-row-hud", "ui.row.create{ place = { host = 'hud', corner } }", f(RS.create, { id = "br", place = { host = "hud", corner = "top-left" } }), E.err(RC .. "rows need a host with a cursor (journal, menu, screen); see input mode, story 16"))
     local ra
     mcase("mm-row-ok", "ui.row.create{ id = 'bra', place = { list = <list> } } [control]", function()
@@ -1983,6 +1986,7 @@ local function badInputCases(phase)
     SETS.GAME.cases(phase) -- core story 31
     SETS.INS.cases(phase) -- core story 32
     SETS.NR.cases(phase) -- core story 33
+    SETS.FN.badInput(phase) -- core story 43
     offThreadCases(phase)
 end
 
@@ -5788,6 +5792,9 @@ SETS.INS = dofile(scriptDir .. "\\gameinsert.lua")({ case = case, E = E, step = 
 -- Core story 33: the game-style rows' bad-input cases and the nativerow scenario (nativerow.lua; gamescreen.lua's helpers).
 SETS.NR = dofile(scriptDir .. "\\nativerow.lua")({ case = case, E = E, step = step, check = check, say = say, CORE = CORE,
     core = function() return core end, absR = absR, request = request, waitWorld = waitWorld }, SETS.GAME)
+-- Core story 43: function interception's bad-input cases and the intercept scenario (intercept.lua; gamescreen.lua's helpers).
+SETS.FN = dofile(scriptDir .. "\\intercept.lua")({ case = case, E = E, step = step, check = check, say = say, CORE = CORE,
+    core = function() return core end, absR = absR, request = request, waitWorld = waitWorld, scriptDir = scriptDir }, SETS.GAME)
 
 -- ---------------------------------------------------------------- runner (game thread, every 250 ms)
 local idx, waiting, busy, finished = 0, nil, false, false
@@ -5996,6 +6003,9 @@ client.connect{
         elseif SCENARIO == "nativerow" then
             -- Core story 33: game-style rows and the game's picker in the create-server screen's list (its cases in menu1)
             SETS.NR.build()
+        elseif SCENARIO == "intercept" then
+            -- Core story 43: function interception on the create-world screen's cards (two passes around a Ctrl+R)
+            SETS.FN.build()
         elseif SCENARIO == "journal" then
             core.log.debugEnabled = true -- the journal attach lines (cost per open) are DEBUG; no profiler: real costs
             buildJournal()
