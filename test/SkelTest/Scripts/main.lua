@@ -5594,6 +5594,17 @@ local function buildMenu()
                 "ROREADY hooks registered (drag %s, drop %s, key release %s); r3 Draggable, the locked r1 not", bool(st.dragHookOk), bool(st.dropHookOk), bool(FO.stats().upOk))
             check(order() == "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16", "ROORDER start %s", order())
         end)
+        -- A real click on a control inside a Draggable row stays the control's: the gear clicks once, no drag starts
+        step("ro: before mclick", function()
+            R.mc, R.md, R.before = R.n["ro.g6"] or 0, RM.stats().drags, order()
+            R.mdrag = try(function() return rowW(6).Draggable end)
+        end)
+        clickAt("ro gear g6", widgetPoint(function() return childTagged(prop(rowW(6), "HBox"), "ro.g6") end))
+        step("ro: mclick", function()
+            check(R.mdrag == true and (R.n["ro.g6"] or 0) == R.mc + 1 and RM.stats().drags == R.md and not RM.stats().dragging and order() == R.before,
+                "ROMCLICK a real click on r6's gear in its Draggable row (%s) clicks it once (%d -> %d), no drag (%d -> %d), order %s",
+                tostring(R.mdrag), R.mc, R.n["ro.g6"] or 0, R.md, RM.stats().drags, order())
+        end)
         -- Mouse: r3 between r5 and r6
         mouse("press", "press r3", rowPoint(3), 0.5)
         mouse("glide", "glide r3 to r5|r6", between(5, 6), 0.8)
@@ -5702,7 +5713,7 @@ local function buildMenu()
         end)
         -- Enter, Down, Escape: the pickup order back, no callback, the window open
         rkey("keydown ENTER", "hold enter again", 1.2, function()
-            R.before, R.cbBefore = order(), R.cb
+            R.before, R.cbBefore, R.escClicks = order(), R.cb, R.n["ro.g6"] or 0
             check(FO._carry() ~= nil, "ROCARRY r6 picked up again")
         end)
         rkey("key DOWN", "carry down 3", 0.8, function() check(order() ~= R.before, "ROORDER carry down 3: %s", order()) end)
@@ -5710,7 +5721,10 @@ local function buildMenu()
             check(FO._carry() == nil and order() == R.before and R.cb == R.cbBefore and UI.screen.isOpen(R.W),
                 "ROCANCEL keys: Escape restores %s, no callback, the window open", order())
         end)
-        rkey("keyup ENTER", "release after escape", 0.8, function() cbCheck("after escape", R.cbBefore) end)
+        rkey("keyup ENTER", "release after escape", 0.8, function()
+            cbCheck("after escape", R.cbBefore)
+            check((R.n["ro.g6"] or 0) == R.escClicks, "ROESCCLICK the release after Escape doesn't click the gear (%d -> %d)", R.escClicks, R.n["ro.g6"] or 0)
+        end)
         -- The segment's top: the first movable row (index 2, under the locked r1) can't go up
         step("ro: focus top", function()
             local top = CC.els["ro.list"].children[2]

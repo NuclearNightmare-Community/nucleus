@@ -237,20 +237,22 @@ local function widgetOf(el)
     return ok and w or nil
 end
 
--- Core story 38: a row's own widget is made focusable (a grip row, or a carried row) once per widget, or not again.
+-- Core story 38: a row's own widget is made focusable (a grip row, or a carried row), or not again.
 -- UUserWidget's SetIsFocusable isn't a UFunction (VM run 1: a TrivialObject); its property bIsFocusable is read live by
 -- NativeSupportsKeyboardFocus, so it is written directly.
 local function focusableRow(row, w, on)
     if not w then return end
+    -- The live widget's own flag decides (an address can be reused by a new widget); row.focusOn only marks that core
+    -- set it, for the off path.
     if on then
-        local okA, a = pcall(C.addr, w)
-        if okA and row.focusAddr == a then return end
+        local okR, cur = pcall(C.prop, w, "bIsFocusable")
+        if okR and cur == true then row.focusOn = true return end
         local ok, err = pcall(function() C.count(); w.bIsFocusable = true end)
-        if ok then row.focusAddr = okA and a or nil
+        if ok then row.focusOn = true
         else C.warnOnce("focus row widget", "making a row focusable failed: %s", firstLine(err)) end
-    elseif row.focusAddr then
+    elseif row.focusOn then
         pcall(function() C.count(); w.bIsFocusable = false end)
-        row.focusAddr = nil
+        row.focusOn = nil
     end
 end
 
