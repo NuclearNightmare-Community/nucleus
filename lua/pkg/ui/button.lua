@@ -205,11 +205,12 @@ local function iconOnly(el) return el.icon ~= nil and el.label == "" end
 -- Core story 42 (0.17.1): the box behind a chipped checkbox's icon (WBP_<Core>Button's IconBack, SetIconBack): shown in
 -- theme.game.focusChipBack while the checkbox is chipped, so its transparent inside stays dark (the light chip shows
 -- only as the ring around it); hidden by its own style when the chip leaves. el.backOn: the widget shows it now. A pak
--- without SetIconBack (older than 0.17.1) or a failing call: one WARN naming the focus chip, then it is never called
--- again in this Lua state (the checkbox keeps its own colours on the chip, without the dark inside).
+-- without SetIconBack (older than 0.17.1) or a failing call: one WARN naming the focus chip, then it is never shown
+-- again in this Lua state (the checkbox keeps its own colours on the chip, without the dark inside); a hide is still
+-- tried, so a box shown before the failure doesn't stay after its chip leaves.
 local backGone = false
 local function iconBack(el, w, show)
-    if backGone then return end
+    if backGone and show then return end
     local c = theme.game.focusChipBack
     local ok, err = pcall(function() C.count(); w:SetIconBack(show, c.r, c.g, c.b, c.a) end)
     if ok then el.backOn = show or nil return end

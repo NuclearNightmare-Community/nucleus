@@ -182,9 +182,9 @@ do
     g.focusChipInk = { r = 0.0052, g = 0.0070, b = 0.0091, a = 1 }
     -- Core story 42 (0.17.1): behind a chipped checkbox's icon (WBP_<Core>Button's IconBack), so its transparent inside
     -- stays as dark as unfocused instead of showing the light chip: the panel as an unfocused checkbox shows it through
-    -- its inside (the card, theme.window's game background, over the row; sRGB #101418 in the VM shot, the same value
-    -- as focusChipInk), opaque.
-    g.focusChipBack = copy(g.focusChipInk)
+    -- its inside (the card, theme.window's game background, over the row), measured in the VM shot as sRGB #101418,
+    -- linear; opaque. Its own value: a later change to focusChipInk's contrast must not change the checkbox's inside.
+    g.focusChipBack = { r = 0.0052, g = 0.0070, b = 0.0091, a = 1 }
 end
 
 -- Mod Manager story 4 (core 0.10.0): the controls. A checkbox shows the game's checkbox textures (falling back to core's

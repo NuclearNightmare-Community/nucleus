@@ -2174,20 +2174,30 @@ do
     FO._resetGamepadInput()
     sub.type = 0
     -- (7) An old pak (no SetIconBack on the widget): the chip and the box's own colours, one WARN naming the focus
-    -- chip, and it is not called again in this Lua state (on any checkbox). Mouse mode here: no IconBack shown.
-    local w1, w3 = T.tagged("r42c1"), T.tagged("r42c3")
-    ok(FO._mode() == "mouse" and T.backHidden(w1) and T.backHidden(w3), "story 42 old pak: starts with no IconBack shown")
+    -- chip, and it is not shown again in this Lua state (on any checkbox); a hide still runs. Mouse mode here.
+    local w1, w2, w3 = T.tagged("r42c1"), T.tagged("r42c2"), T.tagged("r42c3")
+    ok(FO._mode() == "mouse" and T.backHidden(w1) and T.backHidden(w2) and T.backHidden(w3), "story 42 old pak: starts with no IconBack shown")
+    FO._input("keys")
+    T.key(wr, D.up, INV_ACT); T.key(wr, D.up, INV_ACT); T.key(wr, D.up, INV_ACT); T.key(wr, D.left, INV_ACT); T.key(wr, D.down, INV_ACT)
+    ok(T.agree("r42c2") and T.backShown(w2), "story 42 old pak: r2's checkbox chipped, IconBack shown")
+    -- the latch set while r2's IconBack shows: r1's widget has no SetIconBack and gets a chip
     w1.SetIconBack = nil
     C.forgetWarning("focus chip back")
-    local nB, b3 = countLogs("the focus chip's dark inside"), w3.backCalls or 0
+    local nB = countLogs("the focus chip's dark inside")
+    B._chip(C.els["r42c1"], w1, nil, 0)
+    B._style(C.els["r42c1"], w1, false)
+    ok(countLogs("the focus chip's dark inside") == nB + 1 and countLogs("SetIconBack") >= 1, "story 42 old pak: one WARN naming the call", countLogs("the focus chip's dark inside") - nB)
+    local b2 = w2.backCalls
+    T.key(wr, D.right, INV_ACT)
+    ok(T.agree("r42g2") and w2.backCalls == b2 + 1 and T.backHidden(w2) and C.els["r42c2"].backOn == nil, "story 42 old pak: the latch set, a shown IconBack is still hidden when its chip leaves")
     T.noBackOk = true
-    FO._input("keys")
-    T.key(wr, D.up, INV_ACT); T.key(wr, D.up, INV_ACT); T.key(wr, D.up, INV_ACT); T.key(wr, D.left, INV_ACT)
-    ok(T.agree("r42c1") and T.cbChipOwn("r42c1") and countLogs("the focus chip's dark inside") == nB + 1
-        and countLogs("SetIconBack") >= 1, "story 42 old pak: the chip in its own colours, one WARN naming the call", countLogs("the focus chip's dark inside") - nB)
-    T.key(wr, D.down, INV_ACT); T.key(wr, D.down, INV_ACT)
+    local b3 = w3.backCalls or 0
+    b2 = w2.backCalls
+    T.key(wr, D.left, INV_ACT)
+    ok(T.agree("r42c2") and T.cbChipOwn("r42c2") and w2.backCalls == b2, "story 42 old pak: not shown again (r2), the chip in its own colours")
+    T.key(wr, D.down, INV_ACT)
     ok(T.agree("r42c3") and T.cbChipOwn("r42c3") and (w3.backCalls or 0) == b3 and countLogs("the focus chip's dark inside") == nB + 1,
-        "story 42 old pak: not called again (another checkbox), no second WARN", (w3.backCalls or 0) - b3)
+        "story 42 old pak: not shown again (another checkbox), no second WARN", (w3.backCalls or 0) - b3)
     T.noBackOk = nil
     B._resetIconBack()
     SC.close(R)
