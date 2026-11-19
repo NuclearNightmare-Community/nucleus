@@ -187,11 +187,14 @@ end
 
 -- Story 24: the label's and the icon's colours (normal, hover): dimmed, both the game's disabled colour; else the
 -- game's text colours on a game face, white on a plain one (the generator's). el.colorKey: what the widget has now.
+-- Core story 42: ownColors(el) -> key, normal, hover: the colours its own style gives it (also a chipped checkbox's).
+local function ownColors(el)
+    if el.dimmed then return "dim", theme.dimmed, theme.dimmed
+    elseif el.gameFace then return "game", theme.game.text, theme.game.textHover end
+    return "plain", theme.white, theme.white
+end
 local function applyColors(el, w)
-    local key, n, h
-    if el.dimmed then key, n, h = "dim", theme.dimmed, theme.dimmed
-    elseif el.gameFace then key, n, h = "game", theme.game.text, theme.game.textHover
-    else key, n, h = "plain", theme.white, theme.white end
+    local key, n, h = ownColors(el)
     if key == el.colorKey then return end
     C.count(); w:SetContentColors(n.r, n.g, n.b, n.a, h.r, h.g, h.b, h.a)
     el.colorKey = key
@@ -357,7 +360,8 @@ end
 -- labelled button keeps its focus face then, so its layout never moves); its label and icon in the chip's ink
 -- (theme.game.focusChipInk, core story 41; el.colorKey = "focus": its own style puts its colours back). An icon-only
 -- one also gets a render scale: Btn s = (size + 2p) / size per axis, Content 1 / s, so the chip reaches p units beyond
--- the icon while the icon and the layout stay as they are.
+-- the icon while the icon and the layout stay as they are. Core story 42 (0.17.1): a checkbox's content keeps its own
+-- colours (ownColors: dimmed, the game's text / text hover, or white) on the chip; only the chip behind it changes.
 -- Sets el.chipOn ("strong" | "solid") once the face is on. False when no chip can be drawn now. Raises on a failed
 -- widget call (the caller logs it once).
 function B._chip(el, w, mid, p)
@@ -379,9 +383,12 @@ function B._chip(el, w, mid, p)
         C.count(); w:SetColors(c.r, c.g, c.b, c.a, c.r, c.g, c.b, c.a, c.r, c.g, c.b, c.a, el.styledIconOnly and 0 or el.style.pad)
     end
     el.faceOn = nil
-    local ink = g.focusChipInk
+    -- Core story 42: a checkbox's icon is its state (the game's ticked / unticked textures): the ink would tint it (a
+    -- ticked box became a dark filled square), so a chipped checkbox keeps the colours it has unfocused.
+    local n, h = g.focusChipInk, g.focusChipInk
+    if el.kind == "checkbox" then local _; _, n, h = ownColors(el) end
     el.colorKey = "focus"
-    C.count(); w:SetContentColors(ink.r, ink.g, ink.b, ink.a, ink.r, ink.g, ink.b, ink.a)
+    C.count(); w:SetContentColors(n.r, n.g, n.b, n.a, h.r, h.g, h.b, h.a)
     if el.styledIconOnly and p and p > 0 and el.iconSize and el.iconSize.w > 0 and el.iconSize.h > 0 then
         local sx, sy = (el.iconSize.w + 2 * p) / el.iconSize.w, (el.iconSize.h + 2 * p) / el.iconSize.h
         el.chipScaled = true
