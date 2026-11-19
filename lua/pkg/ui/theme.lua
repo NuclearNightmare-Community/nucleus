@@ -88,7 +88,8 @@ M.game = {
     focusRowTint = { r = 1, g = 1, b = 1, a = 1 },         -- the workspace's docs/game-ui-components.md 3.3: hovered M_NN_CinematicSelection, tint alpha 1.0
     -- Core story 39 (0.15.4): the focus chip. While the keyboard or gamepad owns the focus, the focused control inside a
     -- row draws its own face (button, checkbox) or background (choice, slider) with a second instance of the selection
-    -- material, its fill clearly brighter than the band (focusChipColors, in focusChipTint), its icon or text white.
+    -- material, its fill clearly brighter than the band (focusChipColors, in focusChipTint), its icon or text in
+    -- focusChipInk (story 41).
     -- Without an instance (none alive inside core's key and click handling, or creating it failed) the chip is the solid
     -- focusChipSolid (a brush colour, no asset). An icon-only control's chip reaches focusChipPad units beyond its icon
     -- (at most half the row's gap and the row's own padding, listRowPadX / listRowPadY included). The colours were
@@ -98,7 +99,7 @@ M.game = {
     -- focusChipColor is the one chip colour: #6dd5ed, linear (the material's vector parameters and Slate brush colours
     -- are FLinearColor): sRGB c/255 -> ((c/255 + 0.055) / 1.055)^2.4 = 109 -> 0.1529, 213 -> 0.6654, 237 -> 0.8469.
     -- focusChipColors (base and wear) and focusChipSolid are derived from it below; focusChipInk (the chip's icon, label,
-    -- choice value and slider number) is set after M.white.
+    -- choice value and slider number) is set with the derived values below.
     focusChipColor = { r = 0.1529, g = 0.6654, b = 0.8469, a = 1 },
     focusChipTint = { r = 1, g = 1, b = 1, a = 1 },
     focusChipPad = 4,
@@ -161,8 +162,9 @@ do
         CinematicWearColor = copy(g.focusChipColor),
     }
     g.focusChipSolid = copy(g.focusChipColor)      -- the chip without an instance (a brush colour)
-    -- the content on the chip (story 41): near-black, the window's panel colour (sRGB #101418, linear), because white read
-    -- poorly on the light blue in the first VM shot (sp-mm-chip-cfg.png: white gear on #6dd5ed, contrast about 1.6:1)
+    -- the content on the chip (story 41): near-black, sRGB #101418 (the panel as drawn in the VM shot), linear, because
+    -- white read poorly on the light blue in the first VM shot (sp-mm-chip-cfg.png: white gear on #6dd5ed, contrast about
+    -- 1.7:1)
     g.focusChipInk = { r = 0.0052, g = 0.0070, b = 0.0091, a = 1 }
 end
 
