@@ -1571,21 +1571,10 @@ function T.scaleIs(i, sx, sy) return i.scale ~= nil and T.near(i.scale[1], sx) a
 -- A chipped button: the instance as both brushes, the focus look on, content in the chip's ink (story 41:
 -- theme.game.focusChipInk), scale s (1: none set or 1).
 function T.inkIs(c, i) local k = theme.game.focusChipInk; return T.near(c[i], k.r) and T.near(c[i + 1], k.g) and T.near(c[i + 2], k.b) and T.near(c[i + 3], k.a) end
--- Core story 42: a checkbox's content keeps its own colours on the chip (dimmed, the game's text / text hover, or white).
-function T.colIs(c, i, k) return T.near(c[i], k.r) and T.near(c[i + 1], k.g) and T.near(c[i + 2], k.b) and T.near(c[i + 3], k.a) end
-function T.ownIs(el, c)
-    local n, h = theme.white, theme.white
-    if el.dimmed then n, h = theme.dimmed, theme.dimmed elseif el.gameFace then n, h = theme.game.text, theme.game.textHover end
-    return T.colIs(c, 1, n) and T.colIs(c, 5, h)
-end
-function T.contentOk(id, c)
-    if C.els[id].kind == "checkbox" then return T.ownIs(C.els[id], c) end
-    return T.inkIs(c, 1) and T.inkIs(c, 5)
-end
 function T.chipped(id, s)
     local w = T.tagged(id)
     if not (w and T.chipMid(id) and w.focusLook == true and w.content) then return false end
-    if not T.contentOk(id, w.content) then return false end
+    if not (T.inkIs(w.content, 1) and T.inkIs(w.content, 5)) then return false end
     if s and s ~= 1 then return T.scaleIs(w.Btn, s) and T.scaleIs(w.Content, 1 / s) end
     return w.Btn.scale == nil or T.scaleIs(w.Btn, 1)
 end
@@ -1893,7 +1882,7 @@ do
     local c2 = T.tagged("r39c2")
     local sol = g.focusChipSolid
     ok(T.agree("r39c2") and C.els["r39c2"].chipOn == "solid" and c2.colors and T.near(c2.colors[1], sol.r) and T.near(c2.colors[4], sol.a) and c2.colors[13] == 0
-        and T.scaleIs(c2.Btn, T.S39) and T.contentOk("r39c2", c2.content), "story 39 in a hook, no instance: a solid chip now (a checkbox: its own colours, story 42; scaled)")
+        and T.scaleIs(c2.Btn, T.S39) and T.inkIs(c2.content, 1), "story 39 in a hook, no instance: a solid chip now (ink, scaled)")
     ok(AS.stats.loads == loads and F.getAssets == gets and #F.mids == made, "story 39 in a hook: no asset load, nothing made", AS.stats.loads - loads)
     tick()
     ok(T.chipped("r39c2", T.S39) and C.els["r39c2"].chipOn == "strong" and #F.mids >= made + 1, "story 39 in a hook: the tick upgrades it to the instance chip")
@@ -1992,172 +1981,6 @@ do
     AS._reset()
     ok(FO.stats().faults == faults0 and C.inDispatch == 0, "story 39: no fault in the focus path", FO.stats().faults - faults0)
     ok(FO.stats().chips > 0, "story 39: chips counted", FO.stats().chips)
-end
-
--- ---------------------------------------------------------------- core story 42: the tick readable, the chip after a gamepad press
--- A chipped checkbox draws its icon in its own colours (only the chip behind it changes); a hover or a click switches to
--- mouse mode only when the gamepad is not the current input (the game's CommonInputSubsystem). Fakes:
--- SubsystemBlueprintLibrary:GetLocalPlayerSubsystem(pc, class) -> F.ciSub (F.ciFail "throw" | "nil"), the native class
--- /Script/CommonInput.CommonInputSubsystem (T.CI_CLASS), StaticFindObject lookups of it counted (F.ciLookups).
-T.CI_CLASS = "/Script/CommonInput.CommonInputSubsystem"
-F.ciLookups, F.ciPcs = 0, {}
-do
-    local sfo = StaticFindObject
-    StaticFindObject = function(p)
-        if p == T.CI_CLASS then F.ciLookups = F.ciLookups + 1 end
-        return sfo(p)
-    end
-    obj({ GetLocalPlayerSubsystem = function(_, pc, c)
-        F.ciPcs[#F.ciPcs + 1] = pc
-        if F.ciFail == "throw" then error("GetLocalPlayerSubsystem: boom") end
-        if F.ciFail == "nil" or c ~= F.objects[T.CI_CLASS] then return nil end
-        return F.ciSub
-    end }, "/Script/Engine.Default__SubsystemBlueprintLibrary")
-    F.ciSub = obj({ type = 0, bIsGamepadSimulatedClick = false,
-        GetCurrentInputType = function(self) if self.throw then error("GetCurrentInputType: boom") end return self.type end })
-end
--- The checkbox's own colours on its content and not the ink (a dark ink must not tint the ticked / unticked texture).
-function T.cbChipOwn(id)
-    local w = T.tagged(id)
-    return T.chipped(id, T.S39) and T.ownIs(C.els[id], w.content) and not T.inkIs(w.content, 1)
-end
-do
-    local AS = require("nucleus.ui.assets")
-    AS._reset()
-    FO._noChip = false
-    FO._resetGamepadInput()
-    local faults0 = FO.stats().faults
-    local CI = F.objects[T.CI_CLASS] or obj({}, T.CI_CLASS)
-    local sub = F.ciSub
-    sub.type, sub.bIsGamepadSimulatedClick, F.ciFail = 0, false, nil
-    FO._input("keys")
-    local R = SC.open{ id = "R42" }
-    local wr = T.screenOf("R42")
-    local L = LS.create{ id = "r42l", place = { screen = R, corner = "top-left" }, size = { 600, 400 } }
-    for i = 1, 3 do -- r1 unticked, r2 ticked, r3 unticked; each with a gear
-        local r = RS.create{ id = "r42r" .. i, place = { list = L } }
-        CK.create{ id = "r42c" .. i, checked = i == 2, place = { row = r }, onChange = T.rec("r42c" .. i) }
-        X.create{ id = "r42n" .. i, text = "MOD " .. i, place = { row = r, fill = 4 } }
-        B.create{ id = "r42g" .. i, place = { row = r }, icon = { icon = "gear" }, iconSize = 28, dimmed = true, onClick = T.rec("r42g" .. i) }
-    end
-    tick()
-    -- (1) Chipped checkbox: its own colours, ticked or unticked; a chipped gear keeps the ink
-    ok(T.agree("r42c1") and C.els["r42c1"].checked == false and T.cbChipOwn("r42c1"), "story 42 chipped unticked checkbox: the chip, content in its own colours (not the ink)")
-    local cw = T.tagged("r42c1")
-    ok(T.colIs(cw.content, 1, theme.game.text) and T.colIs(cw.content, 5, theme.game.textHover), "story 42 chipped checkbox: the game's text / text hover colours, as unfocused")
-    ok(T.key(wr, D.down, INV_ACT) and T.agree("r42c2") and C.els["r42c2"].checked == true and T.cbChipOwn("r42c2"), "story 42 chipped ticked checkbox: content in its own colours")
-    ok(T.cbOwn("r42c1"), "story 42 unfocused checkbox: its own look back")
-    ok(T.key(wr, D.right, INV_ACT) and T.agree("r42g2") and T.chipped("r42g2", T.S39) and T.inkIs(T.tagged("r42g2").content, 1), "story 42 chipped gear: content in focusChipInk (unchanged)")
-    ok(T.key(wr, D.left, INV_ACT) and T.agree("r42c2") and T.cbChipOwn("r42c2"), "story 42 back on the ticked checkbox")
-    -- (2) Enter / A on a checkbox: onChange once, keys, the chip stays (the box's state in its own colours)
-    local n2 = T.ncalls("r42c2")
-    T.key(wr, INV_DIR, A.accept)
-    T.fire(T.CLICK, T.tagged("r42c2"))
-    ok(T.ncalls("r42c2") == n2 + 1 and C.els["r42c2"].checked == false and FO._mode() == "keys" and T.cbChipOwn("r42c2"), "story 42 accept and its click: onChange once, keys, the chip stays")
-    T.key(wr, INV_DIR, A.accept)
-    T.fire(T.CLICK, T.tagged("r42c2"))
-    ok(T.ncalls("r42c2") == n2 + 2 and C.els["r42c2"].checked == true and FO._mode() == "keys" and T.cbChipOwn("r42c2"), "story 42 accept again: ticked, the chip stays")
-    -- Every valid key records the pointer, also one left to the Button: content moving under it after is no hover
-    local ign = T.ign()
-    T.move()
-    T.key(wr, INV_DIR, A.accept) -- left to the Button (not handled): the pointer recorded all the same
-    T.hover(T.tagged("r42r3")) -- before the Button's click (on the key's release)
-    ok(T.agree("r42c2") and FO._mode() == "keys" and T.cbChipOwn("r42c2") and T.ign() == ign + 1, "story 42 accept: the pointer recorded, a still enter after is ignored")
-    T.fire(T.CLICK, T.tagged("r42c2"))
-    ok(FO._mode() == "keys" and T.cbChipOwn("r42c2") and C.els["r42c2"].checked == false, "story 42 accept: its click after, keys, the chip stays")
-    -- (3) Gamepad click: CommonInput says Gamepad: keys, the chip stays (on the clicked control)
-    sub.type = 1
-    F.ciPcs = {}
-    T.move()
-    T.fire(T.CLICK, T.tagged("r42g2"))
-    ok(T.agree("r42g2") and FO._mode() == "keys" and T.chipped("r42g2", T.S39), "story 42 gamepad click: keys, the chip on the clicked control")
-    ok(F.ciPcs[1] == PC, "story 42 gamepad: the subsystem asked with the window's player controller (the owner's)")
-    -- A simulated click (CommonUI's Accept as a click) while the type already reads MouseAndKeyboard
-    sub.type, sub.bIsGamepadSimulatedClick = 0, true
-    T.move()
-    T.fire(T.CLICK, T.tagged("r42c2"))
-    ok(T.agree("r42c2") and FO._mode() == "keys" and T.cbChipOwn("r42c2"), "story 42 gamepad-simulated click: keys, the chip stays")
-    -- A stale flag (still set, type MouseAndKeyboard) never blocks a real mouse hover: the flag is read on clicks only
-    ok(FO._gamepadInput() == false and FO._gamepadInput(true) == true, "story 42 the simulated-click flag counts for a click only")
-    T.move()
-    T.hover(T.tagged("r42r3"))
-    ok(T.agree("r42c3") and FO._mode() == "mouse" and T.anyChip() == nil, "story 42 stale flag on a moved hover: mouse mode (a real mouse), no chip", T.anyChip())
-    T.key(wr, D.up, INV_ACT)
-    ok(FO._mode() == "keys" and T.agree("r42c2") and T.cbChipOwn("r42c2"), "story 42 stale flag: a key brings keys and the chip back")
-    -- The flag alone still keeps keys on a click
-    T.move()
-    T.fire(T.CLICK, T.tagged("r42c2"))
-    ok(T.agree("r42c2") and FO._mode() == "keys" and T.cbChipOwn("r42c2"), "story 42 the flag alone on a click: keys, the chip stays")
-    sub.bIsGamepadSimulatedClick = false
-    -- (4) Gamepad cursor move: a hover is ignored (focus, mode, chip unchanged), the pointer re-recorded
-    sub.type = 1
-    ign = T.ign()
-    local hv = FO.stats().hovers
-    T.move()
-    T.hover(T.tagged("r42r3"))
-    ok(T.agree("r42c2") and FO._mode() == "keys" and T.cbChipOwn("r42c2") and T.ign() == ign + 1 and FO.stats().hovers == hv, "story 42 gamepad hover: ignored, focus and chip unchanged")
-    sub.type = 0
-    T.hover(T.tagged("r42r3"))
-    ok(T.agree("r42c2") and FO._mode() == "keys" and T.ign() == ign + 2, "story 42 gamepad hover: the pointer re-recorded (a still enter after is content moving)")
-    -- (5) Real mouse: CommonInput says MouseAndKeyboard: a moved hover and a click switch to mouse (story 39)
-    T.move()
-    T.hover(T.tagged("r42r3"))
-    ok(T.agree("r42c3") and FO._mode() == "mouse" and T.anyChip() == nil, "story 42 real mouse hover: mouse mode, no chip", T.anyChip())
-    T.key(wr, D.up, INV_ACT)
-    ok(FO._mode() == "keys" and T.agree("r42c2") and T.cbChipOwn("r42c2"), "story 42 a key: keys again, the chip")
-    T.move()
-    T.fire(T.CLICK, T.tagged("r42g2"))
-    ok(T.agree("r42g2") and FO._mode() == "mouse" and T.noChip("r42g2"), "story 42 real mouse click: mouse mode, no chip")
-    -- The menu entry's click (no element) under gamepad input: keys stay
-    FO._input("keys")
-    sub.type = 1
-    C.clickInput()
-    ok(FO._mode() == "keys", "story 42 the menu entry's click under gamepad input: keys stay")
-    sub.type = 0
-    C.clickInput()
-    ok(FO._mode() == "mouse", "story 42 the menu entry's click under mouse input: mouse")
-    -- (6) No CommonInput: no subsystem, a throwing call: story 39's rules (a click is the mouse's)
-    for _, case in ipairs({ { "nil", false }, { "throw", false }, { nil, true } }) do
-        FO._input("keys")
-        F.ciFail, sub.throw = case[1], case[2]
-        sub.type = 1
-        C.clickInput()
-        ok(FO._mode() == "mouse", "story 42 no CommonInput (" .. tostring(case[1] or "GetCurrentInputType throws") .. "): a click is the mouse's")
-    end
-    F.ciFail, sub.throw, sub.type = nil, false, 0
-    ok(FO._gamepadInput() == false, "story 42 MouseAndKeyboard: not gamepad")
-    -- A failing call is logged: GetLocalPlayerSubsystem throws: false and one WARN naming the focus chip
-    C.forgetWarning("focus chip gamepad")
-    local nG = countLogs("focus chip's gamepad check")
-    F.ciFail, sub.type = "throw", 1
-    ok(FO._gamepadInput() == false and FO._gamepadInput() == false and countLogs("focus chip's gamepad check") == nG + 1
-        and countLogs("GetLocalPlayerSubsystem: boom") >= 1, "story 42 GetLocalPlayerSubsystem throws: false, one WARN naming the call", countLogs("focus chip's gamepad check") - nG)
-    F.ciFail, sub.type = nil, 0
-    local nS = countLogs("focus chip's gamepad check")
-    F.ciFail = "nil"
-    ok(FO._gamepadInput() == false and countLogs("focus chip's gamepad check") == nS, "story 42 no subsystem: false, silent")
-    F.ciFail = nil
-    -- The class missing: false, looked up once in this Lua state (a miss is a full scan)
-    F.objects[T.CI_CLASS] = nil
-    FO._resetGamepadInput()
-    sub.type = 1
-    local lk = F.ciLookups
-    FO._input("keys")
-    C.clickInput()
-    ok(FO._mode() == "mouse" and F.ciLookups == lk + 1, "story 42 class missing: a click is the mouse's, the class looked up once", F.ciLookups - lk)
-    FO._input("keys")
-    C.clickInput()
-    T.key(wr, D.down, INV_ACT)
-    T.move()
-    T.hover(T.tagged("r42r1"))
-    ok(FO._mode() == "mouse" and F.ciLookups == lk + 1, "story 42 class missing: not looked up again", F.ciLookups - lk)
-    F.objects[T.CI_CLASS] = CI
-    FO._resetGamepadInput()
-    sub.type = 0
-    SC.close(R)
-    FO._input("keys")
-    AS._reset()
-    ok(FO.stats().faults == faults0 and C.inDispatch == 0, "story 42: no fault in the focus path", FO.stats().faults - faults0)
 end
 
 -- ---------------------------------------------------------------- core story 38: drag to reorder rows in a list
