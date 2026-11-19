@@ -2071,7 +2071,7 @@ do
     T.move()
     T.fire(T.CLICK, T.tagged("r42g2"))
     ok(T.agree("r42g2") and FO._mode() == "keys" and T.chipped("r42g2", T.S39), "story 42 gamepad click: keys, the chip on the clicked control")
-    ok(F.ciPcs[1] ~= nil and C.valid(F.ciPcs[1]), "story 42 gamepad: the subsystem asked with the window's player controller")
+    ok(F.ciPcs[1] == PC, "story 42 gamepad: the subsystem asked with the window's player controller (the owner's)")
     -- A simulated click (CommonUI's Accept as a click) while the type already reads MouseAndKeyboard
     sub.type, sub.bIsGamepadSimulatedClick = 0, true
     T.move()
@@ -2115,6 +2115,17 @@ do
     end
     F.ciFail, sub.throw, sub.type = nil, false, 0
     ok(FO._gamepadInput() == false, "story 42 MouseAndKeyboard: not gamepad")
+    -- A failing call is logged: GetLocalPlayerSubsystem throws: false and one WARN naming the focus chip
+    C.forgetWarning("focus chip gamepad")
+    local nG = countLogs("focus chip's gamepad check")
+    F.ciFail, sub.type = "throw", 1
+    ok(FO._gamepadInput() == false and FO._gamepadInput() == false and countLogs("focus chip's gamepad check") == nG + 1
+        and countLogs("GetLocalPlayerSubsystem: boom") >= 1, "story 42 GetLocalPlayerSubsystem throws: false, one WARN naming the call", countLogs("focus chip's gamepad check") - nG)
+    F.ciFail, sub.type = nil, 0
+    local nS = countLogs("focus chip's gamepad check")
+    F.ciFail = "nil"
+    ok(FO._gamepadInput() == false and countLogs("focus chip's gamepad check") == nS, "story 42 no subsystem: false, silent")
+    F.ciFail = nil
     -- The class missing: false, looked up once in this Lua state (a miss is a full scan)
     F.objects[T.CI_CLASS] = nil
     FO._resetGamepadInput()

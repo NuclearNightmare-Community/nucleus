@@ -602,10 +602,10 @@ end
 -- Core story 42 (0.17.1): is the gamepad the current input? The game runs CommonUI: on gamepad input its analog cursor
 -- moves or hides the platform cursor and can turn the Accept button into a simulated mouse click, which would look like
 -- a real pointer move or a mouse click here. CommonInputSubsystem (the window's player controller's local player) knows:
--- true while its current input type is Gamepad (ECommonInputType 1) or the click is its gamepad-simulated one. Any
--- failure, a missing class or no subsystem: false (story 39's rules). The class is a native one, found by
--- StaticFindObject; after a miss it is not looked up again in this Lua state (a miss scans every object). No UObject is
--- kept across calls, no asset is loaded and no hook registered.
+-- true while its current input type is Gamepad (ECommonInputType 1) or the click is its gamepad-simulated one. A
+-- missing class or no subsystem: false (story 39's rules); a failing call: false and one WARN naming the focus chip.
+-- The class is a native one, found by StaticFindObject; after a miss it is not looked up again in this Lua state (a
+-- miss scans every object). No UObject is kept across calls, no asset is loaded and no hook registered.
 local CI_CLASS = "/Script/CommonInput.CommonInputSubsystem"
 local CI_GAMEPAD = 1
 local ciMissing = false
@@ -621,7 +621,11 @@ local function gamepadInput()
         if sub:GetCurrentInputType() == CI_GAMEPAD then return true end
         return sub.bIsGamepadSimulatedClick == true
     end)
-    return ok and yes == true
+    if not ok then
+        C.warnOnce("focus chip gamepad", "the focus chip's gamepad check (CommonInputSubsystem) failed: %s", firstLine(yes))
+        return false
+    end
+    return yes == true
 end
 F._gamepadInput = gamepadInput
 F._resetGamepadInput = function() ciMissing = false end
