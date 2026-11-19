@@ -27,7 +27,8 @@
 --                        (Ctrl+R): Lua stops and core's DLL unloads
 --       after runOriginal: a suspension left on is cleared by the next tick (FNTICKCLEAR); the tooltip rule's value
 --                        swapped (same key) and released on the game thread, each followed by a forced GC (FNSWAPVAL,
---                        FNRELFREE), then installed again
+--                        FNRELFREE), then installed again; a rule on a spare card a forced GC collects is dropped by
+--                        the next install (FNPRUNE)
 --     Pass 2 (main.lua runs again after the reload; intercept-pass.txt says so): FnList empty, card A and the Bat card
 --     toggle again (each put back); the replacement released off the game thread at the reload is still kept by the
 --     game instance after a forced GC (FN2KEPT). check.ps1 finds the old instance's released, kept and unloading lines.
@@ -512,6 +513,31 @@ return function(X, GS)
             T.tbAddr, T.tbH = addrOf(tb3), core().ref(tb3)
             T.tip = W.intercept{ fn = P_TIP, target = card("A"), action = "replace", value = tb3 }
             check(addrOf(card("A"):GetToolTipWidget()) == T.tbAddr, "FNTIPAGAIN the tooltip rule installed again (rule %s)", tostring(T.tip))
+        end)
+
+        -- A rule ends with its target: a skip on a spare card (outer: the game instance, never shown) that a forced GC
+        -- collects is dropped by the next install (any rule's), leaves FnList and stops counting toward the cap.
+        local function mineCount() local n = 0 for _, r in ipairs(W.list()) do if r.mod == ME then n = n + 1 end end return n end
+        step("fn: prune install", function()
+            T.mine0 = mineCount()
+            local spare = StaticConstructObject(StaticFindObject(ES:sub(1, -2)), gi(), FName("NucleusFnSpareCard"))
+            T.spareH = core().ref(spare)
+            T.spare = W.intercept{ fn = P_CLICK, target = spare, action = "skip" }
+            T.mine1 = mineCount()
+            StaticFindObject("/Script/Engine.Default__KismetSystemLibrary"):CollectGarbage()
+            return msAfter(2), 5
+        end)
+        step("fn: prune check", function()
+            local gone = core().deref(T.spareH) == nil
+            core().free(T.spareH)
+            local listed = ruleById(T.spare) ~= nil
+            local idB = W.intercept{ fn = P_TIP, target = card("B"), action = "skip" }
+            local dropped = ruleById(T.spare) == nil
+            local relB = W.release(idB)
+            local relSpare = W.release(T.spare)
+            check(gone and listed and dropped and relB == true and relSpare == false and T.mine1 == T.mine0 + 1 and mineCount() == T.mine0,
+                "FNPRUNE the spare card's rule %s (card collected %s, still listed before an install %s) is dropped by the next install (%s); release -> %s; %s's rules %d -> %d -> %d",
+                tostring(T.spare), tostring(gone), tostring(listed), tostring(dropped), tostring(relSpare), ME, T.mine0, T.mine1, mineCount())
         end)
 
         -- ---- row 6: two mods (SkelPeer's any skip on the Bat click; its refusal of card A's click)

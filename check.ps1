@@ -1026,6 +1026,9 @@ $intercept = $started + @(
     "\[$T\] OK FNSWAPVAL "
     "\[$T\] OK FNRELFREE "
     "\[$T\] OK FNTIPAGAIN "
+    # A rule whose target is gone (a spare card, collected) is dropped by the next install, once, and stops counting.
+    "#1|\[$N\] native: intercept: dropped 1 rule\(s\) whose function or target is gone"
+    "\[$T\] OK FNPRUNE "
     # Two mods: the peer's any skip on the Bat click; its refusal of card A's click (held by the test dependent).
     "\[$Peer\] PEERFN bat any skip id=\d+"
     "\[$Peer\] PEERFN refused: fn\.intercept: .*EnemySlot_Button_C:BndEvt__EnemySlot_Button_Button_48_.* is already intercepted by $T"

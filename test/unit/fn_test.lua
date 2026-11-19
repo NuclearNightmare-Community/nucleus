@@ -218,6 +218,14 @@ eq(#Q, 1, "onCall: the registration is scheduled")
 IN_HOOK = false
 runQueue()
 ok(HOOKS["/Game/Y.Y_C:Click"] ~= nil, "onCall: registered on the next frame")
+-- a rule the native side dropped (its target gone; not in FnList) is forgotten at the next call on its path
+Q = {}
+F._S.rules[9] = { path = "/Game/X.X_C:Click", onCall = function() error("never") end, applied = 0 }
+N.list = "id=5 mod=NucleusSkelTest fn=/Game/X.X_C:Click target=any action=skip seen=5 applied=3 suspended=false"
+HOOKS["/Game/X.X_C:Click"](ctx)
+eq(F._S.rules[9], nil, "onCall: a rule missing from FnList (dropped natively) is forgotten")
+ok(F._S.rules[5] ~= nil, "onCall: a rule still in FnList is kept")
+eq(#Q, 0, "onCall: nothing scheduled for the dropped rule")
 
 print(string.format("fn_test: %d passed, %d failed", pass, fail))
 if fail > 0 then os.exit(1) end
