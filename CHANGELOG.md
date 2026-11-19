@@ -2,6 +2,16 @@
 
 All notable changes to Nucleus are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). From 0.5.0 a dependent's `need` and `dependsOn` are minimum versions (`>=0.5.0`), so a newer Nucleus never asks dependents to raise them. Up to 0.3.0, below 1.0.0 a dependent connected only to the same minor version (`need = "0.3.0"` accepted 0.3.x).
 
+## [0.15.5] - 2026-11-18
+
+Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
+
+For players: the focus chip (keyboard or gamepad) is now light blue instead of red, so it stands out behind a ticked checkbox's red tick.
+
+### Changed
+
+- The focus chip's colour (core story 41): one theme value, `theme.game.focusChipColor`, #6dd5ed in linear (0.1529, 0.6654, 0.8469), drives every chip (button, checkbox, choice, slider; the instance's `CinematicBaseColor` and `CinematicWearColor` in `focusChipColors` and the solid `focusChipSolid`, both derived from it, same table shape). What is drawn on the chip (icon, label, a choice's value, a slider's number) is one theme value too, `theme.game.focusChipInk` (white). No public API change; Lua only (no new pak).
+
 ## [0.15.4] - 2026-11-18
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.

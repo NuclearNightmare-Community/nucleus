@@ -354,9 +354,10 @@ end
 -- or checkbox inside a row with the chip: mid (the chip instance, assets.lua A.focusChipMaterial) as its face (normal and
 -- hover brush, theme.game.focusChipTint) with the padding and minimum height its own style gives it, or, without an
 -- instance, the solid theme.game.focusChipSolid (SetColors, which has one padding and no minimum height: a game-look
--- labelled button keeps its focus face then, so its layout never moves); its label and icon white (el.colorKey =
--- "focus": its own style puts its colours back). An icon-only one also gets a render scale: Btn s = (size + 2p) / size
--- per axis, Content 1 / s, so the chip reaches p units beyond the icon while the icon and the layout stay as they are.
+-- labelled button keeps its focus face then, so its layout never moves); its label and icon in the chip's ink
+-- (theme.game.focusChipInk, core story 41; el.colorKey = "focus": its own style puts its colours back). An icon-only
+-- one also gets a render scale: Btn s = (size + 2p) / size per axis, Content 1 / s, so the chip reaches p units beyond
+-- the icon while the icon and the layout stay as they are.
 -- Sets el.chipOn ("strong" | "solid") once the face is on. False when no chip can be drawn now. Raises on a failed
 -- widget call (the caller logs it once).
 function B._chip(el, w, mid, p)
@@ -378,9 +379,9 @@ function B._chip(el, w, mid, p)
         C.count(); w:SetColors(c.r, c.g, c.b, c.a, c.r, c.g, c.b, c.a, c.r, c.g, c.b, c.a, el.styledIconOnly and 0 or el.style.pad)
     end
     el.faceOn = nil
-    local wh = theme.white
+    local ink = g.focusChipInk
     el.colorKey = "focus"
-    C.count(); w:SetContentColors(wh.r, wh.g, wh.b, wh.a, wh.r, wh.g, wh.b, wh.a)
+    C.count(); w:SetContentColors(ink.r, ink.g, ink.b, ink.a, ink.r, ink.g, ink.b, ink.a)
     if el.styledIconOnly and p and p > 0 and el.iconSize and el.iconSize.w > 0 and el.iconSize.h > 0 then
         local sx, sy = (el.iconSize.w + 2 * p) / el.iconSize.w, (el.iconSize.h + 2 * p) / el.iconSize.h
         el.chipScaled = true

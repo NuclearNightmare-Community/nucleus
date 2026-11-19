@@ -92,14 +92,15 @@ M.game = {
     -- Without an instance (none alive inside core's key and click handling, or creating it failed) the chip is the solid
     -- focusChipSolid (a brush colour, no asset). An icon-only control's chip reaches focusChipPad units beyond its icon
     -- (at most half the row's gap and the row's own padding, listRowPadX / listRowPadY included). The colours were
-    -- retuned from the first VM shots (2026-11-18): a light red, clearly lighter than the band and the game's tick red.
-    -- Shown only while the input mode is keys (focus.lua).
-    focusChipColors = {                                    -- the material's vector parameters, set on the chip instance
-        CinematicBaseColor = { r = 1.0, g = 0.32, b = 0.16, a = 1 },
-        CinematicWearColor = { r = 1.0, g = 0.45, b = 0.25, a = 1 },
-    },
+    -- retuned from the first VM shots (2026-11-18) to a light red; core story 41 (0.15.5) made it light blue, because the
+    -- red was hard to tell from the game's red tick behind a ticked checkbox. Shown only while the input mode is keys
+    -- (focus.lua).
+    -- focusChipColor is the one chip colour: #6dd5ed, linear (the material's vector parameters and Slate brush colours
+    -- are FLinearColor): sRGB c/255 -> ((c/255 + 0.055) / 1.055)^2.4 = 109 -> 0.1529, 213 -> 0.6654, 237 -> 0.8469.
+    -- focusChipColors (base and wear) and focusChipSolid are derived from it below; focusChipInk (the chip's icon, label,
+    -- choice value and slider number) is set after M.white.
+    focusChipColor = { r = 0.1529, g = 0.6654, b = 0.8469, a = 1 },
     focusChipTint = { r = 1, g = 1, b = 1, a = 1 },
-    focusChipSolid = { r = 1.0, g = 0.38, b = 0.20, a = 1 },
     focusChipPad = 4,
     buttonPadding = { l = 12, t = 4, r = 12, b = 4 },
     buttonMinHeight = 44,
@@ -150,6 +151,18 @@ M.iconGap = 8                                      -- between a button's icon an
 M.imageTint = { r = 1, g = 1, b = 1, a = 1 }       -- an image's default tint: the texture as it is
 M.dimmed = M.game.textDisabled                     -- dimmed = true: the game's disabled colour
 M.white = { r = 1, g = 1, b = 1, a = 1 }           -- a plain button's label and icon (the generator's)
+-- Core story 41 (0.15.5): the focus chip's derived values (theme.game.focusChipColor above). Readers such as Mod
+-- Manager's screen driver read focusChipColors.CinematicBaseColor: the table keeps story 39's shape.
+do
+    local g = M.game
+    local function copy(c) return { r = c.r, g = c.g, b = c.b, a = c.a } end
+    g.focusChipColors = {                          -- the material's vector parameters, set on the chip instance
+        CinematicBaseColor = copy(g.focusChipColor),
+        CinematicWearColor = copy(g.focusChipColor),
+    }
+    g.focusChipSolid = copy(g.focusChipColor)      -- the chip without an instance (a brush colour)
+    g.focusChipInk = copy(M.white)                 -- the content on the chip; white reads clearly on the blue (story 41)
+end
 
 -- Mod Manager story 4 (core 0.10.0): the controls. A checkbox shows the game's checkbox textures (falling back to core's
 -- checkbox-on / checkbox-off icons when they can't be loaded), sizes 16-64 (default 28).

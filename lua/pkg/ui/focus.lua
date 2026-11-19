@@ -58,7 +58,9 @@
 -- tick upgrades it (el.chipOn "strong" | "solid"; "pending" while a failed one waits for the tick). In mouse mode only
 -- the band and story 27/28's looks show. A change of mode re-applies the current looks at once. Off (focus leaves, the
 -- mode changes, the window is covered or closed, a re-style): render scales back to 1 and the kind's own style draws it.
--- Lone controls and BACK keep story 27/28's looks; focusRowStrong doesn't affect the chip.
+-- Lone controls and BACK keep story 27/28's looks; focusRowStrong doesn't affect the chip. Core story 41 (0.15.5): the
+-- chip is light blue, one theme value (theme.game.focusChipColor, #6dd5ed linear), and what is drawn on it (icon,
+-- label, a choice's value, a slider's number) is theme.game.focusChipInk.
 -- Each window remembers its last-focused element (by id): after a close the next window down gets it back.
 local BASE = (...):gsub("%.ui%.focus$", "")
 local C = require(BASE .. ".ui.common")
@@ -253,15 +255,17 @@ local function chipPad(el)
     return math.max(p, 0)
 end
 F._chipPad = chipPad
--- The content tint that draws the game's text colour (theme.game.text, the slider box's generated colour) white: a
--- Border's content tint multiplies its content (as the generated FocusTint, which reaches the hover colour).
-local function whiteTint()
-    local t, wh = theme.game.text, theme.white
-    return { R = wh.r / t.r, G = wh.g / t.g, B = wh.b / t.b, A = 1 }
+-- The content tint that draws the game's text colour (theme.game.text, the slider box's generated colour) in the chip's
+-- ink (theme.game.focusChipInk): a Border's content tint multiplies its content (as the generated FocusTint, which
+-- reaches the hover colour).
+local function inkTint()
+    local t, ink = theme.game.text, theme.game.focusChipInk
+    return { R = ink.r / t.r, G = ink.g / t.g, B = ink.b / t.b, A = ink.a }
 end
 -- A choice's or a slider's chip: its own Background (padding 0, as its look's) from the instance, else solid; a
--- choice's value white (its font from the cache; a miss leaves the chip "solid", so the tick completes it). lookKey
--- "chip": its own look is drawn again by its style. A slider's number turns white after its focus look (setLook).
+-- choice's value in the chip's ink (its font from the cache; a miss leaves the chip "solid", so the tick completes it).
+-- lookKey "chip": its own look is drawn again by its style. A slider's number takes the ink after its focus look
+-- (setLook).
 local function chipControl(el, w, mid)
     el.lookKey = "chip"
     if mid then
@@ -276,7 +280,8 @@ local function chipControl(el, w, mid)
     if el.kind == "choice" then
         local game = el.gameText
         local font = A.get(game and ("font:" .. theme.game.controlFont.font) or "font:Engine", true)
-        if font then C.count(); w:SetValueLook(font, game and theme.game.controlFont.size or theme.plainControlFont, 1, 1, 1, 1)
+        local ink = theme.game.focusChipInk
+        if font then C.count(); w:SetValueLook(font, game and theme.game.controlFont.size or theme.plainControlFont, ink.r, ink.g, ink.b, ink.a)
         else whole = false end
     end
     el.chipOn = whole and "strong" or "solid"
@@ -335,8 +340,8 @@ local function setLook(el, on)
     local ok, err = pcall(function() C.count(); w:SetFocusLook(on) end)
     if not ok then C.warnOnce("focus look", "the focus look failed (is %s's pak current?): %s", C.NAME, firstLine(err)) end
     if look == "chip" and el.kind == "slider" and el.chipOn then
-        -- after SetFocusLook (it sets the number box's content tint): the number white
-        local okT, errT = pcall(function() C.count(); w.Background:SetContentColorAndOpacity(whiteTint()) end)
+        -- after SetFocusLook (it sets the number box's content tint): the number in the ink
+        local okT, errT = pcall(function() C.count(); w.Background:SetContentColorAndOpacity(inkTint()) end)
         if not okT then
             S.chipFaults = S.chipFaults + 1
             C.warnOnce("focus chip", "'%s': the focus chip failed (is %s's pak current?): %s", el.id, C.NAME, firstLine(errT))
