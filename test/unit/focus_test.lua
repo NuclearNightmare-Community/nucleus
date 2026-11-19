@@ -1552,8 +1552,8 @@ end
 
 -- ---------------------------------------------------------------- core story 39: a focus chip on the focused control
 -- A chip is a button's (a checkbox's) face from an instance of the selection material in the chip colours (normal and
--- hover brush), its content white, an icon-only one's Btn scaled by s and its Content by 1 / s; a choice's or a
--- slider's Background from that instance (a slider's number white through its box's content tint). One input mode per
+-- hover brush), its content in the ink (story 41), an icon-only one's Btn scaled by s and its Content by 1 / s; a choice's or a
+-- slider's Background from that instance (a slider's number in the ink through its box's content tint). One input mode per
 -- Lua state (FO._mode): keys from a navigation key, mouse from a real pointer move into a row and from every click.
 -- T.chipMid(id): the instance a control shows, or nil.
 function T.isChipMid(m)
@@ -1596,7 +1596,7 @@ end
 function T.inkNumber(id)
     local w = T.tagged(id)
     local t, c, k = w and w.Background and w.Background.tint, theme.game.text, theme.game.focusChipInk
-    return t ~= nil and T.near(t.R * c.r, k.r) and T.near(t.G * c.g, k.g) and T.near(t.B * c.b, k.b)
+    return t ~= nil and T.near(t.R * c.r, k.r) and T.near(t.G * c.g, k.g) and T.near(t.B * c.b, k.b) and T.near(t.A, k.a)
 end
 T.S39 = 36 / 28 -- iconSize 28, p = 4 (listRowPadX / Y 4, tight gap 8): (28 + 2 * 4) / 28
 do
@@ -1670,7 +1670,7 @@ do
     X._backgroundStyle(C.els["r39p0"], T.tagged("r39p0"), false)
     X._backgroundStyle(C.els["r39p4"], T.tagged("r39p4"), false)
     ok(padIs("r39p0", 4) and padIs("r39p4", 8) and T.tagged("r39p4").mat == nil, "story 39 plain list rows: the same after a re-style (solid background)")
-    -- Keys on a row: the window opens (keys mode) on r1's checkbox: the chip (its own instance, not the band's), white, scaled
+    -- Keys on a row: the window opens (keys mode) on r1's checkbox: the chip (its own instance, not the band's), the ink, scaled
     local cw = T.tagged("r39c1")
     local mid = T.chipMid("r39c1")
     ok(FO._mode() == "keys" and T.agree("r39c1") and T.chipped("r39c1", T.S39) and T.strong("r39r1"), "story 39 open in keys mode: r1's checkbox has the chip (scale s, content 1 / s), r1 the band")
@@ -1768,7 +1768,7 @@ do
     F.focus = keep
     T.key(wr, D.left, INV_ACT)
     ok(T.agree("r39c3") and T.chipped("r39c3", T.S39), "story 39 keys again: r3's checkbox chipped")
-    -- Choice and slider in a row (keys): their Background is the chip, no scale, white text
+    -- Choice and slider in a row (keys): their Background is the chip, no scale, text in the ink
     T.key(wr, D.down, INV_ACT)
     ok(T.key(wr, D.down, INV_ACT) and T.agree("r39ch") and T.chipMid("r39ch") == mid and T.tagged("r39ch").pad == 0 and T.tintIs(T.tagged("r39ch").matTint, g.focusChipTint),
         "story 39 keys, choice in a row: its Background is the chip")
@@ -1776,9 +1776,9 @@ do
     ok(chw.look and T.inkIs(chw.look, 3) and chw.focusLook == true, "story 39 keys, choice: its value in the chip's ink, its focus look on")
     ok(T.key(wr, D.right, INV_ACT) and T.agree("r39ch") and T.chipMid("r39ch") == mid and T.last("r39ch") ~= nil and FO._mode() == "keys", "story 39 keys, choice: RIGHT steps it, the chip stays")
     ok(T.key(wr, D.down, INV_ACT) and T.agree("r39sl") and T.chipMid("r39sl") == mid and T.tagged("r39sl").pad == 0 and T.inkNumber("r39sl") and T.tagged("r39sl").focusLook == true,
-        "story 39 keys, slider in a row: its Background is the chip, its number white")
+        "story 39 keys, slider in a row: its Background is the chip, its number in the ink")
     ok(T.matOf("r39ch") == T.STRIP and C.els["r39ch"].chipOn == nil and chw.look and T.near(chw.look[3], g.text.r), "story 39 choice unfocused: its own strip and text colour")
-    ok(T.key(wr, D.right, INV_ACT) and T.agree("r39sl") and T.inkNumber("r39sl") and T.chipMid("r39sl") == mid, "story 39 keys, slider: RIGHT nudges it, the chip and white number stay")
+    ok(T.key(wr, D.right, INV_ACT) and T.agree("r39sl") and T.inkNumber("r39sl") and T.chipMid("r39sl") == mid, "story 39 keys, slider: RIGHT nudges it, the chip and the ink number stay")
     -- A hover while a text box of the window holds keyboard focus (typing in the slider's number box) changes nothing:
     -- the mode stays keys, the chip stays
     local keepF = F.focus
@@ -1871,7 +1871,7 @@ do
     X.KIND.slider.style(C.els["r39sl"], T.tagged("r39sl"), false)
     ok(C.els["r39sl"].chipOn == nil and T.chipMid("r39sl") == nil, "story 39 re-style: the slider's own look at once")
     tick()
-    ok(T.chipMid("r39sl") == mid and T.inkNumber("r39sl"), "story 39 re-style: the tick puts the slider's chip and white number back")
+    ok(T.chipMid("r39sl") == mid and T.inkNumber("r39sl"), "story 39 re-style: the tick puts the slider's chip and ink number back")
     for _ = 1, 5 do T.key(wr, D.up, INV_ACT) end
     ok(T.agree("r39c1"), "story 39 back on r1's checkbox", SC.stats().focus)
     -- No instance in a hook: a solid chip now, no asset load; the instance chip after the tick
