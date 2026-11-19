@@ -198,8 +198,8 @@ local function str(s) return { ToString = function() return s end } end
 local function demoLevel(path, opts)
     opts = opts or {}
     local w = newWorld(path)
-    for i = 1, (opts.starts or 24) do place(w, string.format("PS_%02d", i), "/Script/Engine.PlayerStart", { i * 100, 0, 0 }, 0, { PlayerStartTag = str("None") }) end
-    for i = 1, (opts.corrective or 1) do place(w, "Lobby_" .. i, "/Script/Engine.PlayerStart", { 0, 0, 45000 }, 0, { PlayerStartTag = str("Corrective") }) end
+    for i = 1, (opts.starts or 24) do place(w, string.format("PS_%02d", i), "/Script/Engine.PlayerStart", { i * 100, 0, 0 }, 0, { PlayerStartTag = str(opts.tag and opts.tag(i) or "None") }) end
+    for i = 1, (opts.corrective or 1) do place(w, "Lobby_" .. i, "/Script/Engine.PlayerStart", { 0, 0, 45000 }, 0, { PlayerStartTag = str(opts.correctiveTag or "Corrective") }) end
     local start = marker(w, "Start", "DM_Start", { -4200, 0, 0 })
     marker(w, "Item", "DM_Item_Painkillers", { -2000, -600, 0 }, 0, { Item = 0 })
     marker(w, "Item", "DM_Item_Flashlight", { -2000, 600, 0 }, 90, { Item = opts.badItem and 7 or 1 })
@@ -354,6 +354,81 @@ do
     s, c, p = MS.splitStarts(starts(3, 2))
     ok(p and p:find("3 PlayerStarts", 1, true) and p:find("2 Corrective", 1, true), "starts: both problems in one text", p)
 end
+-- core story 40: start zones (Zone<n> tags, any number, one picked with equal odds; all ten arrays = the picked zone)
+do
+    local T = MS.startTag
+    ok(T("Corrective") == "corrective" and T("corrective") == "corrective" and T("CORRECTIVE") == "corrective", "zones: Corrective in any case")
+    ok(T("Zone1") == 1 and T("zone2") == 2 and T("ZONE3") == 3 and T("Zone01") == 1 and T("Zone10") == 10, "zones: Zone<n> in any case, leading zeros")
+    ok(T("Zone11") == 11 and T("Zone100") == 100 and T("Zone999999999") == 999999999 and T("Zone000000000000042") == 42, "zones: above 10 accepted, 9 significant digits")
+    ok(T("Zone0") == "bad" and T("Zone00") == "bad" and T("Zone") == "bad" and T("ZoneA") == "bad" and T("ZoneX") == "bad" and T("Zone 1") == "bad"
+        and T("Zone1a") == "bad" and T("Zone-1") == "bad" and T("Zone1000000000") == "bad" and T("Zoned") == "bad", "zones: bad zone tags")
+    ok(T("None") == nil and T("") == nil and T(nil) == nil and T(5) == nil and T("Lobby") == nil and T("Correctives") == nil and T("Z1") == nil, "zones: untagged")
+end
+local function zoned(spec)
+    -- spec: { { tag, count [, prefix] }, ... } -> PlayerStart entries, numbered in reverse so the sort is checked
+    local l = {}
+    for _, g in ipairs(spec) do
+        for i = g[2], 1, -1 do l[#l + 1] = { name = string.format("%s_%03d", g[3] or g[1], i), tag = g[1] } end
+    end
+    return l
+end
+local function pickN(i) local seen = {} return function(n) seen[#seen + 1] = n return i end, seen end
+do
+    -- single cluster: exactly splitStarts' result, no summary, no pick
+    local l = starts(24, 1)
+    local a, sumA, cA, pA = MS.planStarts(l, function() error("no pick without zones") end)
+    local b, cB, pB = MS.splitStarts(l)
+    ok(#a == 24 and sumA == nil and cA == cB and pA == pB and a[1] == b[1] and a[24] == b[24], "plan: single cluster = splitStarts, no summary")
+    a, sumA, cA, pA = MS.planStarts(starts(19, 2))
+    ok(sumA == nil and pA == select(3, MS.splitStarts(starts(19, 2))), "plan: single cluster problems unchanged", pA)
+    -- two zones: picked zone 2, all its 20 starts, sorted; pick gets the zone count
+    local pick, seen = pickN(2)
+    local list, sum, c, p = MS.planStarts(zoned({ { "Zone1", 20 }, { "Zone2", 20 }, { "None", 2, "U" }, { "Corrective", 1 } }), pick)
+    ok(#seen == 1 and seen[1] == 2, "plan: pick called once with the zone count", seen[1])
+    ok(p == nil and c == 1 and sum and #sum.zones == 2 and sum.picked == 2 and sum.untagged == 2, "plan: two zones, picked Zone2, 2 untagged", p)
+    ok(#list == 20 and list[1].name == "Zone2_001" and list[20].name == "Zone2_020", "plan: the picked zone's starts, name-sorted")
+    ok(MS.zoneText(sum) == "Zone1 x20, Zone2 x20", "plan: zone text", MS.zoneText(sum))
+    list, sum = MS.planStarts(zoned({ { "Zone1", 20 }, { "Zone2", 20 }, { "Corrective", 1 } }), pickN(1))
+    ok(sum.picked == 1 and list[1].name == "Zone1_001", "plan: pick 1 -> Zone1")
+    -- ten zones (with gaps: numbers sorted, the pick indexes the sorted list)
+    local ten = {}
+    for z = 1, 10 do ten[#ten + 1] = { "Zone" .. (z * 3), 20 } end
+    ten[#ten + 1] = { "Corrective", 1 }
+    pick, seen = pickN(10)
+    list, sum, c, p = MS.planStarts(zoned(ten), pick)
+    ok(p == nil and #sum.zones == 10 and seen[1] == 10 and sum.picked == 30 and #list == 20 and list[1].tag == "Zone30", "plan: ten zones with gaps, one picked", p)
+    -- zone too small: one problem, still filled
+    list, sum, c, p = MS.planStarts(zoned({ { "Zone1", 20 }, { "Zone2", 8 }, { "Corrective", 1 } }), pickN(2))
+    ok(p == "Zone2: 8 PlayerStarts (need 20+)" and #list == 8 and sum.picked == 2, "plan: a zone under 20 is the problem, the arrays still filled", p)
+    -- bad tags: Zone11 is zone 11 with 1 start, ZoneX is a bad tag; one combined text
+    list, sum, c, p = MS.planStarts(zoned({ { "Zone1", 20 }, { "Zone2", 20 }, { "Zone11", 1 }, { "ZoneX", 1 }, { "Corrective", 1 } }), pickN(1))
+    ok(p and p:find("ZoneX_001 (ZoneX)", 1, true) and p:find("Zone11: 1 PlayerStarts (need 20+)", 1, true) and not p:find("Zone11_001", 1, true), "plan: ZoneX a bad tag, Zone11 under 20, one text", p)
+    ok(#sum.zones == 3 and sum.zones[3].n == 11 and sum.untagged == 0 and #list == 20, "plan: the bad-tag start left out, not untagged")
+    -- a bad tag in a level without zones: the problem, the start left out, the rest as a single cluster
+    list, sum, c, p = MS.planStarts(zoned({ { "None", 24, "PS" }, { "Zone0", 1 }, { "Corrective", 1 } }))
+    ok(sum == nil and #list == 24 and c == 1 and p and p:find("Zone0_001 (Zone0)", 1, true), "plan: a bad tag without zones: one problem, left out", p)
+    -- mixed case: one zone of 25, lowercase corrective is the lobby start
+    list, sum, c, p = MS.planStarts(zoned({ { "zone1", 20, "a" }, { "ZONE1", 5, "b" }, { "corrective", 1 } }), pickN(1))
+    ok(p == nil and c == 1 and #sum.zones == 1 and sum.zones[1].count == 25 and #list == 25, "plan: mixed case, one zone of 25, 1 Corrective", p)
+    -- zoned with 0 or 2 Corrective: today's Corrective text
+    list, sum, c, p = MS.planStarts(zoned({ { "Zone1", 20 } }), pickN(1))
+    ok(c == 0 and p == "0 Corrective lobby starts (need exactly 1)" and #list == 20, "plan: zoned, 0 Corrective", p)
+    list, sum, c, p = MS.planStarts(zoned({ { "Zone1", 20 }, { "Corrective", 2 } }), pickN(1))
+    ok(c == 2 and p == "2 Corrective lobby starts (need exactly 1)", "plan: zoned, 2 Corrective", p)
+    -- a pick out of range falls back to the first zone
+    list, sum = MS.planStarts(zoned({ { "Zone1", 20 }, { "Zone2", 20 }, { "Corrective", 1 } }), function() return 7 end)
+    ok(sum.picked == 1, "plan: an out-of-range pick falls back to the first zone")
+    -- the default pick: always a zone that exists, both reached
+    local got = {}
+    for _ = 1, 200 do local _, s2 = MS.planStarts(zoned({ { "Zone1", 20 }, { "Zone5", 20 }, { "Corrective", 1 } })) got[s2.picked] = true end
+    ok(got[1] and got[5] and not got[2], "plan: the default pick reaches both zones")
+    -- the OK line's zone list: at most 16, then +N more
+    local many = {}
+    for z = 1, 18 do many[#many + 1] = { "Zone" .. z, 20 } end
+    list, sum = MS.planStarts(zoned(many), pickN(1))
+    local zt = MS.zoneText(sum)
+    ok(zt:find("Zone16 x20, +2 more", 1, true) and not zt:find("Zone17", 1, true), "plan: 16 zones listed, then +N more", zt)
+end
 do
     local sp = { ["/L.L:PersistentLevel.C"] = "/L.L:PersistentLevel.Radio_1" }
     local good = { path = "/L.L:PersistentLevel.C", kind = "Computer", world = true }
@@ -493,6 +568,41 @@ do
     local svc = objects[MS.state().service]
     ok(count("^FAIL WIRE PlayerStarts: .*more than 22 PlayerStarts") == 1, "starts cap: the overflow is one FAIL line", table.concat(lines("^FAIL"), " | "))
     ok(svc and svc.BaseCampStarts:GetArrayNum() <= 22, "starts cap: the arrays stop at the cap", svc and svc.BaseCampStarts:GetArrayNum())
+end
+
+-- core story 40: two start zones through the fake service: all ten arrays = the picked zone's starts
+do
+    local pick = MS.pick
+    for _, want in ipairs({ 1, 2 }) do
+        MS.pick = function() return want end
+        local w, s = demoLevel(string.format("/Game/Mods/DemoMap/Maps/L_Zones%d.L_Zones%d", want, want), { starts = 42, tag = function(i)
+            if i <= 20 then return "Zone1" elseif i <= 40 then return "zone2" else return "None" end end })
+        load(w, s)
+        local svc = objects[MS.state().service]
+        ok(count("^FAIL") == 0, "zones " .. want .. ": no FAIL line", table.concat(lines("^FAIL"), " | "))
+        ok(count("^OK WIRE GameStartService_C at %(%-4200,0,0%), 2 start zones %(Zone1 x20, Zone2 x20%), picked Zone" .. want
+            .. ": 10 %*Starts arrays x 20 PlayerStarts %(1 Corrective lobby start left out, 2 untagged left out%); the nuke flight") == 1,
+            "zones " .. want .. ": the OK line names both zones and the pick", table.concat(lines("WIRE GameStartService_C"), " | "))
+        local first = want == 1 and "PS_01" or "PS_21"
+        local good = svc ~= nil
+        for _, prop in ipairs(MS.STARTS) do
+            local a = svc and svc[prop]
+            if not (a and a:GetArrayNum() == 20 and a[1].__meta.GetFName():ToString() == first) then good = false end
+            for _, ps in ipairs(a or {}) do
+                if MS.startTag(ps.PlayerStartTag:ToString()) ~= want then good = false end
+            end
+        end
+        ok(good, "zones " .. want .. ": all ten arrays hold the picked zone's 20, name-sorted")
+    end
+    -- a zoned level with a too-small zone and a bad tag: one FAIL line, still filled
+    MS.pick = function() return 1 end
+    local w, s = demoLevel("/Game/Mods/DemoMap/Maps/L_ZonesBad.L_ZonesBad", { starts = 29, tag = function(i)
+        if i <= 20 then return "Zone1" elseif i <= 28 then return "Zone2" else return "ZoneX" end end })
+    load(w, s)
+    ok(count("^FAIL") == 1 and count("^FAIL WIRE PlayerStarts: start zone tag not Zone<n> .*PS_29 %(ZoneX%), Zone2: 8 PlayerStarts %(need 20%+%); 20 go into") == 1,
+        "zones bad: one FAIL line with the bad tag and the small zone", table.concat(lines("^FAIL"), " | "))
+    ok(count("^OK WIRE GameStartService_C at .*, 2 start zones %(Zone1 x20, Zone2 x8%), picked Zone1:") == 1, "zones bad: still filled")
+    MS.pick = pick
 end
 
 -- a position that is off: FAIL POS
@@ -678,6 +788,18 @@ for _, c in ipairs({ 0, 2 }) do
     local before = #sounds
     tick(4)
     ok(#sounds == before and count("^FAIL CABIN sound: " .. c .. " Corrective lobby starts in the level %(need exactly 1%); no cabin sound in this world") == 1 and count("CABIN") == 1, "cabin: " .. c .. " Corrective starts is one line per world, no sound", table.concat(logs, " | "))
+end
+-- core story 40: a lowercase "corrective" tag is the lobby start (case-insensitive, as the game's FName ==), for the
+-- arrays and the cabin sound alike
+do
+    local w, s = demoLevel("/Game/Mods/DemoMap/Maps/L_CabLow.L_CabLow", { correctiveTag = "corrective" })
+    load(w, s)
+    ok(count("^FAIL") == 0 and count("^OK WIRE GameStartService_C at .* x 24 PlayerStarts %(1 Corrective lobby start left out%)") == 1, "lowercase corrective: the lobby start, left out of the arrays", table.concat(lines("^FAIL"), " | "))
+    MS.start(w)
+    logs = {}
+    local before = #sounds
+    tick(2)
+    ok(#sounds == before + 2 and count("^OK CABIN sound A at ") == 1 and count("^FAIL CABIN") == 0, "lowercase corrective: the cabin sound plays", table.concat(logs, " | "))
 end
 do
     local w, s = demoLevel("/Game/Mods/DemoMap/Maps/L_NoWave.L_NoWave")

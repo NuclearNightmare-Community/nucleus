@@ -7,7 +7,8 @@
 --     the game state's ReceiveBeginPlay;
 --   * the Start marker's BeginPlay (level actors begin play before the game state): GameStartService_C first (its 10
 --     *Starts arrays from the level's PlayerStarts, the Corrective lobby start left out; the nuke flight starts from this
---     service, native on V8.2), then every other kind whose classes are still in memory;
+--     service, native on V8.2), then every other kind whose classes are still in memory; core story 40: when PlayerStarts
+--     carry Zone<n> tags, the host picks one zone with equal odds and all ten arrays hold that zone's starts;
 --   * the LoadMap post-hook of that world, the same frame: whatever the travel's GC dropped.
 -- isHost is IsServer and not IsStandalone, cached per world; a client spawns nothing here. Every spawned object gets
 -- one "OK|FAIL WIRE" line and one position check against its marker (distance 0, yaw 0); a bad marker value is one
@@ -125,18 +126,87 @@ function M.itemKind(raw)
     if not k then return nil, "unknown value " .. i end
     return k
 end
+-- Core story 40: a PlayerStart's Player Start Tag, case-insensitive (as the game's FName ==): "corrective" for the
+-- lobby start, a start zone's number for Zone<n> (digits only after the prefix, leading zeros allowed, n >= 1, at most
+-- M.ZONE_DIGITS significant digits), "bad" for any other tag starting with "zone", nil for everything else (untagged).
+M.ZONE_DIGITS = 9
+M.ZONE_LIST = 16 -- zones named in the OK line, then "+N more"
+function M.startTag(tag)
+    if type(tag) ~= "string" then return nil end
+    local low = tag:lower()
+    if low == M.CORRECTIVE:lower() then return "corrective" end
+    if low:sub(1, 4) ~= "zone" then return nil end
+    local digits = low:sub(5)
+    if not digits:find("^%d+$") then return "bad" end
+    local sig = digits:gsub("^0+", "")
+    if #sig == 0 or #sig > M.ZONE_DIGITS then return "bad" end
+    return tonumber(sig)
+end
+local function byName(a, b) return a.name < b.name end
 -- PlayerStarts { { name, tag, ... } }: the ones for the *Starts arrays (sorted by name, Corrective left out), the
 -- Corrective count, and one problem text or nil (fewer than 20 starts, or not exactly one Corrective).
 function M.splitStarts(list)
     local starts, corrective = {}, 0
     for _, ps in ipairs(list) do
-        if ps.tag == M.CORRECTIVE then corrective = corrective + 1 else starts[#starts + 1] = ps end
+        if M.startTag(ps.tag) == "corrective" then corrective = corrective + 1 else starts[#starts + 1] = ps end
     end
-    table.sort(starts, function(a, b) return a.name < b.name end)
+    table.sort(starts, byName)
     local bad = {}
     if #starts < M.MIN_STARTS then bad[#bad + 1] = string.format("%d PlayerStarts (need %d+)", #starts, M.MIN_STARTS) end
     if corrective ~= 1 then bad[#bad + 1] = string.format("%d Corrective lobby starts (need exactly 1)", corrective) end
     return starts, corrective, #bad > 0 and table.concat(bad, ", ") or nil
+end
+-- The host's even-odds zone pick: 1..n. Lua 5.4 seeds math.random per state; the unit tests replace it.
+function M.pick(n) return math.random(n) end
+-- Core story 40: the list that goes into all ten *Starts arrays. Without a Zone<n> tag this is splitStarts (the summary
+-- is nil). With zone tags, one zone is picked with equal odds (pick(n) -> 1..n, default M.pick) and its starts, sorted
+-- by name, are the list; untagged starts are left out and counted. Every zone needs M.MIN_STARTS (any can be picked).
+-- A zone-prefixed tag that isn't a zone is a problem naming the start and is left out, zoned or not.
+-- Returns list, summary { zones = { { n, count } } (by number), picked, untagged } | nil, corrective, problem | nil.
+function M.planStarts(list, pick)
+    local zones, plain, badTags, rest, corrective = {}, {}, {}, {}, 0
+    for _, ps in ipairs(list) do
+        local t = M.startTag(ps.tag)
+        if t == "bad" then badTags[#badTags + 1] = ps else rest[#rest + 1] = ps end
+        if t == "corrective" then corrective = corrective + 1
+        elseif type(t) == "number" then zones[t] = zones[t] or {} table.insert(zones[t], ps)
+        elseif t == nil then plain[#plain + 1] = ps end
+    end
+    local bad = {}
+    if #badTags > 0 then
+        table.sort(badTags, byName)
+        local parts = {}
+        for _, ps in ipairs(badTags) do parts[#parts + 1] = string.format("%s (%s)", quote(ps.name), quote(ps.tag)) end
+        bad[1] = string.format("start zone tag not Zone<n> (n = 1 or more, digits only), left out: %s", table.concat(parts, ", "))
+    end
+    local nums = {}
+    for n in pairs(zones) do nums[#nums + 1] = n end
+    if #nums == 0 then
+        local starts, c, problem = M.splitStarts(rest)
+        if problem then bad[#bad + 1] = problem end
+        return starts, nil, c, #bad > 0 and table.concat(bad, ", ") or nil
+    end
+    table.sort(nums)
+    local summary = { zones = {}, untagged = #plain }
+    for _, n in ipairs(nums) do
+        table.sort(zones[n], byName)
+        summary.zones[#summary.zones + 1] = { n = n, count = #zones[n] }
+        if #zones[n] < M.MIN_STARTS then bad[#bad + 1] = string.format("Zone%d: %d PlayerStarts (need %d+)", n, #zones[n], M.MIN_STARTS) end
+    end
+    if corrective ~= 1 then bad[#bad + 1] = string.format("%d Corrective lobby starts (need exactly 1)", corrective) end
+    local i = (pick or M.pick)(#nums)
+    if math.type(i) ~= "integer" or i < 1 or i > #nums then i = 1 end
+    summary.picked = nums[i]
+    return zones[nums[i]], summary, corrective, #bad > 0 and table.concat(bad, ", ") or nil
+end
+-- The zones of a summary for the OK line: "Zone1 x20, Zone2 x20" (at most M.ZONE_LIST, then "+N more").
+function M.zoneText(summary)
+    local parts = {}
+    for i, z in ipairs(summary.zones) do
+        if i > M.ZONE_LIST then parts[#parts + 1] = string.format("+%d more", #summary.zones - M.ZONE_LIST) break end
+        parts[#parts + 1] = string.format("Zone%d x%d", z.n, z.count)
+    end
+    return table.concat(parts, ", ")
 end
 -- A generator's Equipment entries { { path, kind, world } } (kind: the marker kind of the entry's class, or nil;
 -- world: whether it is in this level) against its own path and the spawned objects (marker path -> actor path).
@@ -488,7 +558,7 @@ SECTIONS[#SECTIONS + 1] = { "service", { "service" }, function(world, cls)
             list[#list + 1] = { name = fname(ps), tag = str(try(function() return ps.PlayerStartTag end)) or "", path = pathOf(ps) }
         end
     end
-    local starts, corrective, problem = M.splitStarts(list)
+    local starts, zoned, corrective, problem = M.planStarts(list)
     if over then problem = (problem and problem .. ", " or "") .. string.format("more than %d PlayerStarts", M.LIMIT.starts) end
     if problem then fail("WIRE PlayerStarts: %s; %d go into the *Starts arrays", problem, #starts) end
     local sm = W.startMarker and StaticFindObject(W.startMarker)
@@ -504,7 +574,10 @@ SECTIONS[#SECTIONS + 1] = { "service", { "service" }, function(world, cls)
     end
     W.service = pathOf(svc)
     W.spawned[pathOf(sm)] = W.service
-    if #bad == 0 then
+    if #bad == 0 and zoned then
+        ok("WIRE GameStartService_C at %s, %d start zones (%s), picked Zone%d: 10 *Starts arrays x %d PlayerStarts (%d Corrective lobby start left out, %d untagged left out); the nuke flight starts from this service (native on V8.2)",
+            vec(at), #zoned.zones, M.zoneText(zoned), zoned.picked, #objs, corrective, zoned.untagged)
+    elseif #bad == 0 then
         ok("WIRE GameStartService_C at %s, 10 *Starts arrays x %d PlayerStarts (%d Corrective lobby start left out); the nuke flight starts from this service (native on V8.2)",
             vec(at), #objs, corrective)
     else
@@ -907,7 +980,7 @@ local function cabinTick()
         local list = {}
         for _, ps in ipairs(FindAllOf("PlayerStart") or {}) do
             if #list >= M.LIMIT.starts then break end
-            if alive(ps) and worldOf(ps) == W.world and str(try(function() return ps.PlayerStartTag end)) == M.CORRECTIVE then list[#list + 1] = pathOf(ps) end
+            if alive(ps) and worldOf(ps) == W.world and M.startTag(str(try(function() return ps.PlayerStartTag end))) == "corrective" then list[#list + 1] = pathOf(ps) end
         end
         if #list ~= 1 then
             C.done = true
