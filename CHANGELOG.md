@@ -2,6 +2,20 @@
 
 All notable changes to Nucleus are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). From 0.5.0 a dependent's `need` and `dependsOn` are minimum versions (`>=0.5.0`), so a newer Nucleus never asks dependents to raise them. Up to 0.3.0, below 1.0.0 a dependent connected only to the same minor version (`need = "0.3.0"` accepted 0.3.x).
 
+## [0.17.0] - 2026-11-19
+
+Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
+
+For players: a custom map can now have several start spots, like the stock maps. At each match start the team begins together at one of them, picked at random with even odds. Maps with one start spot play as before.
+
+### Added
+
+- Start zones for kit levels (core story 40). A PlayerStart whose Player Start Tag is `Zone<n>` (n = 1 or more, digits only, leading zeros allowed, any case: `Zone2`, `zone02` and `ZONE2` are zone 2) belongs to start zone n. When a level has any zone tag, the host picks one zone at the match start with equal odds (`math.random`) and fills all ten `GameStartService_C` `*Starts` arrays with that zone's starts, sorted by name, so the game's own pick of an array no longer decides. Untagged starts in a zoned level are left out of the arrays (one can still be a Computer's Reinforcement Start). Every zone needs 20 starts, as a single cluster does, since any zone can be picked. The OK line names the zones and the pick: `OK WIRE GameStartService_C at <loc>, <k> start zones (Zone1 x20, Zone2 x20), picked Zone<n>: 10 *Starts arrays x <m> PlayerStarts (<c> Corrective lobby start left out, <u> untagged left out); ...` (at most 16 zones listed, then `+N more`). A zone under 20 starts, a `zone`-prefixed tag that isn't a zone (`Zone0`, `Zone`, `ZoneA`, over 9 significant digits; that start is left out) and a Corrective count other than 1 go into the one `FAIL WIRE PlayerStarts:` line, and the arrays are still filled. A level without zone tags is filled exactly as before.
+
+### Changed
+
+- The `Corrective` lobby start's tag is matched case-insensitively, as the game's own FName comparison does, for the start arrays and the cabin sound (`corrective` was a ground start before).
+
 ## [0.16.0] - 2026-11-18
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
