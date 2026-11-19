@@ -2184,9 +2184,11 @@ do
     w1.SetIconBack = nil
     C.forgetWarning("focus chip back")
     local nB = countLogs("the focus chip's dark inside")
+    -- the call's own error (the WARN's text names SetIconBack itself, so match the error, not the name)
+    local nE = countLogs("attempt to call")
     B._chip(C.els["r42c1"], w1, nil, 0)
     B._style(C.els["r42c1"], w1, false)
-    ok(countLogs("the focus chip's dark inside") == nB + 1 and countLogs("SetIconBack") >= 1, "story 42 old pak: one WARN naming the call", countLogs("the focus chip's dark inside") - nB)
+    ok(countLogs("the focus chip's dark inside") == nB + 1 and countLogs("attempt to call") == nE + 1, "story 42 old pak: one WARN with the call's error", countLogs("the focus chip's dark inside") - nB)
     local b2 = w2.backCalls
     T.key(wr, D.right, INV_ACT)
     ok(T.agree("r42g2") and w2.backCalls == b2 + 1 and T.backHidden(w2) and C.els["r42c2"].backOn == nil, "story 42 old pak: the latch set, a shown IconBack is still hidden when its chip leaves")

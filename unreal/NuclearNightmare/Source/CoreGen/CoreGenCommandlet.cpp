@@ -891,9 +891,10 @@ namespace
 
 	/**
 	 * WBP_<Core>Button (story 15): SizeBox "Box" (story 2) -> Button "Btn" -> HorizontalBox "Content" (core story 24) ->
-	 * [SizeBox "IconBox" (collapsed until SetIcon) -> Overlay "IconStack" (core story 42) -> [Image "IconBack", Image "Icon"]],
-	 * Spacer "IconGap" (8 x 1, collapsed), TextBlock "Label" (white, drop shadow, size 18, centred). Lua makes an icon-only button by collapsing Label and IconGap and setting
-	 * Box's width and height overrides to the icon's size, and shows IconGap for an icon with a label. Functions:
+	 * [SizeBox "IconBox" (collapsed until SetIcon) -> Overlay "IconStack" (core story 42) -> [Image "IconBack",
+	 * Image "Icon"]], Spacer "IconGap" (8 x 1, collapsed), TextBlock "Label" (white, drop shadow, size 18, centred). Lua
+	 * makes an icon-only button by collapsing Label and IconGap and setting Box's width and height overrides to the
+	 * icon's size, and shows IconGap for an icon with a label. Functions:
 	 *   SetLabel(NewLabel: String)          Label.SetText(NewLabel)
 	 *   SetEnabledState(Enabled: Bool)      Btn.SetIsEnabled(Enabled) (a disabled button never fires OnClicked)
 	 *   SetColors(NR, NG, NB, NA, HR, HG, HB, HA, PR, PG, PB, PA, Padding: Float)
