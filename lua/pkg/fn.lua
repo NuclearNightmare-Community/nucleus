@@ -162,7 +162,7 @@ local function dispatch(path, ctx)
         local r = S.rules[id]
         local a = now[id]
         if a and r.applied and a > r.applied then fire = fire or {}; fire[#fire + 1] = r.onCall end
-        if a then r.applied = a end
+        if a then r.applied = a else S.rules[id] = nil end -- not in FnList: dropped with its target or function
     end
     if not fire then return end
     local obj = ctx:get()
