@@ -2165,12 +2165,36 @@ do
     ok(FO._carry() ~= nil and FO._carry().rowId == "r38r4", "story 38 old pak: the keyboard carry works", FO._carry() and FO._carry().rowId)
     T.keyUp(wr, A.accept)
     ok(FO._carry() == nil and #T.cbs == 0, "story 38 old pak: release drops; unchanged order, no callback")
+    -- An older pak without <Core>_OnNavUp (follow-up review): one WARN, and a held Accept never picks a row up
+    local US = FO._S
+    local wasHooked, wasOk = US.upHooked, US.upOk
+    local nUp = countLogs("rows can't be picked up with A or Enter")
+    RegisterHook = function(p, f)
+        if p:find("Nucleus_OnNavUp", 1, true) then error("UFunction not found: " .. p) end
+        return realRegister(p, f)
+    end
+    US.upHooked = false
+    tick()
+    RegisterHook = realRegister
+    ok(countLogs("rows can't be picked up with A or Enter") == nUp + 1 and FO.stats().upOk == false, "story 38 no OnNavUp: one WARN, upOk false")
+    ok(T.key(wr, D.up, INV_ACT) and T.agree("r38r3"), "story 38 no OnNavUp: on r3's own stop")
+    T.key(wr, INV_DIR, A.accept); clock = clock + 500000; T.roTick()
+    ok(FO._hold() == nil and FO._carry() == nil, "story 38 no OnNavUp: a held Accept picks nothing up")
+    T.keyUp(wr, A.accept)
+    US.upHooked, US.upOk = wasHooked, wasOk
+    ok(T.key(wr, D.down, INV_ACT) and T.agree("r38c4"), "story 38 no OnNavUp: back on r4's checkbox")
     -- the real pak's hooks (a fresh registration, as on a new pak)
     RO._S.hooked = false
     tick(); tick()
     ok(hookCount("Nucleus_OnDragStart") == 1 and hookCount("Nucleus_OnDragCancel") == 1 and hookCount("Nucleus_OnDrop") >= 1 and RO.stats().dragHookOk,
         "story 38: one hook each on the row's and the list's drag counters", hookCount("Nucleus_OnDragStart") .. hookCount("Nucleus_OnDragCancel") .. hookCount("Nucleus_OnDrop"))
     ok(T.tagged("r38r3").Draggable == true and T.tagged("r38r1").Draggable == false, "story 38 sync: movable rows Draggable, the locked r1 not")
+    RO._S.dropHookOk = false -- follow-up review: no drop hook, no drag (a drop could never land)
+    RO.sync()
+    ok(T.tagged("r38r3").Draggable == false, "story 38 sync: without the drop hook no row is Draggable")
+    RO._S.dropHookOk = true
+    RO.sync()
+    ok(T.tagged("r38r3").Draggable == true, "story 38 sync: Draggable again with the drop hook")
 
     -- Pure: segments and slots
     do
@@ -2278,11 +2302,12 @@ do
     tick() -- the UI tick upgrades the carry band
     ok(C.els["r38r3"].carryBg == "carry" and T.matOf("r38r3") and T.matOf("r38r3").params and T.matOf("r38r3").params.CinematicBaseColor.R == theme.game.carryRowColors.CinematicBaseColor.r,
         "story 38 tick: the carry band upgraded", C.els["r38r3"].carryBg)
+    loads, gets = AS.stats.loads, F.getAssets
     ok(T.keyUp(wr, A.accept) == true and #T.cbs == 1 and T.cbs[1].ids == "r38r1 r38r2 r38r4 r38r5 r38r3 r38r6 r38r7 r38r8 r38r9 r38r10" and T.cbs[1].h == L,
         "story 38 drop: one onReorder(list, ids) with the new order", T.cbs[1] and T.cbs[1].ids)
     ok(cbIn[1] and cbIn[1] > 0, "story 38 onReorder runs with C.inDispatch raised", cbIn[1])
     ok(rw.shift[1] == 0 and T.agree("r38r3") and (T.strong("r38r3") or T.selected("r38r3")), "story 38 drop: the lift goes, focus and the band on r3")
-    ok(AS.stats.loads >= 0 and C.inDispatch == 0, "story 38 drop: the dispatch depth back to 0")
+    ok(AS.stats.loads == loads and F.getAssets == gets and C.inDispatch == 0, "story 38 drop: no asset load in the release hook, the dispatch depth back to 0", F.getAssets - gets)
     -- Carry cancel: Enter, Down, Escape -> the pickup order back, the window open, no callback
     T.key(wr, INV_DIR, A.accept); clock = clock + 500000; T.roTick()
     ok(T.key(wr, D.down, INV_ACT) and T.ids("r38l"):find("r38r6 r38r3", 1, true), "story 38 cancel: moved first", T.ids("r38l"))
@@ -2354,6 +2379,40 @@ do
         ok(FO._carry() == nil and #T.cbs == 1, "story 38 interrupted " .. how .. ": cancelled, no callback")
         T.keyUp(wr, A.accept)
     end
+    -- Interrupted (follow-up review): a sibling removed, a same-id row.create that locks, a same-id list.create that
+    -- turns reorderable off; each cancels the carry, the pickup order comes back (minus a removed row), no callback
+    T.tmp38 = RS.create{ id = "r38tmp", place = { list = L } }
+    tick()
+    for _, how in ipairs({ "sibling", "relock", "unreorderable" }) do
+        for _ = 1, 12 do if T.agree("r38c2") then break end T.key(wr, D.up, INV_ACT) end
+        T.key(wr, INV_DIR, A.accept); clock = clock + 500000; T.roTick()
+        local pick = {}
+        for _, ch in ipairs(C.els["r38l"].children) do if not (how == "sibling" and ch.id == "r38tmp") then pick[#pick + 1] = ch.id end end
+        T.key(wr, D.down, INV_ACT)
+        ok(FO._carry() ~= nil, "story 38 interrupted " .. how .. ": carrying")
+        if how == "sibling" then
+            RS.remove(T.tmp38)
+        elseif how == "relock" then
+            RS.create{ id = "r38r8", place = { list = L }, locked = true }
+        else
+            LS.create{ id = "r38l", place = { screen = R, corner = "top-left" }, size = { 600, 200 }, reorderable = false }
+        end
+        ok(FO._carry() == nil and T.ids("r38l") == table.concat(pick, " ") and #T.cbs == 1,
+            "story 38 interrupted " .. how .. ": cancelled, the pickup order back, no callback", T.ids("r38l"))
+        ok(T.keyUp(wr, A.accept) == false and #T.cbs == 1, "story 38 interrupted " .. how .. ": the release drops nothing")
+        if how == "relock" then
+            RS.create{ id = "r38r8", place = { list = L }, locked = false }
+        elseif how == "unreorderable" then
+            LS.create{ id = "r38l", place = { screen = R, corner = "top-left" }, size = { 600, 200 }, reorderable = true,
+                onReorder = function(h, ids)
+                    T.cbs[#T.cbs + 1] = { h = h, ids = table.concat(ids, " ") }
+                    cbIn[#cbIn + 1] = C.inDispatch
+                    if T.cbThrow then error("boom in onReorder") end
+                end }
+        end
+        tick()
+    end
+    T.tmp38 = nil
     -- Interrupted: a covered window
     for _ = 1, 12 do if T.agree("r38c2") then break end T.key(wr, D.up, INV_ACT) end
     T.key(wr, INV_DIR, A.accept); clock = clock + 500000; T.roTick()
@@ -2404,7 +2463,9 @@ do
     local lw = T.tagged("r38l")
     ok(lw.Line.vis == 3 and lw.Line.color and lw.Line.color.R == theme.game.accent.r and math.abs(lw.Line.Slot.top - (T.rowY("r38r6") - 2 - 1)) <= 1,
         "story 38 drag: the accent line at the slot between r5 and r6", lw.Line.Slot.top)
+    loads, gets = AS.stats.loads, F.getAssets
     T.drop("r38l", op, true)
+    ok(AS.stats.loads == loads and F.getAssets == gets, "story 38 mouse drop: no asset load in the hook", F.getAssets - gets)
     ok(T.ids("r38l") == "r38r1 r38r2 r38r4 r38r5 r38r3 r38r6 r38r7 r38r8 r38r9 r38r10" and #T.cbs == 1 and T.cbs[1].ids == T.ids("r38l"),
         "story 38 mouse drop: r3 between r5 and r6, one onReorder with the same ids", T.ids("r38l"))
     ok(rw.opacity == 1 and lw.Line.vis == 1 and not RO.stats().dragging and T.agree("r38r3"), "story 38 mouse drop: opacity back, the line hidden, focus on r3")

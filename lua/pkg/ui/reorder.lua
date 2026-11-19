@@ -715,7 +715,7 @@ function RO.sync()
     local n = 0
     for _, el in ipairs(C.order) do
         if el.kind == "list" and not el.removed then
-            local on = el.reorderable == true and S.dragHookOk and RO.active(el)
+            local on = el.reorderable == true and S.dragHookOk and S.dropHookOk and RO.active(el)
             for _, ch in ipairs(el.children) do
                 if ch.kind == "row" and not ch.removed then
                     local want = on and RO.movable(ch) or false
