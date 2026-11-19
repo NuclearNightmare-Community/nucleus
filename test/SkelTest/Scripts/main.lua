@@ -5210,8 +5210,12 @@ local function buildMenu()
                 local t2 = kbToggle(2)
                 local sv = try(function() return oname(t2.SavedStyle.Normal.ResourceObject) end) or "?"
                 local cur = try(function() return oname(t2.Btn.WidgetStyle.Normal.ResourceObject) end) or "?"
-                check(try(function() return t2.FocusLook end) == true and sv:find("M_NN_WornStrip", 1, true) ~= nil and cur:find("M_NN_CinematicSelection", 1, true) ~= nil,
-                    "KLOOK repeat: after a UI tick the focused TOGGLE keeps its own style saved (%s) and shows the hover brush (%s)", sv, cur)
+                -- Core story 39: in keys mode with the chip instance alive the TOGGLE's face is the chip (an instance of the
+                -- selection material) and SetFocusLook saves that; it is never the plain hover brush saved over its own.
+                local chip = CC.els["kb.t2"] and CC.els["kb.t2"].chipOn == "strong"
+                local own = sv:find("M_NN_WornStrip", 1, true) ~= nil or (chip and sv:find("MID_M_NN_CinematicSelection", 1, true) ~= nil)
+                check(try(function() return t2.FocusLook end) == true and own and cur:find("M_NN_CinematicSelection", 1, true) ~= nil,
+                    "KLOOK repeat: after a UI tick the focused TOGGLE keeps its own style saved (%s; chip %s) and shows the hover brush (%s)", sv, bool(chip), cur)
                 return true
             end, 5, "look kept across a tick"
         end)
@@ -5424,6 +5428,13 @@ local function buildMenu()
         local function lineVis() return try(function() return listW().Line:GetVisibility() end) or -1 end
         -- A mouse request (press, glide, release, rrelease) at a point, then a pause.
         local function mouse(cmd, label, finder, wait)
+            if cmd == "press" then
+                -- every drag starts with the list at its top (a drop scrolls its row into view)
+                step("ro: top before " .. label, function()
+                    pcall(function() listW().Scroll:SetScrollOffset(0) end)
+                    return msAfter(0.4), 3
+                end)
+            end
             step("ro: " .. label, function()
                 local x, y = finder()
                 if not check(x ~= nil, "ROPOINT %s has a point", label) then return end
@@ -5718,7 +5729,15 @@ local function buildMenu()
         -- A hover during a carry is ignored
         focusOn("ro.g6")
         rkey("keydown ENTER", "hold enter hover", 1.2, function() R.ign = FO.stats().hoverIgnored end)
-        moveTo("ro hover r10", rowPoint(10))
+        -- the row two above r6 (in view: focus scrolled r6 into view; run 2 aimed at r10, out of view, and no enter fired)
+        moveTo("ro hover a row near r6", function()
+            local ch = CC.els["ro.list"].children
+            local i
+            for j, e in ipairs(ch) do if e.id == "ro.r6" then i = j end end
+            local o = i and ch[math.max(i - 2, 2)]
+            local r = o and absR(childTagged(prop(listW(), "VBox"), o.id))
+            if r and r.r > r.l then return math.floor(r.l + 24), math.floor((r.t + r.b) / 2) end
+        end)
         step("ro: hover ignored", function()
             check(FO._carry() ~= nil and FO.stats().hoverIgnored > R.ign and try(function() return rowW(6):HasKeyboardFocus() end) == true,
                 "ROHOVER a hover during a carry is ignored (ignored %d -> %d), r6 keeps focus", R.ign, FO.stats().hoverIgnored)

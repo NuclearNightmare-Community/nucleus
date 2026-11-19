@@ -234,24 +234,39 @@ end
 RO._geoFns = geoFns
 
 -- Reads what the drag needs, once at its start, in layout units: the segment's rows (tops in the list's content space,
--- heights), the visible area's size and where content y 0 sits in it. nil and why when it can't be measured.
+-- heights) and the visible area's size. nil and why when it can't be measured. The rows' places come from the layout
+-- (each visible child's desired height and the list's gap before it, as text.lua applyGaps sets them), not from their
+-- geometry: a row scrolled out of view is not painted, so its cached geometry is stale (VM run 1: rows below the view
+-- measured at the desktop's origin, every drop landed at the end).
 local function measure(list, lw, V)
     local cdo = cdoOf()
     if not cdo then return nil, C.NAME .. "'s ModActor is not loaded" end
     local ok, res = pcall(function()
-        local tl, br, toLocal = geoFns(cdo)
-        local scroll, vbox = lw.Scroll, lw.VBox
+        local _, br, toLocal = geoFns(cdo)
+        local scroll = lw.Scroll
         local g = { tops = {}, heights = {} }
+        local at = {}
+        local y, first = 0, true
+        for _, ch in ipairs(list.children) do
+            if not ch.removed and ch.visible then
+                local w = liveWidget(ch)
+                if w then
+                    if not first then y = y + (list.gapUnits or 0) end
+                    first = false
+                    local d = w:GetDesiredSize()
+                    at[ch] = { t = y, h = d.Y }
+                    y = y + d.Y
+                end
+            end
+        end
         for j, row in ipairs(V) do
-            local rw = liveWidget(row)
-            if not rw then error("row '" .. row.id .. "' has no widget", 0) end
-            g.tops[j] = toLocal(vbox, tl(rw)).Y
-            g.heights[j] = toLocal(rw, br(rw)).Y
+            local a = at[row]
+            if not a then error("row '" .. row.id .. "' has no widget", 0) end
+            g.tops[j], g.heights[j] = a.t, a.h
         end
         local size = toLocal(scroll, br(scroll))
         g.w, g.h = size.X, size.Y
         g.offset = scroll:GetScrollOffset()
-        g.d0 = toLocal(scroll, tl(vbox)).Y + g.offset -- content y 0 in the visible area at offset 0
         return g
     end)
     if not ok then return nil, firstLine(res) end
@@ -448,18 +463,21 @@ function RO.cancel(slate)
     end
 end
 
--- The pointer's place now: { x, y (in the visible area), inside, k (target slot) } or nil when unreadable.
-local function where(d, lw, scroll, offset)
+-- The pointer's place now: { x, y (in the visible area), inside, cy (in the content), k (target slot) } or nil when
+-- unreadable. Both from the last paint's geometry of the visible area and of the content (VBox, always painted).
+local function where(d, lw, scroll)
     local cdo = cdoOf()
     local p = pointer()
     if not (cdo and p) then return nil end
-    local ok, loc = pcall(function() return vec2(cdo[C.NAME .. "_AbsToLocal"](cdo, scroll, p)) end)
+    local ok, loc, con = pcall(function()
+        local toLocal = cdo[C.NAME .. "_AbsToLocal"]
+        return vec2(toLocal(cdo, scroll, p)), vec2(toLocal(cdo, lw.VBox, p))
+    end)
     if not ok then return nil end
-    local x, y = loc.X, loc.Y
-    if type(x) ~= "number" or type(y) ~= "number" or x ~= x or y ~= y then return nil end
+    local x, y, cy = loc.X, loc.Y, con.Y
+    if type(x) ~= "number" or type(y) ~= "number" or type(cy) ~= "number" or x ~= x or y ~= y or cy ~= cy then return nil end
     local inside = x >= 0 and x <= d.g.w and y >= 0 and y <= d.g.h
-    local contentY = y - d.g.d0 + offset
-    return { x = x, y = y, inside = inside, k = RO.slotAt(d.g.tops, d.g.heights, contentY) }
+    return { x = x, y = y, inside = inside, cy = cy, k = RO.slotAt(d.g.tops, d.g.heights, cy) }
 end
 
 -- One loop step of a drag: the target slot, the insertion line, auto-scroll.
@@ -477,7 +495,7 @@ local function dragStep()
     local now = C.micros()
     local dt = math.min(math.max((now - (d.t or now)) / 1e6, 0), 0.1)
     d.t = now
-    local at = where(d, lw, scroll, offset)
+    local at = where(d, lw, scroll)
     if not at then return end
     -- auto-scroll: within edge units of the top or the bottom, proportional to depth, while the pointer is over the list
     local r = theme.reorder
@@ -494,8 +512,9 @@ local function dragStep()
                 local okS = pcall(function() C.count(); scroll:SetScrollOffset(to) end)
                 if okS then
                     S.scrolled = S.scrolled + 1
+                    at.cy = at.cy + (to - offset) -- the content moved under the pointer
                     offset = to
-                    at.k = RO.slotAt(d.g.tops, d.g.heights, at.y - d.g.d0 + offset)
+                    at.k = RO.slotAt(d.g.tops, d.g.heights, at.cy)
                 end
             end
         end
@@ -508,7 +527,7 @@ local function dragStep()
     end
     d.k = at.k
     local lineH = r.lineH
-    local y = RO.slotY(d.g.tops, d.g.heights, at.k, list.gapUnits or 0) + d.g.d0 - offset - lineH / 2
+    local y = RO.slotY(d.g.tops, d.g.heights, at.k, list.gapUnits or 0) + (at.y - at.cy) - lineH / 2
     y = math.floor(math.min(math.max(y, 0), math.max(d.g.h - lineH, 0)) + 0.5)
     setLine(list, lw, y)
 end
@@ -607,11 +626,8 @@ local function dropBody(ctx)
     local lw = liveWidget(list)
     local k = d.k
     if lw then
-        local okS, offset = pcall(function() return lw.Scroll:GetScrollOffset() end)
-        if okS and type(offset) == "number" then
-            local at = where(d, lw, lw.Scroll, offset)
-            if at then k = at.inside and at.k or nil end
-        end
+        local at = where(d, lw, lw.Scroll)
+        if at then k = at.inside and at.k or nil end
     end
     if k == nil then finish(true) return end -- released outside the list's visible area
     local new = RO.moved(list.children, row, k)

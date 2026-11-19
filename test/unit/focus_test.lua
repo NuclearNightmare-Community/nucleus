@@ -2012,8 +2012,7 @@ do
         local w = base(self, world, c, owner)
         if w.__class == "WBP_NucleusRow_C" then
             w.Draggable, w.DragOk = false, false
-            function w:SetIsFocusable(v) self.focusable = v end
-            function w:SetKeyboardFocus() if self.focusable then F.focus = self end end
+            function w:SetKeyboardFocus() if self.bIsFocusable then F.focus = self end end
             function w:HasKeyboardFocus() return F.focus == self end
             function w:SetRenderTranslation(v) self.shift = { v.X, v.Y } end
             function w:SetRenderOpacity(o) self.opacity = o end
@@ -2060,7 +2059,12 @@ function T.geo(o)
     return 0, 0, o.wd or 100, o.h or 30
 end
 obj({
-    Nucleus_AbsTopLeft = function(_, w) local x, y = T.geo(w) return vec(x, y) end,
+    Nucleus_AbsTopLeft = function(_, w)
+        local x, y = T.geo(w)
+        -- F.stale: a row out of the list's view was never painted (its cached geometry at the origin)
+        if F.stale and w.__class == "WBP_NucleusRow_C" and w.parent and w.parent.owner and (y < 100 or y >= 100 + w.parent.owner.h) then return vec(0, 0) end
+        return vec(x, y)
+    end,
     Nucleus_AbsBottomRight = function(_, w) local x, y, wd, h = T.geo(w) return vec(x + wd, y + h) end,
     Nucleus_AbsToLocal = function(_, w, a) local x, y = T.geo(w) return vec(a.X - x, a.Y - y) end,
 }, "/Game/Mods/Nucleus/ModActor.Default__ModActor_C")
@@ -2151,7 +2155,7 @@ do
     FO._input("keys")
     ok(T.agree("r38c2"), "story 38 setup: focus on r2's checkbox (r1 is locked and text-only: no stop)", SC.stats().focus)
     ok(T.key(wr, D.down, INV_ACT) and T.agree("r38r3"), "story 38 a text-only movable row is a focus stop itself", SC.stats().focus)
-    ok(T.tagged("r38r3").focusable == true and F.focus == T.tagged("r38r3"), "story 38 grip row: its own widget focusable and focused")
+    ok(T.tagged("r38r3").bIsFocusable == true and F.focus == T.tagged("r38r3"), "story 38 grip row: its own widget focusable and focused")
     ok(T.strong("r38r3") or T.selected("r38r3"), "story 38 grip row: the band on it")
     ok(T.key(wr, D.down, INV_ACT) and T.agree("r38c4"), "story 38 Down to r4's checkbox")
     T.key(wr, INV_DIR, A.accept)
@@ -2341,6 +2345,7 @@ do
     tick()
     loads, gets = AS.stats.loads, F.getAssets
     local lifts = F.lifts or 0
+    F.stale = true -- VM run 1: rows out of view have no painted geometry; the drag must not depend on it
     local okD, op = T.dragStart("r38r3")
     rw = T.tagged("r38r3")
     ok(okD == true and op.DefaultDragVisual and op.DefaultDragVisual.__class == "WBP_NucleusLift_C" and op.Pivot == 0 and op.Tag == rw.tag,
