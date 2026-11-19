@@ -199,8 +199,8 @@ function Invoke-Step([string] $mode, [int] $x, [int] $y) {
     Start-Sleep -Milliseconds 150
     if ([CoreRun.Win]::GetForegroundWindow() -ne $h) { Write-Host "  $mode skipped: the game window lost the front"; return }
     switch ($mode) {
-        'Press' { [CoreRun.Win]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero) }
-        'Release' { [CoreRun.Win]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero) }
+        'Press' { [CoreRun.Win]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero); $script:leftHeld = $true }
+        'Release' { [CoreRun.Win]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero); $script:leftHeld = $false }
         'RRelease' { [CoreRun.Win]::mouse_event(0x0008, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 80; [CoreRun.Win]::mouse_event(0x0010, 0, 0, 0, [UIntPtr]::Zero) }
     }
     Write-Host "  $mode at ($x, $y)"
@@ -300,6 +300,7 @@ $sw = [Diagnostics.Stopwatch]::StartNew()
 $req = Join-Path $scripts 'request.txt'
 $done = Join-Path $scripts 'done.txt'
 $lastSeq = 0
+$script:leftHeld = $false # core story 38: a 'press' not yet released
 $deadline = (Get-Date).AddSeconds($TimeoutSec)
 $result = 'timeout (hang?)'
 Start-Sleep -Seconds 5
@@ -319,6 +320,8 @@ try {
         Start-Sleep -Milliseconds 250
     }
 } finally {
+    # core story 38: a run that ends between a press and its release lets go of the left button
+    if ($script:leftHeld) { [CoreRun.Win]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero); $script:leftHeld = $false; Write-Host '  left button released at the end of the run' }
     Write-Host ("Run {0} after {1:N0} s." -f $result, $sw.Elapsed.TotalSeconds)
     Start-Sleep -Seconds 2
     Stop-Game
