@@ -259,8 +259,9 @@ Step 'blueprint' {
     if ($foreign) { Remove-Item $pak; throw "Refusing: $name.pak would hold files outside Content/Mods/$($name): $($foreign -join ', ')" }
     $missing = @($mapAssets | Where-Object { $list -notcontains "NuclearNightmare/Content/Mods/$name/Map/$_.uasset" })
     # Core story 24: the six icons and every widget, the image's included. Mod Manager story 4: the choice and the slider.
+    # Core story 38: the lift (a dragged row's copy).
     $missing += @($iconAssets | Where-Object { $list -notcontains "NuclearNightmare/Content/Mods/$name/Icons/$_.uasset" } | ForEach-Object { "Icons/$_" })
-    $missing += @('Text', 'Panel', 'Button', 'List', 'Row', 'Screen', 'Image', 'Choice', 'Slider' | ForEach-Object { "WBP_$name$_" } |
+    $missing += @('Text', 'Panel', 'Button', 'List', 'Row', 'Lift', 'Screen', 'Image', 'Choice', 'Slider' | ForEach-Object { "WBP_$name$_" } |
         Where-Object { $list -notcontains "NuclearNightmare/Content/Mods/$name/$_.uasset" })
     # Core story 22: the replicated host state <name>Net; core story 23: the per-player <name>Presence (a missing class
     # must fail the build).

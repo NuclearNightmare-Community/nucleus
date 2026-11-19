@@ -336,6 +336,7 @@ local function ensureBack(rec)
 end
 
 local function closeOne(rec, reason, event)
+    if F.windowClosed then pcall(F.windowClosed, rec) end -- core story 38: a hold, a carry or a drag in it ends first
     local i = indexOf(rec.id)
     if i then table.remove(order, i) end
     X._detachHost(C.windowHost(rec.id))

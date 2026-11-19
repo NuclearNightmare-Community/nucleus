@@ -62,6 +62,22 @@
 -- chip is light blue, one theme value (theme.game.focusChipColor, #6dd5ed linear), and what is drawn on it (icon,
 -- label, a choice's value, a slider's number) is theme.game.focusChipInk.
 -- Each window remembers its last-focused element (by id): after a close the next window down gets it back.
+-- Core story 38 (0.16.0, UI-16): rows of a reorderable list move with the keyboard and the gamepad (reorder.lua holds
+-- the shared model and the mouse drag). A movable row (reorder.lua's rule) with no focusable of its own is a focus stop
+-- itself (its widget made focusable; its look is the band). Holding A or Enter (the Accept key) on a movable row's
+-- element (or on such a row) for theme.reorder.holdMs picks the row up: keyboard focus goes to the row's own widget (a
+-- held Button is released, so it never clicks), the row shows the carry band (a third instance, assets.lua
+-- A.carryRowMaterial, else the strong band until the UI tick upgrades it) and a render translation of theme.reorder.lift
+-- to the right. While held, Up / Down (and Next / Previous) move it one visible slot within its segment (one rebuild per
+-- step, focus kept on it, scrolled into view; at an edge handled and nothing moves), Left / Right and the key's repeats
+-- are handled and do nothing, Back (Escape, B) puts the pickup order back and leaves the window open. Releasing the key
+-- (WBP_<Core>Screen's OnKeyUp override calls <Core>_OnNavUp; this state's post-hook, registered once from the UI poll
+-- while it has a reorderable list) drops it: onReorder once when the order changed, focus back on the element A went
+-- down on. A shorter press is a tap: the control's own action (a button's click on the release; a choice, a slider or a
+-- row: nothing), as before. A click, a hover-free focus change, a covered or closed window, or an API change to the
+-- list cancels a carry (the pickup order back, no callback). Hovers are ignored during a hold, a carry or a drag. The
+-- hold and the carry are checked by reorder.lua's 16 ms loop; the pickup and the key paths run with C.inDispatch
+-- raised (cached assets only).
 local BASE = (...):gsub("%.ui%.focus$", "")
 local C = require(BASE .. ".ui.common")
 local H = require(BASE .. ".ui.hud")
@@ -71,6 +87,7 @@ local SL = require(BASE .. ".ui.slider")
 local A = require(BASE .. ".ui.assets")
 local B = require(BASE .. ".ui.button")
 local theme = require(BASE .. ".ui.theme")
+local RO = require(BASE .. ".ui.reorder")
 
 local F = {}
 F.DIR = { left = 0, right = 1, up = 2, down = 3, next = 4, previous = 5 }
@@ -81,7 +98,9 @@ local INPUT_DO_NOT_LOCK = 0
 local S = { navs = 0, handled = 0, ignored = 0, moves = 0, steps = 0, closes = 0, refocus = 0, recovered = 0,
     scrolls = 0, faults = 0, hooked = false, hookTries = 0, rowLooks = 0, faces = 0,
     hovers = 0, hoverIgnored = 0, hoverHooked = false, hoverTries = 0, -- story 36
-    chips = 0, chipFaults = 0 } -- story 39
+    chips = 0, chipFaults = 0, -- story 39
+    holds = 0, taps = 0, pickups = 0, carryMoves = 0, carryEdges = 0, drops = 0, carryCancels = 0, carryRefocus = 0,
+    ups = 0, upHooked = false, upOk = false, upTries = 0 } -- story 38
 
 local function firstLine(e) return (tostring(e):match("^[^\n]*")) end
 
@@ -96,7 +115,9 @@ local function chainVisible(el)
     return true
 end
 
+local gripRow -- below
 function F.focusable(el)
+    if el ~= nil and el.kind == "row" then return gripRow(el) end -- core story 38
     return el ~= nil and not el.removed and FOCUSABLE[el.kind] == true and el.attached == true
         and el.enabled ~= false and chainVisible(el)
 end
@@ -109,6 +130,18 @@ local function lineOf(container)
     return line
 end
 
+-- Core story 38: a movable row of a reorderable list that has no focusable of its own is a focus stop itself.
+gripRow = function(el)
+    if el.removed or el.attached ~= true or not chainVisible(el) then return false end
+    local list = el.panel
+    if not (list and list.kind == "list" and list.reorderable == true and RO.movable(el)) then return false end
+    for _, ch in ipairs(el.children or {}) do
+        if ch.kind ~= "row" and F.focusable(ch) then return false end
+    end
+    return true
+end
+F._gripRow = function(el) return gripRow(el) end
+
 -- lines(host, backId) -> { { els = { el, ... }, owner = <row or list id | nil> }, ... }
 function F.lines(host, backId)
     local lines = {}
@@ -118,7 +151,11 @@ function F.lines(host, backId)
             for _, ch in ipairs(el.children) do
                 if not ch.removed then
                     if ch.kind == "row" then
-                        if ch.visible then push(lineOf(ch), ch.id) end
+                        if ch.visible then
+                            local line = lineOf(ch)
+                            if #line == 0 and gripRow(ch) then line = { ch } end -- core story 38: the row itself
+                            push(line, ch.id)
+                        end
                     elseif F.focusable(ch) then push({ ch }, nil) end
                 end
             end
@@ -200,10 +237,29 @@ local function widgetOf(el)
     return ok and w or nil
 end
 
--- The widget keyboard focus goes to: a button's (and a checkbox's) inner Button, a choice's or a slider's own widget.
+-- Core story 38: a row's own widget is made focusable (a grip row, or a carried row) once per widget, or not again.
+-- UUserWidget's SetIsFocusable isn't a UFunction (VM run 1: a TrivialObject); its property bIsFocusable is read live by
+-- NativeSupportsKeyboardFocus, so it is written directly.
+local function focusableRow(row, w, on)
+    if not w then return end
+    if on then
+        local okA, a = pcall(C.addr, w)
+        if okA and row.focusAddr == a then return end
+        local ok, err = pcall(function() C.count(); w.bIsFocusable = true end)
+        if ok then row.focusAddr = okA and a or nil
+        else C.warnOnce("focus row widget", "making a row focusable failed: %s", firstLine(err)) end
+    elseif row.focusAddr then
+        pcall(function() C.count(); w.bIsFocusable = false end)
+        row.focusAddr = nil
+    end
+end
+
+-- The widget keyboard focus goes to: a button's (and a checkbox's) inner Button, a choice's or a slider's own widget;
+-- core story 38: a grip row's own widget.
 local function targetOf(el)
     local w = widgetOf(el)
     if not w then return nil end
+    if el.kind == "row" then focusableRow(el, w, true) return w end
     if el.kind == "button" or el.kind == "checkbox" then
         local ok, b = pcall(C.prop, w, "Btn")
         return ok and C.valid(b) and b or nil
@@ -220,6 +276,7 @@ end
 F._hasFocus = hasFocus
 
 local function rowOf(el)
+    if el and el.kind == "row" then return (not el.removed) and el or nil end -- core story 38: a grip row is its own row
     local p = el and el.panel
     if p and p.kind == "row" and not p.removed then return p end
     return nil
@@ -316,6 +373,7 @@ local function chipOff(el, w)
 end
 
 local function setLook(el, on)
+    if el and el.kind == "row" then return end -- core story 38: a grip row's look is the band (setRow)
     local w = el and widgetOf(el)
     if not w then
         if el then el.chipOn = nil end -- its widget is gone (a new one starts without a chip)
@@ -402,7 +460,9 @@ F._setRow = setRow
 
 -- Core story 28: the window no longer holds focus (another window covers it, or it closed): its focused element and
 -- row go back to their own look; the model keeps the element (focusId) for the return.
+local windowGone -- core story 38, below
 function F.blur(rec)
+    windowGone(rec)
     if rec.lookId then
         local old = C.els[rec.lookId]
         if old and not old.removed then setLook(old, false) end
@@ -563,6 +623,220 @@ local function clickInput(id)
 end
 C.onClickInput = clickInput
 
+-- ---------------------------------------------------------------- core story 38: hold A / Enter to move a row
+local hold = nil  -- { recId, id (the element the key went down on), rowId, listId, t (C.micros) }
+local carry = nil -- { recId, rowId, listId, id (refocused after), pickup = { the list's children at the pickup } }
+F._hold = function() return hold end
+F._carry = function() return carry end
+local function now() return C.micros and C.micros() or 0 end
+
+-- The row an element would carry (a grip row is its own) and its list: a movable row of a reorderable list in this
+-- state's global top window; nil otherwise.
+local function carryRowOf(el)
+    if type(el) ~= "table" then return nil end
+    local row = rowOf(el)
+    if not row then return nil end
+    local list = row.panel
+    if not (list and list.kind == "list" and RO.movable(row) and RO.active(list)) then return nil end
+    return row, list
+end
+
+-- The carry look on (the carry band, else the strong band, else the plain selection; a render translation to the
+-- right) or off (no translation; the row's own background, the caller puts the band back with focusEl).
+local function carryLook(rec, row, on)
+    local w = row and widgetOf(row)
+    if not w then return end
+    if on then
+        local mid, look = nil, nil
+        local okC, m = pcall(A.carryRowMaterial, w, hookDepth > 0)
+        if okC and m then mid, look = m, "carry" end
+        if not mid then
+            local okS, sm = pcall(A.focusRowMaterial, w, true)
+            if okS and sm then mid, look = sm, "strong" end
+        end
+        if not mid then mid, look = A.get("mat:selection"), "plain" end
+        if mid and not (row.selBg == "carry" and row.carryBg == look) then
+            local t = look == "plain" and theme.game.rowTint or theme.game.focusRowTint
+            local ok, err = pcall(function() C.count(); w:SetBackgroundMaterial(mid, t.r, t.g, t.b, t.a, row.style.pad) end)
+            if ok then
+                X._applyRowPad(row, w)
+                row.matBg, row.selBg, row.carryBg = true, "carry", look
+            else C.warnOnce("carry look", "row '%s': the carry look failed (is %s's pak current?): %s", row.id, C.NAME, firstLine(err)) end
+        end
+        local d = theme.reorder.lift
+        pcall(function() C.count(); w:SetRenderTranslation({ X = d, Y = 0 }) end)
+        return
+    end
+    pcall(function() C.count(); w:SetRenderTranslation({ X = 0, Y = 0 }) end)
+    row.carryBg = nil
+    rowLook(row, false)
+    if rec and rec.lookRowId == row.id then rec.lookRowId = nil end
+end
+F._carryLook = carryLook
+
+-- After a drop or a cancel: focus back on the element the key went down on (else the nearest), when the window is
+-- still this state's global top.
+local function refocus(rec, c)
+    if not (rec and rec.open and globalTop(rec)) then return end
+    local lines = F.lines(C.windowHost(rec.id), backIdOf(rec))
+    local el = C.els[c.id]
+    if not (el and F.find(lines, el)) then el = F.recover(lines, rec.focusPos) end
+    if el then focusEl(rec, el, lines, false) end
+end
+
+local function endCarry(rec, row)
+    if not row or row.removed then return end
+    carryLook(rec, row, false)
+    if not gripRow(row) then focusableRow(row, widgetOf(row), false) end
+end
+
+-- Cancels a carry: the pickup order back (when the list still holds the same children), no callback.
+local function cancelCarry(restore)
+    local c = carry
+    if not c then return end
+    carry = nil
+    local rec, list, row = C.windows[c.recId], C.els[c.listId], C.els[c.rowId]
+    if restore and list and not list.removed and #list.children == #c.pickup then
+        local same = true
+        for _, ch in ipairs(c.pickup) do if ch.panel ~= list or ch.removed then same = false break end end
+        if same then RO.apply(list, c.pickup) end
+    end
+    endCarry(rec, row)
+    S.carryCancels = S.carryCancels + 1
+    refocus(rec, c)
+end
+F._cancelCarry = cancelCarry
+
+-- Drops a carry (the key's release): onReorder once when the order changed.
+local function dropCarry()
+    local c = carry
+    if not c then return end
+    carry = nil
+    local rec, list, row = C.windows[c.recId], C.els[c.listId], C.els[c.rowId]
+    endCarry(rec, row)
+    S.drops = S.drops + 1
+    local changed = list ~= nil and not list.removed and not RO.same(list.children, c.pickup)
+    refocus(rec, c)
+    rememberPointer() -- story 36: the rows moved under a still pointer
+    if changed then RO.fire(list) end
+end
+
+-- One step of a carry (delta -1 up, +1 down): one rebuild, focus kept on the row, the row scrolled into view.
+local function carryStep(delta)
+    local list, row = C.els[carry.listId], C.els[carry.rowId]
+    if not (list and row and not list.removed and not row.removed) then cancelCarry(false) return end
+    local k = RO.step(list.children, row, delta)
+    if not k then S.carryEdges = S.carryEdges + 1 return end
+    local new = RO.moved(list.children, row, k)
+    if not (new and RO.apply(list, new)) then return end
+    S.carryMoves = S.carryMoves + 1
+    local rw = widgetOf(row)
+    if rw then pcall(C.call0, rw, "SetKeyboardFocus") end -- the rebuild took it out of the tree
+    scrollIntoView(row)
+end
+
+-- A key while carrying: Back puts it back; Up / Down move it; anything else does nothing. Always handled.
+local function carryNav(dir, act)
+    if act == F.ACT.back then cancelCarry(true) return true end
+    if act == F.ACT.accept then return true end -- the held key's repeats
+    if dir == F.DIR.up or dir == F.DIR.previous then carryStep(-1)
+    elseif dir == F.DIR.down or dir == F.DIR.next then carryStep(1) end
+    return true
+end
+
+-- The pickup, from the loop once the key was held long enough: the element still holds keyboard focus (the key is
+-- still down), its row is still movable. Keyboard focus goes to the row's own widget.
+local function pickUp(h)
+    local rec = C.windows[h.recId]
+    if not (rec and rec.open and globalTop(rec)) or RO.dragging() then return false end
+    local el, row = C.els[h.id], C.els[h.rowId]
+    if not (el and row and not el.removed and not row.removed) then return false end
+    local r2, list = carryRowOf(el)
+    if r2 ~= row or list.id ~= h.listId then return false end
+    if not hasFocus(targetOf(el)) then return false end
+    local rw = widgetOf(row)
+    if not rw then return false end
+    focusableRow(row, rw, true)
+    local okK = pcall(C.call0, rw, "SetKeyboardFocus")
+    if not (okK and hasFocus(rw)) then
+        if not gripRow(row) then focusableRow(row, rw, false) end
+        C.warnOnce("carry focus", "row '%s': it could not take keyboard focus; it isn't picked up", row.id)
+        return false
+    end
+    local pickup = {}
+    for i, ch in ipairs(list.children) do pickup[i] = ch end
+    carry = { recId = rec.id, rowId = row.id, listId = list.id, id = el.id, pickup = pickup }
+    carryLook(rec, row, true)
+    S.pickups = S.pickups + 1
+    rememberPointer()
+    return true
+end
+
+-- reorder.lua's loop (16 ms): a hold held long enough picks up; a carry keeps its row focused (focus nowhere: back on
+-- it; on another element of the window: cancelled).
+local function loopTick()
+    if hold and now() - hold.t >= theme.reorder.holdMs * 1000 then
+        local h = hold
+        hold = nil
+        hookDepth = hookDepth + 1
+        C.inDispatch = C.inDispatch + 1 -- the pickup is part of the key path: cached assets only
+        local ok, err = pcall(pickUp, h)
+        C.inDispatch = C.inDispatch - 1
+        hookDepth = hookDepth - 1
+        if not ok then S.faults = S.faults + 1; C.warnOnce("carry pickup", "picking a row up failed: %s", firstLine(err)) end
+    end
+    local c = carry
+    if not c then return end
+    local rec, row = C.windows[c.recId], C.els[c.rowId]
+    if not (rec and rec.open and globalTop(rec)) then cancelCarry(true) return end
+    local rw = row and widgetOf(row)
+    if not rw then cancelCarry(true) return end
+    if hasFocus(rw) then return end
+    local lines = F.lines(C.windowHost(rec.id), backIdOf(rec))
+    for _, l in ipairs(lines) do
+        for _, e in ipairs(l.els) do
+            if e ~= row and hasFocus(targetOf(e)) then cancelCarry(true) return end -- focus moved on (not by a hover)
+        end
+    end
+    S.carryRefocus = S.carryRefocus + 1
+    pcall(C.call0, rw, "SetKeyboardFocus")
+end
+
+-- A change to a list (reorder.lua RO.interrupt): a hold or a carry in it ends (the carry's order back first).
+local function interrupt(list)
+    if hold and hold.listId == list.id then hold = nil end
+    if carry and carry.listId == list.id then cancelCarry(true) end
+end
+-- A window covered or closed: its hold, carry and drag end.
+windowGone = function(rec)
+    if hold and hold.recId == rec.id then hold = nil end
+    if carry and carry.recId == rec.id then cancelCarry(true) end
+    local d = RO._drag()
+    if d then
+        local list = C.els[d.listId]
+        local lrec = list and RO.windowOf(list)
+        if not lrec or lrec.id == rec.id then RO.cancel(true) end
+    end
+end
+F.windowClosed = function(rec) windowGone(rec) end
+
+-- Mouse drag (reorder.lua): focus and the band on a row's element in the current column (no scroll at the drag's
+-- start, scrolled into view at its drop); the drag is the mouse's input.
+local function focusRow(row, scroll, start)
+    local list = row.panel
+    local rec = RO.windowOf(list)
+    if not rec then return end
+    if start then input("mouse") end
+    local lines = F.lines(C.windowHost(rec.id), backIdOf(rec))
+    local li = nil
+    for i, l in ipairs(lines) do if l.owner == row.id then li = i break end end
+    if not li then return end
+    local els = lines[li].els
+    local to = els[math.min((rec.focusPos and rec.focusPos.ci) or 1, #els)]
+    rec.openFresh = false
+    focusEl(rec, to, lines, false, not scroll)
+end
+
 -- Focus on open (fresh: its first focusable), and back on a window after the one above it closed (its remembered
 -- element, else its first focusable); else the window widget. With the UI input mode. Story 39: the input mode stays
 -- (a window opened by a mouse click shows no chip; by keys, the chip on its first control).
@@ -610,6 +884,12 @@ end
 -- remembered element; the focus look is put back on (a re-style removes it).
 function F.tick(rec, w)
     rec.openFresh = false
+    if carry and carry.recId == rec.id then
+        -- core story 38: a carried row keeps its look; the tick upgrades a strong band to the carry band
+        local row = C.els[carry.rowId]
+        if row and row.carryBg ~= "carry" then carryLook(rec, row, true) end
+        return
+    end
     F.changed(rec)
     local okD, inside = pcall(C.call0, w, "HasFocusedDescendants")
     local okK, self = pcall(C.call0, w, "HasKeyboardFocus")
@@ -639,6 +919,8 @@ function F.used(el, noClick)
 end
 local navDepth = 0 -- > 0 while a key is handled (a step it causes reaches F.used: still the key's)
 used = function(el, noClick)
+    hold = nil -- core story 38: a click ends a hold (a tap's own click included) and cancels a carry
+    if carry then cancelCarry(true) end
     -- Story 39: a click is the mouse's (on any host: the menu's elements too), unless it is a key's (the Accept key's
     -- click, a step inside the key's own handling).
     if navDepth == 0 and not noClick then clickInput(el and el.id) end
@@ -674,6 +956,16 @@ function F.nav(rec, dir, act)
         return true
     end
     rec.openFresh = false
+    -- Core story 38: a carry takes every key; a mouse drag: Back cancels it, other keys do nothing.
+    if carry then
+        if carry.recId == rec.id then return carryNav(dir, aOk and act or nil) end
+        cancelCarry(true)
+    end
+    if RO.dragging() then
+        if aOk and act == F.ACT.back then RO.cancel(true) end
+        return true
+    end
+    if not (aOk and act == F.ACT.accept) then hold = nil end
     local host = C.windowHost(rec.id)
     local lines = F.lines(host, backIdOf(rec))
     local el = focusedIn(rec, lines)
@@ -691,6 +983,18 @@ function F.nav(rec, dir, act)
         return true
     end
     if aOk then
+        -- Core story 38: on a movable row's element (or a grip row) the key may be held to pick the row up (the loop
+        -- decides); its repeats keep the hold.
+        local row, list = carryRowOf(el)
+        if row and S.upOk then
+            if not (hold and hold.id == el.id) then
+                hold = { recId = rec.id, id = el.id, rowId = row.id, listId = list.id, t = now() }
+                S.holds = S.holds + 1
+                RO.want()
+            end
+        else
+            hold = nil
+        end
         -- Accept: a Button clicks itself (its own Accept); on a choice or a slider nothing changes.
         if el.kind == "button" or el.kind == "checkbox" then
             acceptKey = { id = el.id, t = C.micros and C.micros() or 0 } -- story 39: its click is this key's
@@ -771,6 +1075,7 @@ F._onNav, F._navBody = onNav, navBody
 local function hoverBody(ctx)
     local function ignore() S.hoverIgnored = S.hoverIgnored + 1 end
     if C.offGameThread() then return ignore() end
+    if hold or carry or RO.dragging() then return ignore() end -- core story 38
     local w = ctx:get()
     if not C.valid(w) then return ignore() end
     local okT, tag = pcall(function() return w.CoreTag:ToString() end)
@@ -819,6 +1124,69 @@ local function onHover(ctx)
     end
 end
 F._onHover = onHover
+
+-- Core story 38: the post-hook on <Core>_OnNavUp (the window's OnKeyUp: a key's release no focused widget handled).
+-- The Accept key's release drops a carry (handled) or ends a hold (a tap); anything else is left alone. Silent for
+-- another mod's window, a stale widget and a closed window, as navBody.
+local function navUpBody(ctx)
+    if C.offGameThread() then S.ignored = S.ignored + 1 return end
+    local w = ctx:get()
+    if not C.valid(w) then S.ignored = S.ignored + 1 return end
+    local okT, tag = pcall(function() return w.CoreTag:ToString() end)
+    if not (okT and type(tag) == "string") then S.ignored = S.ignored + 1 return end
+    local mine = C.LOWER .. ":" .. C.modTag .. ":#screen:"
+    if tag:sub(1, #mine) ~= mine then S.ignored = S.ignored + 1 return end
+    local rec = C.windows[tag:sub(#mine + 1)]
+    if not (rec and rec.open) then S.ignored = S.ignored + 1 return end
+    local live = cb.windowWidget and cb.windowWidget(rec)
+    if not live or live:GetAddress() ~= w:GetAddress() then S.ignored = S.ignored + 1 return end
+    local okV, act = pcall(function() return w.NavAction end)
+    act = okV and math.tointeger(tonumber(act) or -1) or -1
+    if act ~= F.ACT.accept then return end
+    S.ups = S.ups + 1
+    if carry and carry.recId == rec.id then
+        dropCarry()
+        local okH, errH = pcall(function() w.NavHandled = true end)
+        if not okH then C.warnOnce("nav up handled", "window keys: setting NavHandled failed: %s", firstLine(errH)) end
+    elseif hold and hold.recId == rec.id then
+        hold = nil
+        S.taps = S.taps + 1 -- a tap: the control's own action (or none)
+    end
+end
+local function onNavUp(ctx)
+    hookDepth = hookDepth + 1
+    C.inDispatch = C.inDispatch + 1 -- cached assets only (story 37's rule); onReorder runs as a dependent callback
+    local ok, err = pcall(navUpBody, ctx)
+    C.inDispatch = C.inDispatch - 1
+    hookDepth = hookDepth - 1
+    if not ok then
+        S.faults = S.faults + 1
+        C.warnOnce("reorder handling", "window key release (reorder handling) failed: %s (further failures not logged)", firstLine(err))
+    end
+end
+F._onNavUp = onNavUp
+
+-- From the UI poll (reorder.lua's dispatch, never inside a hook), once this state has a reorderable list and the window
+-- class is loaded. Once; a failure is one WARN (an old pak: a row can't be picked up with the keys).
+local function ensureUpHook()
+    if S.upHooked or X._inHook() then return end
+    if not X._classOf("screen") then return end
+    S.upTries = S.upTries + 1
+    local ok, err = pcall(RegisterHook, C.NAVUP_FN, onNavUp)
+    S.upHooked, S.upOk = true, ok
+    if ok then C.log.debug("ui window key release hook registered on %s", C.NAVUP_FN)
+    else C.warnOnce("nav up hook", "window keys: RegisterHook(%s) failed (is %s's pak current?): %s; rows can't be picked up with A or Enter", C.NAVUP_FN, C.NAME, firstLine(err)) end
+end
+F._ensureUpHook = ensureUpHook
+
+RO.cb.globalTop = globalTop
+RO.cb.focusRow = focusRow
+RO.cb.remember = function() rememberPointer() end
+RO.cb.carrying = function() return carry ~= nil end
+RO.cb.busy = function() return hold ~= nil or carry ~= nil end
+RO.cb.tick = loopTick
+RO.cb.interrupt = interrupt
+RO.cb.ensure = ensureUpHook
 
 -- From the UI poll (never inside a hook), once this mod has a window and the window class is loaded.
 local function ensureHook()

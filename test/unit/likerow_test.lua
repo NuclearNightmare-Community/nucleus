@@ -863,7 +863,7 @@ do
     local function bad(o, text, name) raises(function() RS.create(o) end, RC .. text, "bad input: " .. name) end
     local IN = { host = CSH, container = VB, after = "Overlay_28" }
     local L65 = string.rep("a", 65)
-    bad({ id = "bx", like = "Overlay_28", nope = 1, place = IN }, "unknown key 'nope' (valid: control, gap, help, id, label, like, place, style)", "an unknown key lists the new keys")
+    bad({ id = "bx", like = "Overlay_28", nope = 1, place = IN }, "unknown key 'nope' (valid: control, gap, help, id, label, like, locked, place, style)", "an unknown key lists the new keys")
     bad({ id = "bx", like = 28, place = IN }, "like must be a game widget's name (a string), got 28", "like a number")
     bad({ id = "bx", like = "", place = IN }, "like must not be empty", "like empty")
     bad({ id = "bx", like = L65, place = IN }, "like is 65 characters, at most 64", "like 65 characters")

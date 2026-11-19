@@ -4,6 +4,7 @@
 -- (core story 27: "compact" is 4 units; a row's default stays "tight")
 --   setStyle(handle, style)    setVisible(handle, visible)    remove(handle)    isShown(handle) -> boolean
 --   setLabel(handle, label)    setHelp(handle, help | nil)     (core story 33: game-style rows only)
+--   setLocked(handle, locked)  (core story 38; create's locked = <boolean|nil> too)
 -- (panel.setStyle, setVisible, remove and isShown take a row too, and core.ui.place moves it.)
 --
 -- A row is WBP_<Core>Row: Border "Background" -> HorizontalBox "HBox". It is placed { list = h }, { panel = h } or by
@@ -25,6 +26,10 @@
 -- need like. A like name that isn't a game row on the open screen gives core's game look and one WARN.
 -- style and setStyle have no effect on a game-style row while its like row is a game row (its look is copied; they
 -- apply to the fallback look), and gap spaces the children inside its holder.
+--
+-- Core story 38 (0.16.0): locked = true (or setLocked(h, true)) keeps a row in place in a reorderable list (list.lua):
+-- it can't be dragged or picked up, and no other row moves past it. Any row takes it; it means something only in a
+-- reorderable list.
 local BASE = (...):gsub("%.ui%.row$", "")
 local C = require(BASE .. ".ui.common")
 local P = require(BASE .. ".ui.place")
@@ -32,7 +37,7 @@ local X = require(BASE .. ".ui.text")
 local St = require(BASE .. ".ui.strings")
 
 local R = {}
-local CREATE_KEYS = { id = true, place = true, style = true, gap = true, like = true, label = true, help = true, control = true }
+local CREATE_KEYS = { id = true, place = true, style = true, gap = true, like = true, label = true, help = true, control = true, locked = true }
 local LIKE_MAX = 64
 local CONTROL_KINDS = { checkbox = true, choice = true, gchoice = true, slider = true, button = true }
 
@@ -72,8 +77,11 @@ function R.create(opts, ...)
     if type(opts) ~= "table" then C.fail("%s: expected a table { id = ..., place = ..., style = ..., gap = ... }, got %s", pre, C.describe(opts)) end
     if select("#", ...) > 0 then C.fail("%s: expected 1 argument (a table), got %d", pre, 1 + select("#", ...)) end
     for k in pairs(opts) do
-        if not CREATE_KEYS[k] then C.fail("%s: unknown key %s (valid: control, gap, help, id, label, like, place, style)", pre, C.describe(k)) end
+        if not CREATE_KEYS[k] then C.fail("%s: unknown key %s (valid: control, gap, help, id, label, like, locked, place, style)", pre, C.describe(k)) end
     end
+    -- Core story 38: locked.
+    if opts.locked ~= nil and type(opts.locked) ~= "boolean" then C.fail("%s: locked must be a boolean or nil, got %s", pre, C.describe(opts.locked)) end
+    local locked = opts.locked == true
     local id = X._validId(opts.id, "row.create")
     if opts.place ~= nil and type(opts.place) ~= "table" then C.fail("%s: place must be a table or nil, got %s", pre, C.describe(opts.place)) end
     -- Core story 33: like, label, help, control.
@@ -101,6 +109,10 @@ function R.create(opts, ...)
             C.fail("%s: id '%s' is already a row %s like; remove it first to change that", pre, id, el.like and "with" or "without")
         end
         if like then el.like, el.label, el.help = like, label, help end
+        if (el.locked == true) ~= locked then
+            if el.panel and el.panel.kind == "list" then C.listChanged(el.panel) end
+            el.locked = locked
+        end
         X._setStyle(el, style)
         if el.gap ~= gap then el.gap, el.gapUnits = gap, P._LIST_GAP[gap]; X._applyGaps(el); X._resized(el) end
         P.place(el.handle, intent)
@@ -111,7 +123,7 @@ function R.create(opts, ...)
         return el.handle
     end
     el = X._new("row", id, { style = style, layout = "horizontal", gap = gap, gapUnits = P._LIST_GAP[gap], children = {},
-        like = like, label = label, help = help }, place)
+        like = like, label = label, help = help, locked = locked }, place)
     if ctl and ctl.panel ~= el then P.place(ctl.handle, { row = el.handle }) end
     return el.handle
 end
@@ -161,6 +173,19 @@ function R.setHelp(h, ...)
     local el = likeRow(h, "setHelp", 1 + select("#", ...), 2)
     el.help = St.validateHelp((...), C.UI .. ".row.setHelp")
     X._likeRefresh(el)
+end
+
+-- Core story 38: a row that stays in place in a reorderable list. A change cancels a drag or a carry in its list.
+function R.setLocked(h, ...)
+    C.enter("row.setLocked")
+    local el = C.element(h, "row.setLocked", "row")
+    local n = 1 + select("#", ...)
+    if n ~= 2 then C.fail("%s.row.setLocked: expected 2 arguments (handle, locked), got %d", C.UI, n) end
+    local locked = (...)
+    if type(locked) ~= "boolean" then C.fail("%s.row.setLocked: locked must be a boolean, got %s", C.UI, C.describe(locked)) end
+    if (el.locked == true) == locked then return end
+    if el.panel and el.panel.kind == "list" then C.listChanged(el.panel) end
+    el.locked = locked
 end
 
 return R

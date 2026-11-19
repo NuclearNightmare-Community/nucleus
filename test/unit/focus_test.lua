@@ -1983,5 +1983,509 @@ do
     ok(FO.stats().chips > 0, "story 39: chips counted", FO.stats().chips)
 end
 
+-- ---------------------------------------------------------------- core story 38: drag to reorder rows in a list
+-- Fakes: a row widget takes keyboard focus (SetIsFocusable / SetKeyboardFocus) and records its render translation and
+-- opacity and the Blueprint's Draggable / DragOp / DragOk; a list has its insertion line (Line), DropOp / DropLeft and a
+-- scrollable Scroll; WBP_NucleusLift; WidgetBlueprintLibrary's IsDragDropping / CancelDragDrop (F.dragging); core's
+-- ModActor CDO with the geometry functions. Geometry (layout units = absolute): a list's visible area is at (100, 100)
+-- with its size, its rows stacked from there (their height, the slot's top padding as the gap) less the scroll offset,
+-- a row's texts at x = row + 10 + 150 * (index - 1), 140 wide.
+T.LIFTCLASS = cls("/Game/Mods/Nucleus/WBP_NucleusLift.WBP_NucleusLift_C")
+F.dragging, F.dragCancels, F.ops = false, 0, 0
+do
+    local WBL = F.objects["/Script/UMG.Default__WidgetBlueprintLibrary"]
+    WBL.IsDragDropping = function() return F.dragging end
+    WBL.CancelDragDrop = function() F.dragCancels = F.dragCancels + 1; F.dragging = false end
+    local base = WBL.Create
+    WBL.Create = function(self, world, c, owner)
+        if c == T.LIFTCLASS then
+            local w = widget("WBP_NucleusLift_C", "/Engine/Transient.WBP_NucleusLift_C_" .. (F.addr + 0x100))
+            w.HBox = newBox("HorizontalBox", w.__path .. ".WidgetTree.HBox", true)
+            w.Background = { SetPadding = function(s, m) s.pad = { m.Left, m.Top, m.Right, m.Bottom } end }
+            function w:SetLiftSize(W, H) self.size = { W, H } end
+            function w:SetBackgroundMaterial(m, r, g, b, a, p) self.mat = m; self.pad = p end
+            function w:SetBackground(r, g, b, a) self.bg = { r, g, b, a } end
+            function w:SetBackgroundPadding(p) self.pad = p end
+            F.lifts = (F.lifts or 0) + 1
+            return w
+        end
+        local w = base(self, world, c, owner)
+        if w.__class == "WBP_NucleusRow_C" then
+            w.Draggable, w.DragOk = false, false
+            function w:SetKeyboardFocus() if self.bIsFocusable then F.focus = self end end
+            function w:HasKeyboardFocus() return F.focus == self end
+            function w:SetRenderTranslation(v) self.shift = { v.X, v.Y } end
+            function w:SetRenderOpacity(o) self.opacity = o end
+        elseif w.__class == "WBP_NucleusList_C" then
+            w.VBox.owner, w.Scroll.owner = w, w
+            w.Scroll.kind = "scroll"
+            function w.Scroll:SetScrollOffset(v) self.offset = v; self.sets = (self.sets or 0) + 1 end
+            function w.Scroll:GetScrollOffsetOfEnd()
+                local H = 0
+                for _, c in ipairs(w.VBox.children) do if c.vis ~= 1 then H = H + c.h + c.Slot.Padding.Top end end
+                return math.max(H - w.h, 0)
+            end
+            w.Line = { vis = 1, sets = 0 }
+            w.Line.Slot = { SetPadding = function(s, m) s.top = m.Top; w.Line.sets = w.Line.sets + 1 end }
+            function w.Line:SetVisibility(v) self.vis = v end
+            function w.Line:SetColorAndOpacity(c) self.color = c end
+        end
+        return w
+    end
+end
+-- Absolute rectangle of a fake widget: x, y, w, h.
+function T.geo(o)
+    if o.kind == "scroll" then local lw = o.owner return 100, 100, lw.wd, lw.h end
+    if o.owner and o.owner.VBox == o then return 100, 100 - o.owner.Scroll.offset, o.owner.wd, 1000 end
+    local p = o.parent
+    if p and p.owner and p.owner.VBox == p then
+        local x, y = T.geo(p)
+        for _, c in ipairs(p.children) do
+            if c.vis ~= 1 then
+                y = y + c.Slot.Padding.Top
+                if c == o then return x, y, p.owner.wd, c.h end
+                y = y + c.h
+            end
+        end
+    end
+    if p and p.horiz then -- a text in a row's HBox
+        for _, cand in pairs(handles) do
+            if type(cand) == "table" and cand.HBox == p and cand.__class == "WBP_NucleusRow_C" then
+                local x, y, _, h = T.geo(cand)
+                for i, c in ipairs(p.children) do if c == o then return x + 10 + 150 * (i - 1), y, 140, h end end
+            end
+        end
+    end
+    return 0, 0, o.wd or 100, o.h or 30
+end
+obj({
+    Nucleus_AbsTopLeft = function(_, w)
+        local x, y = T.geo(w)
+        -- F.stale: a row out of the list's view was never painted (its cached geometry at the origin)
+        if F.stale and w.__class == "WBP_NucleusRow_C" and w.parent and w.parent.owner and (y < 100 or y >= 100 + w.parent.owner.h) then return vec(0, 0) end
+        return vec(x, y)
+    end,
+    Nucleus_AbsBottomRight = function(_, w) local x, y, wd, h = T.geo(w) return vec(x + wd, y + h) end,
+    Nucleus_AbsToLocal = function(_, w, a) local x, y = T.geo(w) return vec(a.X - x, a.Y - y) end,
+}, "/Game/Mods/Nucleus/ModActor.Default__ModActor_C")
+T.NAVUP, T.DSTART, T.DCANCEL, T.DROP = "WBP_NucleusScreen_C:Nucleus_OnNavUp", "WBP_NucleusRow_C:Nucleus_OnDragStart",
+    "WBP_NucleusRow_C:Nucleus_OnDragCancel", "WBP_NucleusList_C:Nucleus_OnDrop"
+-- A hook by its exact path's end (<Core>_OnNav is a prefix of <Core>_OnNavUp).
+function T.fireExact(sub, w)
+    for _, h in ipairs(F.hooks) do if h.path:sub(-#sub) == sub then h.fn({ get = function() return w end }) end end
+end
+function T.key(w, dir, act)
+    w.NavDir, w.NavAction, w.NavHandled = dir, act, false
+    T.fireExact(NAV, w)
+    return w.NavHandled
+end
+-- The window's OnKeyUp: NavAction from the key, NavHandled false, <Core>_OnNavUp, Handled iff NavHandled.
+function T.keyUp(w, act)
+    w.NavDir, w.NavAction, w.NavHandled = INV_DIR, act, false
+    fireHook(T.NAVUP, w)
+    return w.NavHandled
+end
+-- The row's OnDragDetected: a new operation, DragOk false, <Core>_OnDragStart; returns DragOk and the operation.
+function T.dragStart(id)
+    local w = T.tagged(id)
+    F.ops = F.ops + 1
+    w.DragOp = obj({ __class = "DragDropOperation", Tag = "", Pivot = 5 })
+    w.DragOk = false
+    F.dragging = true
+    fireHook(T.DSTART, w)
+    if not w.DragOk then F.dragging = false end
+    return w.DragOk, w.DragOp
+end
+function T.drop(listId, op, left)
+    local lw = T.tagged(listId)
+    lw.DropOp, lw.DropLeft = op, left ~= false
+    fireHook(T.DROP, lw)
+    F.dragging = false
+end
+function T.dragCancel(id) fireHook(T.DCANCEL, T.tagged(id)); F.dragging = false end
+-- The pointer over the list (local y in its visible area), x 50 units in.
+function T.at(listId, y, x) local lw = T.tagged(listId) F.mouse = { x = 100 + (x or 50), y = 100 + y }; return lw end
+-- The local y of row id's top (or its middle with mid) in its list's visible area.
+function T.rowY(id, mid) local w = T.tagged(id) local _, y, _, h = T.geo(w) return y - 100 + (mid and h / 2 or 0) end
+function T.ids(listId) local out = {} for i, ch in ipairs(C.els[listId].children) do out[i] = ch.id end return table.concat(out, " ") end
+function T.box(listId) local out = {} for i, w in ipairs(T.tagged(listId).VBox.children) do out[i] = w.tag:match("[^:]+$") end return table.concat(out, " ") end
+function T.roTick() local RO = require("nucleus.ui.reorder") local f = RO._loop.handle and F.loops[RO._loop.handle] if f then f() end end
+T.cbs = {}
+
+do
+    local RO = require("nucleus.ui.reorder")
+    local AS = require("nucleus.ui.assets")
+    AS._reset()
+    FO._noChip = true
+    FO._input("keys")
+    local faults0, roFaults0 = FO.stats().faults, RO.stats().faults
+    -- Old pak first: the row has no <Core>_OnDragStart (its RegisterHook fails): one WARN, no mouse drag; keys work.
+    local realRegister = RegisterHook
+    RegisterHook = function(p, f)
+        if p:find("Nucleus_OnDragStart", 1, true) then error("UFunction not found: " .. p) end
+        return realRegister(p, f)
+    end
+    local nWarn = countLogs("rows can't be dragged with the mouse")
+    local R = SC.open{ id = "R38" }
+    local wr = T.screenOf("R38")
+    local rec = C.windows["R38"]
+    local cbIn = {}
+    local L = LS.create{ id = "r38l", place = { screen = R, corner = "top-left" }, size = { 600, 200 }, reorderable = true,
+        onReorder = function(h, ids)
+            T.cbs[#T.cbs + 1] = { h = h, ids = table.concat(ids, " ") }
+            cbIn[#cbIn + 1] = C.inDispatch
+            if T.cbThrow then error("boom in onReorder") end
+        end }
+    local rows = {}
+    for i = 1, 8 do
+        rows[i] = RS.create{ id = "r38r" .. i, place = { list = L }, locked = (i == 1) or nil }
+        X.create{ id = "r38n" .. i, text = "MOD " .. i, place = { row = rows[i], fill = 4 } }
+        if i % 2 == 0 then CK.create{ id = "r38c" .. i, place = { row = rows[i] }, onChange = T.rec("r38c" .. i) } end
+    end
+    rows[9] = RS.create{ id = "r38r9", place = { list = L } }
+    CH.create{ id = "r38ch", options = { "LOW", "MID", "HIGH" }, selected = 1, place = { row = rows[9] }, onChange = T.rec("r38ch") }
+    rows[10] = RS.create{ id = "r38r10", place = { list = L } }
+    SL.create{ id = "r38sl", min = 0, max = 10, step = 1, defaultValue = 5, place = { row = rows[10] }, onChange = T.rec("r38sl") }
+    tick(); tick()
+    RegisterHook = realRegister
+    ok(countLogs("rows can't be dragged with the mouse") == nWarn + 1 and RO.stats().dragHookOk == false, "story 38 old pak: one WARN, no mouse drag")
+    ok(T.tagged("r38r3").Draggable == false, "story 38 old pak: rows stay undraggable")
+    ok(hookCount("Nucleus_OnNavUp") == 1 and FO.stats().upOk == true, "story 38: one hook on the window's <Core>_OnNavUp, registered from the poll", hookCount("Nucleus_OnNavUp"))
+    -- the keys still carry with the old pak: hold Enter on r4's checkbox
+    FO._input("keys")
+    ok(T.agree("r38c2"), "story 38 setup: focus on r2's checkbox (r1 is locked and text-only: no stop)", SC.stats().focus)
+    ok(T.key(wr, D.down, INV_ACT) and T.agree("r38r3"), "story 38 a text-only movable row is a focus stop itself", SC.stats().focus)
+    ok(T.tagged("r38r3").bIsFocusable == true and F.focus == T.tagged("r38r3"), "story 38 grip row: its own widget focusable and focused")
+    ok(T.strong("r38r3") or T.selected("r38r3"), "story 38 grip row: the band on it")
+    ok(T.key(wr, D.down, INV_ACT) and T.agree("r38c4"), "story 38 Down to r4's checkbox")
+    T.key(wr, INV_DIR, A.accept)
+    ok(FO._hold() ~= nil and FO._hold().id == "r38c4", "story 38 old pak: the hold starts on r4's checkbox")
+    clock = clock + 500000
+    T.roTick()
+    ok(FO._carry() ~= nil and FO._carry().rowId == "r38r4", "story 38 old pak: the keyboard carry works", FO._carry() and FO._carry().rowId)
+    T.keyUp(wr, A.accept)
+    ok(FO._carry() == nil and #T.cbs == 0, "story 38 old pak: release drops; unchanged order, no callback")
+    -- the real pak's hooks (a fresh registration, as on a new pak)
+    RO._S.hooked = false
+    tick(); tick()
+    ok(hookCount("Nucleus_OnDragStart") == 1 and hookCount("Nucleus_OnDragCancel") == 1 and hookCount("Nucleus_OnDrop") >= 1 and RO.stats().dragHookOk,
+        "story 38: one hook each on the row's and the list's drag counters", hookCount("Nucleus_OnDragStart") .. hookCount("Nucleus_OnDragCancel") .. hookCount("Nucleus_OnDrop"))
+    ok(T.tagged("r38r3").Draggable == true and T.tagged("r38r1").Draggable == false, "story 38 sync: movable rows Draggable, the locked r1 not")
+
+    -- Pure: segments and slots
+    do
+        local function r(id, o) local e = { id = id, kind = "row", visible = true, removed = false } for k, v in pairs(o or {}) do e[k] = v end return e end
+        local a, b, cl, d, e = r("a"), r("b"), r("c", { locked = true }), r("d"), r("e")
+        local t = { id = "t", kind = "text", visible = true, removed = false }
+        local h = r("h", { visible = false })
+        local ch = { a, b, cl, d, h, e, t }
+        local lo, hi = RO.segment(ch, 1)
+        ok(lo == 1 and hi == 2, "story 38 segment: a locked row bounds it", lo .. "," .. hi)
+        lo, hi = RO.segment(ch, 4)
+        ok(lo == 4 and hi == 6, "story 38 segment: a hidden row inside, a text bounds it", lo .. "," .. hi)
+        local V, p = RO.slots(ch, 4)
+        ok(#V == 2 and V[1] == d and V[2] == e and p == 1, "story 38 slots: hidden rows are never a target")
+        ok(RO.moved(ch, d, 0) == nil and RO.moved(ch, d, 1) == nil, "story 38 moved: just above or below itself changes nothing")
+        local m = RO.moved(ch, d, 2)
+        ok(m and m[4] == h and m[5] == e and m[6] == d and m[3] == cl and m[7] == t, "story 38 moved: d after e; the hidden row keeps its place, the fixed ones their index")
+        ok(RO.step(ch, a, -1) == nil and RO.step(ch, b, 1) == nil and RO.step(ch, b, -1) == 0, "story 38 step: the segment's edges")
+        ok(RO.slotAt({ 0, 34, 68 }, { 30, 30, 30 }, 40) == 1 and RO.slotAt({ 0, 34, 68 }, { 30, 30, 30 }, 60) == 2, "story 38 slotAt: by row middles")
+        ok(RO.slotY({ 0, 34 }, { 30, 30 }, 1, 4) == 32 and RO.slotY({ 0, 34 }, { 30, 30 }, 2, 4) == 66, "story 38 slotY: in the gap, and after the last row")
+    end
+
+    -- Keyboard: tap vs hold on every control kind (a checkbox, a choice, a slider, a grip row)
+    T.log = {}
+    local nck = T.ncalls("r38c4")
+    ok(T.key(wr, INV_DIR, A.accept) == false and FO._hold() ~= nil, "story 38 tap checkbox: Accept left to the Button, a hold starts")
+    T.fire(T.CLICK, T.tagged("r38c4")) -- the Button's own click on the key's release
+    ok(FO._hold() == nil and T.ncalls("r38c4") == nck + 1, "story 38 tap checkbox: it toggles once, the hold ends")
+    clock = clock + 500000
+    T.roTick()
+    ok(FO._carry() == nil and #T.cbs == 0, "story 38 tap checkbox: no pickup")
+    -- a grip row tap
+    T.key(wr, D.up, INV_ACT)
+    ok(T.agree("r38r3"), "story 38 Up: back on the grip row r3")
+    ok(T.key(wr, INV_DIR, A.accept) == true and FO._hold() ~= nil, "story 38 tap grip row: handled, a hold starts")
+    ok(T.keyUp(wr, A.accept) == false and FO._hold() == nil and FO.stats().taps >= 1, "story 38 tap grip row: the release ends the hold, unhandled")
+    -- the choice and the slider: tap (nothing), hold (pickup) and back
+    for _, k in ipairs({ { "r38ch", "r38r9" }, { "r38sl", "r38r10" } }) do
+        FO._input("keys")
+        local lines = FO.lines(C.windowHost("R38"), "#close:R38")
+        local el = C.els[k[1]]
+        -- move to it with Down
+        for _ = 1, 12 do if T.agree(k[1]) then break end T.key(wr, D.down, INV_ACT) end
+        ok(T.agree(k[1]), "story 38 setup: " .. k[1] .. " focused")
+        local nk = T.ncalls(k[1])
+        ok(T.key(wr, INV_DIR, A.accept) == true and T.keyUp(wr, A.accept) == false and T.ncalls(k[1]) == nk, "story 38 tap " .. k[1] .. ": handled, nothing changes")
+        T.key(wr, INV_DIR, A.accept)
+        clock = clock + 500000
+        T.roTick()
+        ok(FO._carry() and FO._carry().rowId == k[2] and F.focus == T.tagged(k[2]), "story 38 hold " .. k[1] .. ": its row is picked up, focus on the row")
+        ok(T.keyUp(wr, A.accept) == true and FO._carry() == nil and T.agree(k[1]) and T.ncalls(k[1]) == nk, "story 38 hold " .. k[1] .. ": release drops, focus back, no change")
+    end
+    ok(#T.cbs == 0, "story 38: no callback without an order change", #T.cbs)
+
+    -- Carry: grip focused (r3); Enter, Down, Down, Enter -> moved 2 down live, one onReorder at the drop
+    for _ = 1, 12 do if T.agree("r38r3") then break end T.key(wr, D.up, INV_ACT) end
+    ok(T.agree("r38r3"), "story 38 carry setup: r3 focused")
+    local loads, gets = AS.stats.loads, F.getAssets
+    AS._reset() -- cold: no carry instance, no strong one either
+    T.key(wr, INV_DIR, A.accept)
+    clock = clock + 300000
+    T.roTick()
+    ok(FO._carry() == nil and FO._hold() ~= nil, "story 38 hold: not yet at 0.3 s")
+    clock = clock + 150000
+    T.roTick()
+    local rw = T.tagged("r38r3")
+    ok(FO._carry() and FO.stats().pickups >= 1 and rw.shift and rw.shift[1] == theme.reorder.lift, "story 38 pickup: the row lifted by theme.reorder.lift", rw.shift and rw.shift[1])
+    ok(C.els["r38r3"].carryBg ~= "carry", "story 38 cold: no carry instance inside the key path", C.els["r38r3"].carryBg)
+    ok(F.getAssets == gets, "story 38 pickup: no GetAsset inside the key path", F.getAssets - gets)
+    ok(T.key(wr, D.down, INV_ACT) and T.ids("r38l") == "r38r1 r38r2 r38r4 r38r3 r38r5 r38r6 r38r7 r38r8 r38r9 r38r10", "story 38 carry Down: r3 one slot down, live", T.ids("r38l"))
+    ok(T.box("r38l") == T.ids("r38l") and F.focus == rw, "story 38 carry Down: the box rebuilt, focus kept on the row")
+    ok(T.key(wr, D.down, INV_ACT) and T.ids("r38l") == "r38r1 r38r2 r38r4 r38r5 r38r3 r38r6 r38r7 r38r8 r38r9 r38r10", "story 38 carry Down again", T.ids("r38l"))
+    ok(#T.cbs == 0, "story 38 carry: no callback while held")
+    ok(T.key(wr, D.left, INV_ACT) and T.key(wr, D.right, INV_ACT) and T.ids("r38l"):find("r38r5 r38r3", 1, true), "story 38 carry Left / Right: handled, nothing")
+    ok(T.key(wr, INV_DIR, A.accept) and FO._carry() ~= nil, "story 38 carry: the held key's repeat is handled")
+    tick() -- the UI tick upgrades the carry band
+    ok(C.els["r38r3"].carryBg == "carry" and T.matOf("r38r3") and T.matOf("r38r3").params and T.matOf("r38r3").params.CinematicBaseColor.R == theme.game.carryRowColors.CinematicBaseColor.r,
+        "story 38 tick: the carry band upgraded", C.els["r38r3"].carryBg)
+    ok(T.keyUp(wr, A.accept) == true and #T.cbs == 1 and T.cbs[1].ids == "r38r1 r38r2 r38r4 r38r5 r38r3 r38r6 r38r7 r38r8 r38r9 r38r10" and T.cbs[1].h == L,
+        "story 38 drop: one onReorder(list, ids) with the new order", T.cbs[1] and T.cbs[1].ids)
+    ok(cbIn[1] and cbIn[1] > 0, "story 38 onReorder runs with C.inDispatch raised", cbIn[1])
+    ok(rw.shift[1] == 0 and T.agree("r38r3") and (T.strong("r38r3") or T.selected("r38r3")), "story 38 drop: the lift goes, focus and the band on r3")
+    ok(AS.stats.loads >= 0 and C.inDispatch == 0, "story 38 drop: the dispatch depth back to 0")
+    -- Carry cancel: Enter, Down, Escape -> the pickup order back, the window open, no callback
+    T.key(wr, INV_DIR, A.accept); clock = clock + 500000; T.roTick()
+    ok(T.key(wr, D.down, INV_ACT) and T.ids("r38l"):find("r38r6 r38r3", 1, true), "story 38 cancel: moved first", T.ids("r38l"))
+    ok(T.key(wr, INV_DIR, A.back) and FO._carry() == nil and T.ids("r38l") == T.cbs[1].ids and rec.open and #T.cbs == 1, "story 38 carry cancel: Escape restores, the window stays, no callback", T.ids("r38l"))
+    ok(T.box("r38l") == T.ids("r38l") and T.agree("r38r3"), "story 38 carry cancel: the box rebuilt, focus on r3")
+    ok(T.keyUp(wr, A.accept) == false, "story 38 the release after a cancel: nothing")
+    -- Edge: Up at the segment top (r2 is the first movable row: r1 locked)
+    for _ = 1, 12 do if T.agree("r38c2") then break end T.key(wr, D.up, INV_ACT) end
+    T.key(wr, INV_DIR, A.accept); clock = clock + 500000; T.roTick()
+    local before = T.ids("r38l")
+    local edges = FO.stats().carryEdges
+    ok(FO._carry() and FO._carry().rowId == "r38r2" and T.key(wr, D.up, INV_ACT) and T.ids("r38l") == before and FO.stats().carryEdges == edges + 1,
+        "story 38 carry edge: Up at the segment top is handled, nothing moves")
+    ok(T.keyUp(wr, A.accept) and #T.cbs == 1, "story 38 carry edge: the drop changes nothing, no callback")
+    -- Hover during a carry: ignored
+    T.key(wr, INV_DIR, A.accept); clock = clock + 500000; T.roTick()
+    local ign = FO.stats().hoverIgnored
+    T.move(); T.hover(T.tagged("r38r6"))
+    ok(FO._carry() ~= nil and FO.stats().hoverIgnored == ign + 1 and F.focus == T.tagged("r38r2"), "story 38 a hover during a carry is ignored")
+    -- Interrupted: a click cancels (pickup order back, no callback)
+    T.key(wr, D.down, INV_ACT)
+    T.fire(T.CLICK, T.tagged("r38c6"))
+    ok(FO._carry() == nil and T.ids("r38l") == before and #T.cbs == 1, "story 38 interrupted: a click cancels, the order back", T.ids("r38l"))
+    -- Interrupted: an API setOrder during a carry (carry restored first, then the new order; no callback)
+    for _ = 1, 12 do if T.agree("r38c2") then break end T.key(wr, D.up, INV_ACT) end
+    T.key(wr, INV_DIR, A.accept); clock = clock + 500000; T.roTick()
+    T.key(wr, D.down, INV_ACT)
+    local PNL = require("nucleus.ui.panel")
+    local order = PNL.order(L)
+    order[4], order[5] = order[5], order[4] -- the order the dependent read during the carry, two rows swapped
+    local want = {}
+    for i, h in ipairs(order) do want[i] = h.id end
+    PNL.setOrder(L, order)
+    ok(FO._carry() == nil and T.ids("r38l") == table.concat(want, " ") and #T.cbs == 1 and C.els["r38r2"].carryBg == nil,
+        "story 38 interrupted: setOrder cancels the carry first, its own order applies, no callback", T.ids("r38l"))
+    ok(T.keyUp(wr, A.accept) == false and #T.cbs == 1, "story 38 interrupted: setOrder never calls onReorder")
+    -- Interrupted: a child removed; a row locked; a hover-free focus change
+    for _, how in ipairs({ "remove", "lock", "focus" }) do
+        for _ = 1, 12 do if T.agree("r38c2") then break end T.key(wr, D.up, INV_ACT) end
+        T.key(wr, INV_DIR, A.accept); clock = clock + 500000; T.roTick()
+        T.key(wr, D.down, INV_ACT)
+        local was = T.ids("r38l")
+        ok(FO._carry() ~= nil, "story 38 interrupted " .. how .. ": carrying")
+        if how == "remove" then
+            local tmp = RS.create{ id = "r38tmp", place = { list = L } }
+            ok(FO._carry() == nil, "story 38 interrupted: a child added cancels")
+            RS.remove(tmp)
+        elseif how == "lock" then
+            RS.setLocked(rows[8], true)
+            ok(FO._carry() == nil and T.tagged("r38r2").shift[1] == 0, "story 38 interrupted: a lock cancels")
+            RS.setLocked(rows[8], false)
+        else
+            F.focus = T.btn("r38c6")
+            T.roTick()
+        end
+        ok(FO._carry() == nil and #T.cbs == 1, "story 38 interrupted " .. how .. ": cancelled, no callback")
+        T.keyUp(wr, A.accept)
+    end
+    -- Interrupted: a covered window
+    for _ = 1, 12 do if T.agree("r38c2") then break end T.key(wr, D.up, INV_ACT) end
+    T.key(wr, INV_DIR, A.accept); clock = clock + 500000; T.roTick()
+    local W2 = SC.open{ id = "R38top" }
+    ok(FO._carry() == nil and C.els["r38r2"].carryBg == nil and T.tagged("r38r2").shift[1] == 0, "story 38 interrupted: a covered window cancels")
+    SC.close(W2)
+    tick()
+    -- Callback throws: the order stays, one WARN per list
+    T.cbThrow = true
+    local nW = countLogs("list 'r38l' onReorder")
+    for _ = 1, 2 do
+        for _ = 1, 12 do if T.agree("r38c2") then break end T.key(wr, D.up, INV_ACT) end
+        T.key(wr, INV_DIR, A.accept); clock = clock + 500000; T.roTick()
+        local was = T.ids("r38l")
+        T.key(wr, D.down, INV_ACT)
+        local moved = T.ids("r38l")
+        T.keyUp(wr, A.accept)
+        ok(T.ids("r38l") == moved and moved ~= was, "story 38 callback throws: the order stays")
+    end
+    ok(countLogs("list 'r38l' onReorder") == nW + 1 and C.inDispatch == 0, "story 38 callback throws: one WARN per list", countLogs("list 'r38l' onReorder") - nW)
+    T.cbThrow = nil
+    T.cbs = {}
+
+    -- Mouse: r3 dragged between r5 and r6 -> r1 r2 r4 r5 r3 r6...; one onReorder; focus on r3's line
+    LS.create{ id = "r38l", place = { screen = R, corner = "top-left" }, size = { 600, 200 }, reorderable = true,
+        onReorder = function(h, ids) T.cbs[#T.cbs + 1] = { h = h, ids = table.concat(ids, " ") } end }
+    local base = { "r38r1", "r38r2", "r38r3", "r38r4", "r38r5", "r38r6", "r38r7", "r38r8", "r38r9", "r38r10" }
+    local hs = {}
+    for i, id in ipairs(base) do hs[i] = C.els[id].handle end
+    PNL.setOrder(L, hs)
+    tick()
+    loads, gets = AS.stats.loads, F.getAssets
+    local lifts = F.lifts or 0
+    F.stale = true -- VM run 1: rows out of view have no painted geometry; the drag must not depend on it
+    local okD, op = T.dragStart("r38r3")
+    rw = T.tagged("r38r3")
+    ok(okD == true and op.DefaultDragVisual and op.DefaultDragVisual.__class == "WBP_NucleusLift_C" and op.Pivot == 0 and op.Tag == rw.tag,
+        "story 38 drag start: DragOk, the lift as the visual from the grab point, the row's tag")
+    local lift = op.DefaultDragVisual
+    ok(rw.opacity == theme.reorder.sourceOpacity and RO.stats().dragging, "story 38 drag: the source at 40%", rw.opacity)
+    ok(#lift.HBox.children == 1 and lift.HBox.children[1].text == "MOD 3" and lift.HBox.children[1].Slot.Size.SizeRule == 1 and lift.HBox.children[1].Slot.Size.Value == 4,
+        "story 38 lift: a copy of the row's text, its fill weight")
+    ok(lift.size and lift.size[2] == rw.h and lift.mat ~= nil, "story 38 lift: the row's size, the band's look", lift.size and table.concat(lift.size, "x"))
+    ok(AS.stats.loads == loads and F.getAssets == gets, "story 38 drag start: no asset load in the hook", F.getAssets - gets)
+    ok(T.agree("r38r3") and C.inDispatch == 0, "story 38 drag: focus and the band on r3")
+    T.at("r38l", (T.rowY("r38r5", true) + T.rowY("r38r6", true)) / 2)
+    T.roTick()
+    local lw = T.tagged("r38l")
+    ok(lw.Line.vis == 3 and lw.Line.color and lw.Line.color.R == theme.game.accent.r and math.abs(lw.Line.Slot.top - (T.rowY("r38r6") - 2 - 1)) <= 1,
+        "story 38 drag: the accent line at the slot between r5 and r6", lw.Line.Slot.top)
+    T.drop("r38l", op, true)
+    ok(T.ids("r38l") == "r38r1 r38r2 r38r4 r38r5 r38r3 r38r6 r38r7 r38r8 r38r9 r38r10" and #T.cbs == 1 and T.cbs[1].ids == T.ids("r38l"),
+        "story 38 mouse drop: r3 between r5 and r6, one onReorder with the same ids", T.ids("r38l"))
+    ok(rw.opacity == 1 and lw.Line.vis == 1 and not RO.stats().dragging and T.agree("r38r3"), "story 38 mouse drop: opacity back, the line hidden, focus on r3")
+    -- Same slot: directly above itself -> no rebuild, no callback
+    local rebuilds = C.stats.panelRebuilds
+    okD, op = T.dragStart("r38r3")
+    T.at("r38l", T.rowY("r38r3") - 1)
+    T.roTick()
+    T.drop("r38l", op, true)
+    ok(#T.cbs == 1 and C.stats.panelRebuilds == rebuilds, "story 38 same slot: no rebuild, no callback")
+    -- Locked barrier: drag r3 above r1 -> the line below r1; the drop puts r3 at index 2
+    okD, op = T.dragStart("r38r3")
+    T.at("r38l", 2)
+    T.roTick()
+    ok(lw.Line.Slot.top >= T.rowY("r38r2") - 4, "story 38 locked barrier: the line clamps below r1", lw.Line.Slot.top)
+    T.drop("r38l", op, true)
+    ok(T.ids("r38l"):sub(1, 17) == "r38r1 r38r3 r38r2" and #T.cbs == 2, "story 38 locked barrier: r3 at index 2", T.ids("r38l"))
+    -- Cancel: Escape (the row's OnDragCancelled), a right release, a release outside, B
+    local cancels = RO.stats().dragCancels
+    for _, how in ipairs({ "escape", "right", "outside", "b" }) do
+        local was = T.ids("r38l")
+        okD, op = T.dragStart("r38r4")
+        T.at("r38l", T.rowY("r38r7", true))
+        T.roTick()
+        if how == "escape" then T.dragCancel("r38r4")
+        elseif how == "right" then T.drop("r38l", op, false)
+        elseif how == "outside" then T.at("r38l", 400); T.drop("r38l", op, true)
+        else
+            ok(T.key(wr, INV_DIR, A.back) and rec.open, "story 38 B during a drag: handled, the window stays")
+            ok(F.dragCancels > 0 and not F.dragging, "story 38 B: Slate's drag cancelled")
+            T.dragCancel("r38r4")
+        end
+        ok(okD and T.ids("r38l") == was and #T.cbs == 2 and T.tagged("r38r4").opacity == 1 and lw.Line.vis == 1 and not RO.stats().dragging,
+            "story 38 cancel (" .. how .. "): order unchanged, no callback, opacity back, line hidden", T.ids("r38l"))
+    end
+    ok(RO.stats().dragCancels == cancels + 4, "story 38 cancel: four counted", RO.stats().dragCancels - cancels)
+    ok(rec.open, "story 38 cancel: the window stays open")
+    -- Auto-scroll: the pointer held in the bottom 32 units scrolls to the end; the drop lands at a later slot
+    okD, op = T.dragStart("r38r2")
+    T.at("r38l", 200 - 8)
+    local o0 = lw.Scroll.offset
+    for _ = 1, 40 do clock = clock + 16000; T.roTick() end
+    ok(lw.Scroll.offset > o0 and math.abs(lw.Scroll.offset - lw.Scroll:GetScrollOffsetOfEnd()) < 1e-6, "story 38 auto-scroll: the offset grows to the end", lw.Scroll.offset)
+    T.at("r38l", T.rowY("r38r9", true) + 1)
+    T.drop("r38l", op, true)
+    ok(T.ids("r38l"):find("r38r9 r38r2 r38r10", 1, true) and #T.cbs == 3, "story 38 auto-scroll: the drop lands at a slot that was off-screen", T.ids("r38l"))
+    lw.Scroll.offset = 0
+    -- Interrupted drag: an API change cancels it (Slate's drag too)
+    okD, op = T.dragStart("r38r4")
+    local dc = F.dragCancels
+    RS.setVisible(rows[7], false)
+    ok(not RO.stats().dragging and F.dragCancels == dc + 1 and T.tagged("r38r4").opacity == 1, "story 38 interrupted drag: an API change cancels it")
+    T.dragCancel("r38r4")
+    RS.setVisible(rows[7], true)
+    -- IsDragDropping turns false without an end this state saw: the loop cancels
+    okD, op = T.dragStart("r38r4")
+    F.dragging = false
+    T.roTick()
+    ok(not RO.stats().dragging and #T.cbs == 3, "story 38 loop: IsDragDropping false ends the drag, no callback")
+    -- Cold lift class: the drag runs without a copy, no GetAsset in the hook
+    kill(T.LIFTCLASS)
+    gets = F.getAssets
+    okD, op = T.dragStart("r38r4")
+    ok(okD and op.DefaultDragVisual == nil and op.Tag == "" and F.getAssets == gets, "story 38 cold lift class: no copy, no GetAsset", F.getAssets - gets)
+    T.dragCancel("r38r4")
+    T.LIFTCLASS = cls("/Game/Mods/Nucleus/WBP_NucleusLift.WBP_NucleusLift_C")
+    tick()
+    -- Foreign or stale: another mod's row, a stale widget, an off-thread hook, another mod's list, an operation not ours
+    local ign0 = RO.stats().ignored
+    local other = tagged(widget("WBP_NucleusRow_C", "/Engine/Transient.WBP_NucleusRow_C_o38"))
+    other.tag = "nucleus:OtherMod:r38r3"
+    other.DragOp, other.DragOk = obj({}), false
+    fireHook(T.DSTART, other)
+    ok(other.DragOk == false, "story 38 foreign row: DragOk stays false")
+    local copy = tagged(widget("WBP_NucleusRow_C", "/Engine/Transient.WBP_NucleusRow_C_c38"))
+    copy.tag = "nucleus:TestMod:r38r3"
+    copy.DragOp, copy.DragOk = obj({}), false
+    fireHook(T.DSTART, copy)
+    ok(copy.DragOk == false, "story 38 stale widget: DragOk stays false")
+    local realDeref = _G.Nucleus_Deref
+    _G.Nucleus_Deref = function() error("off the game thread") end
+    local rw4 = T.tagged("r38r4")
+    rw4.DragOp, rw4.DragOk = obj({}), false
+    fireHook(T.DSTART, rw4)
+    _G.Nucleus_Deref = realDeref
+    ok(rw4.DragOk == false, "story 38 off-thread: DragOk stays false")
+    okD, op = T.dragStart("r38r4")
+    local olw = tagged(widget("WBP_NucleusList_C", "/Engine/Transient.WBP_NucleusList_C_o38"))
+    olw.tag = "nucleus:OtherMod:r38l"
+    olw.DropOp, olw.DropLeft = op, true
+    fireHook(T.DROP, olw)
+    ok(RO.stats().dragging, "story 38 another mod's list: ignored (its own state decides)")
+    lw.DropOp, lw.DropLeft = obj({}), true
+    fireHook(T.DROP, lw)
+    ok(RO.stats().dragging and #T.cbs == 3, "story 38 an operation not this state's: ignored")
+    T.dragCancel("r38r4")
+    ok(RO.stats().ignored >= ign0 + 5, "story 38 foreign or stale: counted", RO.stats().ignored - ign0)
+    -- Hover during a drag: ignored
+    okD, op = T.dragStart("r38r4")
+    ign = FO.stats().hoverIgnored
+    T.move(); T.hover(T.tagged("r38r6"))
+    ok(FO.stats().hoverIgnored == ign + 1, "story 38 a hover during a drag is ignored")
+    T.dragCancel("r38r4")
+    -- Elsewhere: not the top window -> no flag, a drag start refused
+    local Wc = SC.open{ id = "R38c" }
+    tick()
+    ok(T.tagged("r38r4").Draggable == false, "story 38 covered: Draggable off")
+    okD = T.dragStart("r38r4")
+    ok(okD == false, "story 38 covered: a drag start is refused")
+    SC.close(Wc)
+    tick()
+    ok(T.tagged("r38r4").Draggable == true, "story 38 top again: Draggable on")
+    -- reorderable off (same-id create): flags off; a list on another host: no effect
+    LS.create{ id = "r38l", place = { screen = R, corner = "top-left" }, size = { 600, 200 } }
+    tick()
+    ok(T.tagged("r38r4").Draggable == false and C.els["r38l"].onReorder == nil, "story 38 same-id create: reorderable off, the flags follow")
+    ok(not FO._gripRow(C.els["r38r3"]), "story 38 reorderable off: no grip stop")
+    LS.create{ id = "r38l", place = { screen = R, corner = "top-left" }, size = { 600, 200 }, reorderable = true }
+    tick()
+    ok(T.tagged("r38r4").Draggable == true, "story 38 same-id create: reorderable on again")
+    SC.close(R)
+    ok(FO.stats().faults == faults0 and RO.stats().faults == roFaults0 and C.inDispatch == 0, "story 38: no fault", RO.stats().faults - roFaults0)
+end
+
 print(string.format("focus_test: %d passed, %d failed", pass, failN))
 if failN > 0 then os.exit(1) end

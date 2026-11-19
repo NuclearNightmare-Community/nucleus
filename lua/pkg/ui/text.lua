@@ -330,7 +330,8 @@ local KIND = {
 }
 X.KIND = KIND -- button.lua adds the button kind
 -- Widget classes that are not element kinds (story 21: the window).
-local EXTRA_CLASS = { screen = { pkg = C.SCREEN_PKG, short = C.SCREEN_SHORT } }
+local EXTRA_CLASS = { screen = { pkg = C.SCREEN_PKG, short = C.SCREEN_SHORT },
+    lift = { pkg = C.LIFT_PKG, short = C.LIFT_SHORT } } -- core story 38: a dragged row's lifted copy
 
 -- Mod Manager story 4: a checkbox is a button widget, so two kinds share one class. A widget's class names a kind (the
 -- first of them, in a fixed order) only to read its tag; whether it belongs to an element compares classes (sameClass).
@@ -2499,6 +2500,7 @@ function X._new(kind, id, fields, place)
     local el = fields
     el.kind, el.id, el.visible, el.removed, el.attached, el.seq = kind, id, true, false, false, C.seq
     if place.panelEl then
+        if place.panelEl.kind == "list" then C.listChanged(place.panelEl) end -- core story 38: cancels a drag or a carry
         el.panel, el.place, el.fill = place.panelEl, { inPanel = true }, place.fill
         local list = place.panelEl.children
         list[#list + 1] = el
@@ -2528,6 +2530,7 @@ end
 -- Takes an element out of where it is (a host canvas or a panel): its widget leaves, its handle is freed, and the
 -- place it left closes up. Its state stays.
 local function detach(el)
+    if el.panel and el.panel.kind == "list" then C.listChanged(el.panel) end -- core story 38
     local wasHost = C.hostOf(el)
     local w = liveWidget(el)
     if w then removeWidget(w) end
@@ -2546,6 +2549,10 @@ end
 
 -- Removes an element for good (a panel with its children: their handles raise "was removed" from then on).
 local function removeEl(el, underRemovedPanel)
+    -- Core story 38: a list's child (or the list itself) going cancels a drag or a carry in it.
+    if not underRemovedPanel then
+        if el.kind == "list" then C.listChanged(el) elseif el.panel and el.panel.kind == "list" then C.listChanged(el.panel) end
+    end
     local wasHost = C.hostOf(el)
     local w = liveWidget(el)
     if w and not underRemovedPanel then removeWidget(w) end -- a child goes with its panel's widget
@@ -2612,6 +2619,7 @@ X._shown = shown
 -- setVisible for any kind (the caller checked the handle and the value).
 function X._setVisible(el, visible)
     if el.visible == visible then return end
+    if el.kind == "list" then C.listChanged(el) elseif el.panel and el.panel.kind == "list" then C.listChanged(el.panel) end -- core story 38
     el.visible = visible
     local w = liveWidget(el)
     if w then
@@ -2758,6 +2766,7 @@ placeImpl = function(el, pl)
             return
         end
         checkJoin(p, el.kind, "place", el)
+        if p.kind == "list" then C.listChanged(p) end -- core story 38: cancels a drag or a carry in it
         detach(el)
         el.panel, el.place, el.fill = p, { inPanel = true }, pl.fill
         p.children[#p.children + 1] = el
@@ -2835,6 +2844,9 @@ A.extra = function()
     for _, el in ipairs(C.order) do if not el.removed then need[el.kind] = true end end
     for kind in pairs(need) do classOf(kind) end
     if next(C.windows) then classOf("screen"); classOf("button") end
+    for _, el in ipairs(C.order) do -- core story 38: a reorderable list's dragged row copy
+        if el.kind == "list" and not el.removed and el.reorderable then classOf("lift") break end
+    end
 end
 
 X._validId, X._validText, X._sameStyle, X._sameFull = validId, validText, sameStyle, sameFull

@@ -18,7 +18,11 @@
   "drag <x1> <y1> <x2> <y2>" (the left button down at the first point, ten moves to the second, up there; to the front
   first, like a click), "type <text>" (1-16 of 0-9 . , a-z -, each posted as WM_CHAR to the game window) and
   "key BACK", "key TAB", "key ESCAPE" (posted like Enter). Core story 27's window keys add "key LEFT" and "key RIGHT"
-  (arrow keys, extended, like UP and DOWN).
+  (arrow keys, extended, like UP and DOWN). Core story 38 (a row dragged and held in steps) adds "press <x> <y>" (the
+  left button down there, kept), "glide <x> <y>" (ten real moves there from where the cursor is, the buttons as they
+  are), "release <x> <y>" (the left button up there), "rrelease <x> <y>" (a right press and release there while the left
+  button is held; each to the front first, like a click) and "keydown <KEY>" / "keyup <KEY>" (only that half of a
+  "key <KEY>" press, posted like it: a key held across other requests).
   Keeps the log as <workspace>/dumps/<copy>/<name lowercase>/<scenario>.log (ignored by git) and runs check.ps1.
   Refuses to start while another runner's test or driver mod is enabled in the copy (the workspace's tools/run-guard:
   the refusal names each and the command that clears it); -AllowOtherDrivers runs anyway.
@@ -85,6 +89,8 @@ Add-Type -Namespace CoreRun -Name Win -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
 [DllImport("user32.dll")] public static extern void mouse_event(uint flags, int dx, int dy, uint data, System.UIntPtr extra);
 [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(System.IntPtr v);
+[DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
+public struct POINT { public int X; public int Y; }
 '@
 # Slate's absolute coordinates (the test's click points) are physical desktop pixels: see the same pixels.
 [void][CoreRun.Win]::SetProcessDpiAwarenessContext([IntPtr](-4))
@@ -170,6 +176,36 @@ function Invoke-Drag([int] $x, [int] $y, [int] $x2, [int] $y2) {
     Write-Host "  dragged ($x, $y) -> ($x2, $y2)"
 }
 
+# Core story 38: one step of a drag on the game only (to the front first, like a click): Press (the left button down at
+# the point, kept), Glide (ten real moves there from where the cursor is), Release (the left button up there), RRelease
+# (a right press and release there while the left button is held).
+function Invoke-Step([string] $mode, [int] $x, [int] $y) {
+    $h = Get-FrontGameWindow $mode.ToLowerInvariant()
+    if ($h -eq [IntPtr]::Zero) { return }
+    if ($mode -eq 'Glide') {
+        $from = New-Object CoreRun.Win+POINT
+        [void][CoreRun.Win]::GetCursorPos([ref]$from)
+        for ($i = 1; $i -le 10; $i++) {
+            [void][CoreRun.Win]::SetCursorPos([int][Math]::Round($from.X + ($x - $from.X) * $i / 10), [int][Math]::Round($from.Y + ($y - $from.Y) * $i / 10))
+            [CoreRun.Win]::mouse_event(0x0001, 1, 0, 0, [UIntPtr]::Zero); [CoreRun.Win]::mouse_event(0x0001, -1, 0, 0, [UIntPtr]::Zero)
+            Start-Sleep -Milliseconds 40
+        }
+        Write-Host "  glided ($($from.X), $($from.Y)) -> ($x, $y)"
+        return
+    }
+    [void][CoreRun.Win]::SetCursorPos($x, $y)
+    Start-Sleep -Milliseconds 150
+    [CoreRun.Win]::mouse_event(0x0001, 1, 0, 0, [UIntPtr]::Zero); [CoreRun.Win]::mouse_event(0x0001, -1, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 150
+    if ([CoreRun.Win]::GetForegroundWindow() -ne $h) { Write-Host "  $mode skipped: the game window lost the front"; return }
+    switch ($mode) {
+        'Press' { [CoreRun.Win]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero) }
+        'Release' { [CoreRun.Win]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero) }
+        'RRelease' { [CoreRun.Win]::mouse_event(0x0008, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 80; [CoreRun.Win]::mouse_event(0x0010, 0, 0, 0, [UIntPtr]::Zero) }
+    }
+    Write-Host "  $mode at ($x, $y)"
+}
+
 function Invoke-Request([string] $cmd) {
     # 'key ENTER' (touchdown), 'key <A-Z>' (the journal scenario's map key), 'key UP' / 'key DOWN', 'click <x> <y>'
     # (story 15), 'move <x> <y>' and 'wheel <x> <y> <notches>' (story 21), 'drag <x1> <y1> <x2> <y2>', 'type <text>' and
@@ -189,6 +225,12 @@ function Invoke-Request([string] $cmd) {
         if ($x -le 16383 -and $y -le 16383 -and $n -ne 0 -and [Math]::Abs($n) -le 20) { Invoke-Wheel $x $y $n } else { Write-Host "  wheel skipped: ($x, $y) or $n notches out of range" }
         return
     }
+    if ($cmd -cmatch '^(press|glide|release|rrelease) (\d{1,5}) (\d{1,5})$') { # core story 38
+        $mode = @{ press = 'Press'; glide = 'Glide'; release = 'Release'; rrelease = 'RRelease' }[$Matches[1]]
+        $x = [int]$Matches[2]; $y = [int]$Matches[3]
+        if ($x -le 16383 -and $y -le 16383) { Invoke-Step $mode $x $y } else { Write-Host "  $($Matches[1]) skipped: ($x, $y) out of range" }
+        return
+    }
     if ($cmd -cmatch '^drag (\d{1,5}) (\d{1,5}) (\d{1,5}) (\d{1,5})$') {
         $p = 1..4 | ForEach-Object { [int]$Matches[$_] }
         if (-not ($p | Where-Object { $_ -gt 16383 })) { Invoke-Drag $p[0] $p[1] $p[2] $p[3] } else { Write-Host "  drag skipped: a point out of range" }
@@ -206,6 +248,9 @@ function Invoke-Request([string] $cmd) {
     if ($cmd -cmatch '^shot [A-Za-z0-9._-]{1,40}$') { Write-Host "  $cmd skipped (screenshots only in the VM)"; return }
     $vk, $scan, $label = $null, $null, $null
     $ext = 0
+    # Core story 38: "keydown <KEY>" / "keyup <KEY>" post only that half of "key <KEY>".
+    $half = 0
+    if ($cmd -cmatch '^key(down|up) ([A-Z]+)$') { $half = if ($Matches[1] -ceq 'down') { 1 } else { 2 }; $cmd = 'key ' + $Matches[2] }
     if ($cmd -ceq 'key ENTER') { $vk, $scan, $label = 0x0D, 0x1C, 'ENTER' }
     elseif ($cmd -ceq 'key UP') { $vk, $scan, $label, $ext = 0x26, 0x48, 'UP', 1 }      # arrow keys are extended keys
     elseif ($cmd -ceq 'key DOWN') { $vk, $scan, $label, $ext = 0x28, 0x50, 'DOWN', 1 }
@@ -229,6 +274,14 @@ function Invoke-Request([string] $cmd) {
     $h = if ($p) { $p.MainWindowHandle } else { [IntPtr]::Zero }
     if ($h -eq [IntPtr]::Zero) { Write-Host '  key skipped: no game window'; return }
     $e = [int64]$ext -shl 24
+    if ($half -eq 1) {
+        $down = [CoreRun.Win]::PostMessage($h, 0x0100, [IntPtr]$vk, [IntPtr](1 -bor ($scan -shl 16) -bor $e))
+        Write-Host ("  posted {0} down only to the game window ({1})" -f $label, $down); return
+    }
+    if ($half -eq 2) {
+        $up = [CoreRun.Win]::PostMessage($h, 0x0101, [IntPtr]$vk, [IntPtr]([int64]0xC0000001 -bor ([int64]$scan -shl 16) -bor $e))
+        Write-Host ("  posted {0} up only to the game window ({1})" -f $label, $up); return
+    }
     $down = [CoreRun.Win]::PostMessage($h, 0x0100, [IntPtr]$vk, [IntPtr](1 -bor ($scan -shl 16) -bor $e))                         # WM_KEYDOWN
     Start-Sleep -Milliseconds 80
     $up = [CoreRun.Win]::PostMessage($h, 0x0101, [IntPtr]$vk, [IntPtr]([int64]0xC0000001 -bor ([int64]$scan -shl 16) -bor $e))    # WM_KEYUP
