@@ -47,6 +47,9 @@ M.HAND = {
     -- core story 33 (0.15.0, UI-15): game-style rows (row.create's like, label, help, control; ui.row is a module, so
     -- its new functions by hand) and the game's own picker (choice.create's widget = "game")
     "ui.row.like", "ui.row.setLabel", "ui.row.setHelp", "ui.choice.game",
+    -- core story 38 (0.16.0, UI-16): drag to reorder rows in a list (list.create's reorderable and onReorder, row.create's
+    -- locked; ui.row is a module, so its new setLocked by hand)
+    "ui.list.reorderable", "ui.row.setLocked",
 }
 
 -- The UI part of the api table: path -> { module, function } (client.lua builds api.ui from this).
@@ -79,6 +82,7 @@ M.UI = {
     { "row.create", "row", "create" }, { "row.setStyle", "row", "setStyle" }, { "row.setVisible", "row", "setVisible" },
     { "row.remove", "row", "remove" }, { "row.isShown", "row", "isShown" },
     { "row.setLabel", "row", "setLabel" }, { "row.setHelp", "row", "setHelp" }, -- core story 33 (0.15.0): game-style rows
+    { "row.setLocked", "row", "setLocked" }, -- core story 38 (0.16.0): a row that can't be dragged in a reorderable list
     -- story 24 (core 0.8.0, Mod Manager CAP-2): images and icons
     { "image.create", "image", "create" }, { "image.set", "image", "set" }, { "image.setVisible", "image", "setVisible" },
     { "image.remove", "image", "remove" }, { "image.isShown", "image", "isShown" }, { "image.setTooltip", "image", "setTooltip" },

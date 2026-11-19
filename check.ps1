@@ -851,6 +851,45 @@ $menuChecks = $started + @(
     "\[$T\] OK KHOVER the band followed the mouse \(hooked true, hovers [1-9]"
     "\[$T\] OK KBEND every window closed"
     "!\[$T\] WARN .*(window key|focus look|focus face|focus highlight|restoring its own|focus window|focus tick|focusing it failed|focused row|keyboard focus|input mode|clicked element|card|re-fit|BACK button|NavHandled|window rows|hover handling|focus chip|list row)"
+    # Core story 38 (UI-16): window RO, drag to reorder. The ro-* group (below), then the real mouse (r3 between r5 and
+    # r6, the locked barrier, three cancels, auto-scroll) and real keys (Enter held on r6's gear: Down, Down, release;
+    # Enter, Down, Escape; Up at the segment top; a hover during a carry; a short Enter).
+    "\[$T\] OK ROCASES ran 19 cases"
+    "\[$T\] OK ROREADY hooks registered \(drag true, drop true, key release true\)"
+    "\[$T\] OK ROORDER start 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16"
+    "\[$T\] OK RODRAG r3 dragged: source opacity 0\.40, line visible 3, the lift WBP_$($N)Lift_C"
+    "\[$T\] OK ROORDER mouse r3 between r5 and r6: 1 2 4 5 3 6 7 8 9 10 11 12 13 14 15 16"
+    "\[$T\] OK ROCB mouse 1 onReorder call\(s\) \(want 1\), last ids 1 2 4 5 3 6 "
+    "\[$T\] OK ROCB inside a dependent callback"
+    "#1|\[$T\] ROCB 1 1 2 4 5 3 6 7 8 9 10 11 12 13 14 15 16 inDispatch=[1-9]\d* same-handle=true"
+    "\[$T\] OK RODROP the line hidden, r3 opaque again"
+    "\[$T\] OK ROFOCUS RO ro\.r3 "
+    "\[$T\] OK ROORDER barrier r4 at index 2, under the locked r1: 1 4 2 5 3 6 "
+    "\[$T\] OK ROCB barrier 2 onReorder"
+    "\[$T\] OK ROCANCEL escape: "
+    "\[$T\] OK ROCANCEL right: "
+    "\[$T\] OK ROCANCEL outside: "
+    "\[$T\] OK ROSCROLL the offset grew "
+    "\[$T\] OK ROORDER scroll r2 dropped at index "
+    "\[$T\] OK ROCB scroll 3 onReorder"
+    "\[$T\] OK ROFOCUS RO ro\.g6 "
+    "\[$T\] OK ROFOCUS RO ro\.r6 carried"
+    "\[$T\] OK ROCARRY r6 lifted 8\.0 units in the carry band"
+    "\[$T\] OK ROORDER carry down 1: "
+    "\[$T\] OK ROORDER carry down 2: "
+    "\[$T\] OK RODROP keys: dropped, the gear not clicked"
+    "\[$T\] OK ROORDER carry r6 two down: "
+    "\[$T\] OK ROCB carry 4 onReorder"
+    "#4|\[$T\] ROCB \d+ "
+    "\[$T\] OK ROCANCEL keys: Escape restores "
+    "\[$T\] OK ROCB after escape 4 onReorder"
+    "\[$T\] OK ROEDGE Up at the segment top: handled, nothing moves"
+    "\[$T\] OK ROCB edge 4 onReorder"
+    "\[$T\] OK ROHOVER a hover during a carry is ignored"
+    "\[$T\] OK ROTAP a short Enter clicks the gear once"
+    "\[$T\] OK ROSTATS "
+    "\[$T\] OK ROEND every window closed"
+    "!\[$T\] WARN .*(drag handling|reorder handling|row drag|insertion line|lifted copy|carry look|carry focus|picking a row up|reorder|drag flags|row focusable|onReorder|key release)"
     "\[$T\] END result=PASS"
 )
 # Core story 24: the ic-* group, on window IC (menu3), and every new function off the game thread.
@@ -890,6 +929,13 @@ foreach ($id in 'gap-compact', 'gap-default', 'gap-row-compact', 'gap-tiny', 'ga
                 'nav-dir-99', 'nav-act-neg', 'nav-handled', 'nav-foreign', 'nav-stale', 'nav-throwing-tag', 'nav-closed', 'nofocus', 'nofocus-keys',
                 'has-focus', 'nav-offthread') {
     $menuChecks += "\[$T\] OK CASE menu3\.kb-$id "
+}
+# Core story 38: the ro-* group, on window RO (menu3): the new keys and row.setLocked, hook noise, off the game thread,
+# the feature names.
+foreach ($id in 'reorderable-str', 'onreorder-str', 'onreorder-noflag', 'list-key', 'locked-str', 'row-key', 'setlocked-args', 'setlocked-str',
+                'setlocked-list', 'setlocked-forged', 'setlocked-ok', 'setlocked-removed', 'has', 'drag-foreign', 'drag-stale', 'drop-foreign',
+                'navup-foreign', 'off-setlocked', 'off-dragstart') {
+    $menuChecks += "\[$T\] OK CASE menu3\.ro-$id "
 }
 # Core story 31 (UI-13, core 0.13.0): core.ui.game's bad-input group, in both worlds and off the game thread.
 $gameCaseIds = @('watch-nope', 'watch-num', 'watch-nil', 'watch-menu', 'watch-case', 'isopen-menu', 'isopen-nil', 'isopen-table', 'isopen-two',

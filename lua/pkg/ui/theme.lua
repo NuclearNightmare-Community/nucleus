@@ -86,6 +86,13 @@ M.game = {
         CinematicWearColor = { r = 0.16, g = 0.02, b = 0.01, a = 1 },
     },
     focusRowTint = { r = 1, g = 1, b = 1, a = 1 },         -- the workspace's docs/game-ui-components.md 3.3: hovered M_NN_CinematicSelection, tint alpha 1.0
+    -- Core story 38 (0.16.0): drag to reorder. accent: the insertion line; carryRowColors: a row picked up with the
+    -- keyboard or gamepad (a third instance of the selection material, hotter than the band, in focusRowTint).
+    accent = { r = 0.96, g = 0.97, b = 0.94, a = 1 },
+    carryRowColors = {
+        CinematicBaseColor = { r = 0.30, g = 0.06, b = 0.02, a = 1 },
+        CinematicWearColor = { r = 0.45, g = 0.10, b = 0.03, a = 1 },
+    },
     -- Core story 39 (0.15.4): the focus chip. While the keyboard or gamepad owns the focus, the focused control inside a
     -- row draws its own face (button, checkbox) or background (choice, slider) with a second instance of the selection
     -- material, its fill clearly brighter than the band (focusChipColors, in focusChipTint), its icon or text in
@@ -121,6 +128,13 @@ M.game = {
     pickerWidget = { pkg = "/Game/Graphics/MainMenu/Components/MultipleSelectBox", name = "MultipleSelectBox_C" },
     likeFallback = { labelPad = { l = 12, t = 4, r = 12, b = 4 }, helpPad = { l = 8, t = 0, r = 12, b = 0 } },
 }
+
+-- Core story 38 (0.16.0): drag to reorder rows in a list. edge: the auto-scroll zone at a list's top and bottom (units);
+-- speed: the auto-scroll speed at the edge itself (units per second, proportional to the pointer's depth in the zone);
+-- lineH: the insertion line's height; lift: a carried row's render translation to the right; sourceOpacity: a dragged
+-- row's opacity while its copy follows the pointer; holdMs: how long A or Enter is held on a row to pick it up (a
+-- shorter press is a tap: the control's own action); loopMs: the drag and hold loop's period.
+M.reorder = { edge = 32, speed = 600, lineH = 2, lift = 8, sourceOpacity = 0.4, holdMs = 400, loopMs = 16 }
 
 -- Story 24 (core 0.8.0, Mod Manager CAP-2): images and icons. Core's own icons are white on transparent 128x128
 -- textures in core's pak (/Game/Mods/<Core>/Icons/T_<Key in CamelCase>), tinted at runtime; key -> asset name.

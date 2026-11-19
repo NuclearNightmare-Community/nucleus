@@ -141,7 +141,8 @@ end
 -- change or a garbage collection that took it while no row showed it.
 -- Unnamed (OptionalName None: a reused name collides) and transient. w: the world context (the row's widget).
 -- Core story 39 (0.15.4): the focus chip is a second such instance (theme.game.focusChipColors), under the same rules,
--- with its own handle and failed flag (A.focusChipMaterial).
+-- with its own handle and failed flag (A.focusChipMaterial). Core story 38 (0.16.0): a carried row's look is a third
+-- (theme.game.carryRowColors, A.carryRowMaterial).
 local KML = "/Script/Engine.Default__KismetMaterialLibrary"
 local MID_TRANSIENT = 1 -- EMIDCreationFlags::Transient: the transient package is its outer
 local mids = {
@@ -149,6 +150,9 @@ local mids = {
         what = "the focused row's strong look", after = "focused rows show the plain selection" },
     chip = { colors = "focusChipColors", key = "asset:focus chip",
         what = "the focus chip", after = "focused controls show a solid focus chip" },
+    -- Core story 38 (0.16.0): a row picked up with the keyboard or gamepad (theme.game.carryRowColors)
+    carry = { colors = "carryRowColors", key = "asset:carry row",
+        what = "the carried row's look", after = "carried rows show the focused row's band" },
 }
 local function instance(slot, w, cachedOnly)
     if slot.ref then
@@ -186,6 +190,7 @@ local function instance(slot, w, cachedOnly)
 end
 function A.focusRowMaterial(w, cachedOnly) return instance(mids.row, w, cachedOnly) end
 function A.focusChipMaterial(w, cachedOnly) return instance(mids.chip, w, cachedOnly) end
+function A.carryRowMaterial(w, cachedOnly) return instance(mids.carry, w, cachedOnly) end
 
 -- Loads every game-look asset (fonts and materials), the engine font and the textures in use; extra(), when set,
 -- loads more (text.lua: core's widget classes in use). Never raises.

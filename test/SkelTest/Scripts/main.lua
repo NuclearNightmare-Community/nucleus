@@ -5375,6 +5375,374 @@ local function buildMenu()
         end)
     end
     MM.kbSteps()
+    -- ---- core story 38 (UI-16): drag to reorder rows, over the third menu. The ro-* bad-input group (the new keys and
+    -- row.setLocked, hook noise, off the game thread, the feature names), then window RO: a reorderable list of 16 rows
+    -- (a text, a gear on every even row; r1 locked) about 8 rows high. With the real mouse (press, glide, release,
+    -- rrelease requests): r3 dragged between r5 and r6 (shots ro-drag, ro-drop), the locked barrier, cancels by Escape,
+    -- a right release and a release outside, and auto-scroll in the bottom edge zone (ROSCROLL). With real keys: Enter
+    -- held on r6's gear picks the row up (shot ro-carry), Down, Down, then the release drops it (one onReorder); Enter,
+    -- Down, Escape restores; Up at the segment top does nothing; a hover during a carry is ignored; a short Enter is
+    -- the gear's own click. Lines ROCASES, ROFOCUS, ROORDER, ROCB, ROCANCEL, ROSCROLL, ROEDGE, ROHOVER, ROTAP, ROSTATS.
+    -- Hung off MM (main.lua is at Lua's 200-locals limit).
+    MM.reorderSteps = function()
+        local R = { cb = 0, cases = 0, n = {}, ids = nil }
+        local LO = CORE:lower()
+        local UIP = LO .. ".ui"
+        local FO = require(LO .. ".ui.focus")
+        local RM = require(LO .. ".ui.reorder")
+        local CC = require(LO .. ".ui.common")
+        local SCR = require(LO .. ".ui.screen")
+        local TH = require(LO .. ".ui.theme")
+        local NROWS = 16
+        local function f(fn, ...) local a = table.pack(...) return function() return fn(table.unpack(a, 1, a.n)) end end
+        local function rcase(id, desc, fn, expect) R.cases = R.cases + 1; case("menu3.ro-" .. id, desc, fn, expect) end
+        local function hit(id) return function() R.n[id] = (R.n[id] or 0) + 1 say("ROCLICK %s %d", id, R.n[id]) end end
+        local function order()
+            local out = {}
+            for i, ch in ipairs(CC.els["ro.list"].children) do out[i] = (ch.id:gsub("^ro%.r", "")) end
+            return table.concat(out, " ")
+        end
+        local function listW() local _, c = screenWith("ro.title") return childTagged(c, "ro.list") end
+        local function rowW(i) return childTagged(prop(listW(), "VBox"), "ro.r" .. i) end
+        local function rowPoint(i) return function() local r = absR(rowW(i)) if r and r.r > r.l then return math.floor(r.l + 24), math.floor((r.t + r.b) / 2) end end end
+        local function between(i, j)
+            return function()
+                local a, b = absR(rowW(i)), absR(rowW(j))
+                if a and b and a.r > a.l then return math.floor(a.l + 24), math.floor((a.b + b.t) / 2) end
+            end
+        end
+        -- The point between the rows at display index i and i + 1 (whichever rows they are now).
+        local function gapAt(i)
+            return function()
+                local ch = CC.els["ro.list"].children
+                local a = ch[i] and absR(childTagged(prop(listW(), "VBox"), ch[i].id))
+                local b = ch[i + 1] and absR(childTagged(prop(listW(), "VBox"), ch[i + 1].id))
+                if a and b and a.r > a.l then return math.floor(a.l + 24), math.floor((a.b + b.t) / 2) end
+            end
+        end
+        local function offset() return try(function() return listW().Scroll:GetScrollOffset() end) or -1 end
+        local function lineVis() return try(function() return listW().Line:GetVisibility() end) or -1 end
+        -- A mouse request (press, glide, release, rrelease) at a point, then a pause.
+        local function mouse(cmd, label, finder, wait)
+            step("ro: " .. label, function()
+                local x, y = finder()
+                if not check(x ~= nil, "ROPOINT %s has a point", label) then return end
+                say("ROMOUSE %s %s at (%d,%d)", cmd, label, x, y)
+                return request(string.format("%s %d %d", cmd, x, y)), 40, cmd .. " " .. label
+            end)
+            step("ro: settle " .. label, function() return msAfter(wait or 0.8), 4 end)
+        end
+        -- A key request (key K, keydown K, keyup K), then (wait s later) the checks.
+        local function rkey(cmd, label, wait, after)
+            step("ro: " .. label, function()
+                local done = request(cmd)
+                local t
+                return function()
+                    if not done() then return false end
+                    t = t or os.clock() + (wait or 0.8)
+                    if os.clock() < t then return false end
+                    if after then
+                        local ok, err = pcall(after)
+                        if not ok then check(false, "ROSTEP %s threw: %s", label, firstLine(err)) end
+                    end
+                    return true
+                end, 30, cmd
+            end)
+        end
+        -- ROFOCUS: the model's element is want (a control or a grip row) and its target holds keyboard focus.
+        local function rofocus(want)
+            local id = SCR.stats().focus
+            local el = CC.els[want]
+            local t = el and FO._targetOf(el)
+            local has = t ~= nil and FO._hasFocus(t)
+            check(id == want and has, "ROFOCUS RO %s (model %s, HasKeyboardFocus %s)", want, tostring(id), bool(has))
+        end
+        local function focusOn(id)
+            step("ro: focus " .. id, function()
+                FO.used(CC.els[id], true) -- not a click: the focus model and keyboard focus move there
+                FO._input("keys")
+                return msAfter(0.5), 3
+            end)
+        end
+        local function cbCheck(label, n, want)
+            check(R.cb == n and (want == nil or R.ids == want), "ROCB %s %d onReorder call(s) (want %d), last ids %s", label, R.cb, n, tostring(R.ids))
+        end
+
+        -- ---- the ro-* group
+        step("ro: cases", function()
+            local LC, RC, SLK = UIP .. ".list.create: ", UIP .. ".row.create: ", UIP .. ".row.setLocked: "
+            R.W = UI.screen.open{ id = "RO", close = true }
+            UI.text.create{ id = "ro.title", text = "SKEL REORDER", place = { screen = R.W, corner = "top-left" }, style = { font = "title" } }
+            local P = { screen = R.W, corner = "top-right" }
+            rcase("reorderable-str", "ui.list.create{ reorderable = 'yes' }", f(UI.list.create, { id = "ro.x1", place = P, size = { w = 100, h = 60 }, reorderable = "yes" }),
+                E.err(LC .. "reorderable must be a boolean or nil, got 'yes'"))
+            rcase("onreorder-str", "ui.list.create{ reorderable = true, onReorder = 'f' }", f(UI.list.create, { id = "ro.x1", place = P, size = { w = 100, h = 60 }, reorderable = true, onReorder = "f" }),
+                E.err(LC .. "onReorder must be a function or nil, got 'f'"))
+            rcase("onreorder-noflag", "ui.list.create{ onReorder = fn }", f(UI.list.create, { id = "ro.x1", place = P, size = { w = 100, h = 60 }, onReorder = function() end }),
+                E.err(LC .. "onReorder needs reorderable = true"))
+            rcase("list-key", "ui.list.create{ order = 1 }", f(UI.list.create, { id = "ro.x1", place = P, size = { w = 100, h = 60 }, order = 1 }),
+                E.err(LC .. "unknown key 'order' (valid: gap, id, onReorder, place, reorderable, size, style)"))
+            local L = UI.list.create{ id = "ro.x2", place = P, size = { w = 100, h = 60 }, reorderable = true }
+            rcase("locked-str", "ui.row.create{ locked = 'no' }", f(UI.row.create, { id = "ro.x3", place = { list = L }, locked = "no" }),
+                E.err(RC .. "locked must be a boolean or nil, got 'no'"))
+            rcase("row-key", "ui.row.create{ nope = 1 }", f(UI.row.create, { id = "ro.x3", place = { list = L }, nope = 1 }),
+                E.err(RC .. "unknown key 'nope' (valid: control, gap, help, id, label, like, locked, place, style)"))
+            local r = UI.row.create{ id = "ro.x4", place = { list = L } }
+            rcase("setlocked-args", "ui.row.setLocked(h)", f(UI.row.setLocked, r), E.err(SLK .. "expected 2 arguments (handle, locked), got 1"))
+            rcase("setlocked-str", "ui.row.setLocked(h, 'yes')", f(UI.row.setLocked, r, "yes"), E.err(SLK .. "locked must be a boolean, got 'yes'"))
+            rcase("setlocked-list", "ui.row.setLocked(<list>, true)", f(UI.row.setLocked, L, true), E.err(SLK .. "not a row handle ('ro.x2' is a list)"))
+            rcase("setlocked-forged", "ui.row.setLocked({}, true)", f(UI.row.setLocked, {}, true), E.err(SLK .. "not a row handle"))
+            rcase("setlocked-ok", "ui.row.setLocked(h, true) [control]", function()
+                UI.row.setLocked(r, true)
+                local a = CC.els["ro.x4"].locked
+                UI.row.setLocked(r, false)
+                return a, CC.els["ro.x4"].locked
+            end, E.ret("true, false", function(x) return x[1] == true and x[2] == false end))
+            UI.row.remove(r)
+            rcase("setlocked-removed", "ui.row.setLocked(<removed>, true)", f(UI.row.setLocked, r, true), E.err(UIP .. ".row: handle 'ro.x4' was removed"))
+            UI.list.remove(L)
+            rcase("has", "core.has('ui.list.reorderable'), ('ui.row.setLocked')", function()
+                return core.has("ui.list.reorderable"), core.has("ui.row.setLocked")
+            end, E.ret("true, true", function(x) return x[1] == true and x[2] == true end))
+            -- hook noise, through the hooks' own functions
+            local function foreignRow(tag)
+                return { DragOp = { IsValid = function() return true end, GetAddress = function() return 7 end }, DragOk = false,
+                    IsValid = function() return true end, GetAddress = function() return 3 end,
+                    CoreTag = { ToString = function() return tag end } }
+            end
+            rcase("drag-foreign", "<Core>_OnDragStart on another mod's row", function()
+                local w = foreignRow(LO .. ":OtherMod:ro.r3")
+                local before = RM.stats().ignored
+                RM._onDragStart({ get = function() return w end })
+                return w.DragOk, RM.stats().ignored > before, RM.stats().faults
+            end, E.ret("false, ignored, no fault", function(x) return x[1] == false and x[2] == true and x[3] == 0 end))
+            rcase("drag-stale", "<Core>_OnDragStart on a stale widget tagged as this mod's row", function()
+                local w = foreignRow(LO .. ":" .. CORE .. "SkelTest:ro.title")
+                local before = RM.stats().ignored
+                RM._onDragStart({ get = function() return w end })
+                return w.DragOk, RM.stats().ignored > before, RM.stats().faults
+            end, E.ret("false, ignored, no fault", function(x) return x[1] == false and x[2] == true and x[3] == 0 end))
+            rcase("drop-foreign", "<Core>_OnDrop on another mod's list", function()
+                local w = foreignRow(LO .. ":OtherMod:ro.list")
+                local before = RM.stats().ignored
+                RM._onDrop({ get = function() return w end })
+                return RM.stats().ignored > before, RM.stats().faults, RM.stats().drops
+            end, E.ret("ignored, no fault, no drop", function(x) return x[1] == true and x[2] == 0 and x[3] == 0 end))
+            rcase("navup-foreign", "<Core>_OnNavUp on another mod's window", function()
+                local w = foreignRow(LO .. ":OtherMod:#screen:RO")
+                local before = FO.stats().ignored
+                FO._onNavUp({ get = function() return w end })
+                return FO.stats().ignored > before, FO.stats().faults
+            end, E.ret("ignored, no fault", function(x) return x[1] == true and x[2] == 0 end))
+            return msAfter(0.5), 3
+        end)
+        step("ro: off-thread", function()
+            local done = false
+            LoopAsync(10, function()
+                local ok, err = pcall(function()
+                    R.cases = R.cases + 1
+                    case("menu3.ro-off-setlocked", "ui.row.setLocked [off thread]", f(UI.row.setLocked, {}, true), E.err(UIP .. ".row.setLocked called off the game thread"))
+                    R.cases = R.cases + 1
+                    case("menu3.ro-off-dragstart", "<Core>_OnDragStart [off thread]", function()
+                        local before = RM.stats().ignored
+                        RM._onDragStart({ get = function() return { IsValid = function() return true end } end })
+                        return RM.stats().ignored > before, RM.stats().faults
+                    end, E.ret("ignored, no fault", function(x) return x[1] == true and x[2] == 0 end))
+                end)
+                if not ok then check(false, "CASE menu3.ro-off block threw: %s", firstLine(err)) end
+                done = true
+                return true
+            end)
+            return function() return done end, 10, "ro off-thread cases"
+        end)
+        step("ro: cases done", function() check(true, "ROCASES ran %d cases", R.cases) end)
+
+        -- ---- window RO
+        step("ro: window", function()
+            R.L = UI.list.create{ id = "ro.list", place = { screen = R.W, corner = "top-left" }, size = { w = 640, h = 330 }, reorderable = true,
+                onReorder = function(h, ids)
+                    R.cb = R.cb + 1
+                    for i, id in ipairs(ids) do ids[i] = (id:gsub("^ro%.r", "")) end
+                    R.ids = table.concat(ids, " ")
+                    R.inDispatch = CC.inDispatch
+                    say("ROCB %d %s inDispatch=%d same-handle=%s", R.cb, R.ids, CC.inDispatch, bool(rawequal(h, R.L)))
+                end }
+            for i = 1, NROWS do
+                local r = UI.row.create{ id = "ro.r" .. i, place = { list = R.L }, locked = i == 1 or nil }
+                UI.text.create{ id = "ro.n" .. i, text = (i == 1 and "SKEL LOCKED ROW 1" or ("SKEL REORDER ROW " .. i)), place = { row = r, fill = 4 } }
+                if i % 2 == 0 then
+                    UI.button.create{ id = "ro.g" .. i, icon = { icon = "gear" }, iconSize = 28, dimmed = true, place = { row = r }, onClick = hit("ro.g" .. i) }
+                end
+            end
+            return msAfter(1.5), 4 -- the UI tick: the rows' Draggable flags, the hooks, the warm lift and carry band
+        end)
+        step("ro: ready", function()
+            local st = RM.stats()
+            check(st.dragHookOk and st.dropHookOk and FO.stats().upOk and try(function() return rowW(3).Draggable end) == true
+                and try(function() return rowW(1).Draggable end) == false,
+                "ROREADY hooks registered (drag %s, drop %s, key release %s); r3 Draggable, the locked r1 not", bool(st.dragHookOk), bool(st.dropHookOk), bool(FO.stats().upOk))
+            check(order() == "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16", "ROORDER start %s", order())
+        end)
+        -- Mouse: r3 between r5 and r6
+        mouse("press", "press r3", rowPoint(3), 0.5)
+        mouse("glide", "glide r3 to r5|r6", between(5, 6), 0.8)
+        step("ro: mid-drag", function()
+            local op = try(function() return rowW(3).DragOp end)
+            local vis = try(function() return op.DefaultDragVisual end)
+            check(RM.stats().dragging and math.abs((try(function() return rowW(3):GetRenderOpacity() end) or 1) - TH.reorder.sourceOpacity) < 0.01
+                and lineVis() == 3 and cname(vis) == "WBP_" .. CORE .. "Lift_C",
+                "RODRAG r3 dragged: source opacity %.2f, line visible %s, the lift %s", try(function() return rowW(3):GetRenderOpacity() end) or -1, tostring(lineVis()), cname(vis))
+        end)
+        shot("ro-drag")
+        mouse("release", "release r3", between(5, 6), 1.0)
+        step("ro: dropped", function()
+            check(order() == "1 2 4 5 3 6 7 8 9 10 11 12 13 14 15 16", "ROORDER mouse r3 between r5 and r6: %s", order())
+            cbCheck("mouse", 1, order())
+            check(R.inDispatch and R.inDispatch > 0, "ROCB inside a dependent callback (inDispatch %s)", tostring(R.inDispatch))
+            check(not RM.stats().dragging and lineVis() == 1 and math.abs((try(function() return rowW(3):GetRenderOpacity() end) or 0) - 1) < 0.01,
+                "RODROP the line hidden, r3 opaque again")
+            rofocus("ro.r3")
+        end)
+        shot("ro-drop")
+        -- The locked barrier: r4 dragged above r1 lands at index 2
+        mouse("press", "press r4", rowPoint(4), 0.5)
+        mouse("glide", "glide r4 above r1", function() local r = absR(rowW(1)) if r then return math.floor(r.l + 24), math.floor(r.t + 3) end end, 0.8)
+        mouse("release", "release r4", function() local r = absR(rowW(1)) if r then return math.floor(r.l + 24), math.floor(r.t + 3) end end, 1.0)
+        step("ro: barrier", function()
+            check(order() == "1 4 2 5 3 6 7 8 9 10 11 12 13 14 15 16", "ROORDER barrier r4 at index 2, under the locked r1: %s", order())
+            cbCheck("barrier", 2, order())
+        end)
+        -- Cancels: Escape, a right release, a release outside
+        for _, how in ipairs({ "escape", "right", "outside" }) do
+            step("ro: before " .. how, function() R.before, R.cbBefore = order(), R.cb end)
+            mouse("press", "press r6 " .. how, rowPoint(6), 0.5)
+            mouse("glide", "glide r6 " .. how, gapAt(4), 0.8)
+            if how == "escape" then
+                rkey("key ESCAPE", "escape the drag", 0.8)
+                mouse("release", "release after escape", gapAt(4), 0.8)
+            elseif how == "right" then
+                mouse("rrelease", "right release r6", gapAt(4), 0.8)
+                mouse("release", "release after right", gapAt(4), 0.8)
+            else
+                mouse("glide", "glide r6 outside", widgetPoint(function() local _, c = screenWith("ro.title") return childTagged(c, "ro.title") end), 0.8)
+                mouse("release", "release outside", widgetPoint(function() local _, c = screenWith("ro.title") return childTagged(c, "ro.title") end), 0.8)
+            end
+            step("ro: cancelled " .. how, function()
+                check(order() == R.before and R.cb == R.cbBefore and not RM.stats().dragging and lineVis() == 1
+                    and math.abs((try(function() return rowW(6):GetRenderOpacity() end) or 0) - 1) < 0.01 and UI.screen.isOpen(R.W),
+                    "ROCANCEL %s: order %s unchanged, %d callback(s), the line hidden, r6 opaque, the window open", how, order(), R.cb)
+            end)
+        end
+        -- Auto-scroll: r2 held in the bottom edge zone, then dropped there (a slot off-screen at the press)
+        step("ro: before scroll", function()
+            R.off0 = offset()
+            local lr = absR(listW())
+            R.seen = {}
+            for i = 1, NROWS do
+                local rr = absR(rowW(i))
+                if rr and lr and rr.b > lr.t and rr.t < lr.b then R.seen[i] = true end
+            end
+        end)
+        mouse("press", "press r2", rowPoint(2), 0.5)
+        local function bottomZone() local lr = absR(listW()) if lr then return math.floor(lr.l + 24), math.floor(lr.b - 10 * scale(menu())) end end
+        mouse("glide", "glide r2 to the bottom edge", bottomZone, 1.5)
+        step("ro: scrolled", function()
+            local o1 = offset()
+            local e = try(function() return listW().Scroll:GetScrollOffsetOfEnd() end) or -1
+            check(o1 > R.off0 and RM.stats().scrolled > 0, "ROSCROLL the offset grew %.1f -> %.1f (end %.1f) with the pointer held in the bottom zone", R.off0, o1, e)
+        end)
+        mouse("release", "release r2 at the bottom", bottomZone, 1.0)
+        step("ro: scroll dropped", function()
+            local ids = {}
+            for i, ch in ipairs(CC.els["ro.list"].children) do ids[i] = tonumber((ch.id:gsub("^ro%.r", ""))) end
+            local at
+            for i, n in ipairs(ids) do if n == 2 then at = i end end
+            local prev = at and ids[at - 1]
+            check(at and at > 9 and prev and not R.seen[prev], "ROORDER scroll r2 dropped at index %s after r%s, off-screen at the press: %s", tostring(at), tostring(prev), order())
+            cbCheck("scroll", 3, order())
+            pcall(function() listW().Scroll:SetScrollOffset(0) end)
+        end)
+        -- Keys: Enter held on r6's gear picks r6 up; Down, Down; the release drops it (one onReorder; no click)
+        focusOn("ro.g6")
+        step("ro: focus g6", function()
+            rofocus("ro.g6")
+            R.before, R.cbBefore, R.clicks = order(), R.cb, R.n["ro.g6"] or 0
+        end)
+        rkey("keydown ENTER", "hold enter on g6", 1.2, function()
+            local c = FO._carry()
+            local rw = rowW(6)
+            local tx = try(function() return rw.RenderTransform.Translation.X end)
+            local bg = try(function() return rw.Background.Background.ResourceObject end)
+            local base = try(function() return bg:K2_GetVectorParameterValue(FName("CinematicBaseColor")) end)
+            local want = TH.game.carryRowColors.CinematicBaseColor
+            check(c ~= nil and c.rowId == "ro.r6" and try(function() return rw:HasKeyboardFocus() end) == true,
+                "ROFOCUS RO ro.r6 carried: the row picked up and its own widget focused (carry %s)", tostring(c and c.rowId))
+            check(type(tx) == "number" and math.abs(tx - TH.reorder.lift) < 0.01 and base and math.abs(base.R - want.r) < 0.002 and math.abs(base.G - want.g) < 0.002,
+                "ROCARRY r6 lifted %s units in the carry band (base %s,%s)", tostring(tx), tostring(base and base.R), tostring(base and base.G))
+        end)
+        shot("ro-carry")
+        rkey("key DOWN", "carry down 1", 0.8, function() check(order():find("7 6 8", 1, true) ~= nil and R.cb == R.cbBefore, "ROORDER carry down 1: %s (no callback yet)", order()) end)
+        rkey("key DOWN", "carry down 2", 0.8, function() check(order():find("7 8 6", 1, true) ~= nil, "ROORDER carry down 2: %s", order()) end)
+        rkey("keyup ENTER", "release enter", 1.0, function()
+            check(FO._carry() == nil and (R.n["ro.g6"] or 0) == R.clicks, "RODROP keys: dropped, the gear not clicked (%d)", R.n["ro.g6"] or 0)
+            check(order():find("7 8 6", 1, true) ~= nil, "ROORDER carry r6 two down: %s", order())
+            cbCheck("carry", R.cbBefore + 1, order())
+            rofocus("ro.g6")
+        end)
+        -- Enter, Down, Escape: the pickup order back, no callback, the window open
+        rkey("keydown ENTER", "hold enter again", 1.2, function()
+            R.before, R.cbBefore = order(), R.cb
+            check(FO._carry() ~= nil, "ROCARRY r6 picked up again")
+        end)
+        rkey("key DOWN", "carry down 3", 0.8, function() check(order() ~= R.before, "ROORDER carry down 3: %s", order()) end)
+        rkey("key ESCAPE", "carry escape", 0.8, function()
+            check(FO._carry() == nil and order() == R.before and R.cb == R.cbBefore and UI.screen.isOpen(R.W),
+                "ROCANCEL keys: Escape restores %s, no callback, the window open", order())
+        end)
+        rkey("keyup ENTER", "release after escape", 0.8, function() cbCheck("after escape", R.cbBefore) end)
+        -- The segment's top: the first movable row (index 2, under the locked r1) can't go up
+        step("ro: focus top", function()
+            local top = CC.els["ro.list"].children[2]
+            local n = top.id:gsub("^ro%.r", "")
+            R.top = CC.els["ro.g" .. n] and ("ro.g" .. n) or top.id
+            FO.used(CC.els[R.top], true)
+            FO._input("keys")
+            R.before, R.cbBefore, R.edges = order(), R.cb, FO.stats().carryEdges
+            return msAfter(0.5), 3
+        end)
+        rkey("keydown ENTER", "hold enter top", 1.2, function() check(FO._carry() ~= nil, "ROCARRY the top row picked up") end)
+        rkey("key UP", "carry up at the top", 0.8, function()
+            check(order() == R.before and FO.stats().carryEdges == R.edges + 1 and FO._carry() ~= nil, "ROEDGE Up at the segment top: handled, nothing moves (%s)", order())
+        end)
+        rkey("keyup ENTER", "release at the top", 0.8, function() cbCheck("edge", R.cbBefore) end)
+        -- A hover during a carry is ignored
+        focusOn("ro.g6")
+        rkey("keydown ENTER", "hold enter hover", 1.2, function() R.ign = FO.stats().hoverIgnored end)
+        moveTo("ro hover r10", rowPoint(10))
+        step("ro: hover ignored", function()
+            check(FO._carry() ~= nil and FO.stats().hoverIgnored > R.ign and try(function() return rowW(6):HasKeyboardFocus() end) == true,
+                "ROHOVER a hover during a carry is ignored (ignored %d -> %d), r6 keeps focus", R.ign, FO.stats().hoverIgnored)
+        end)
+        rkey("keyup ENTER", "release after hover", 0.8)
+        -- A tap: the gear's own click, no pickup
+        focusOn("ro.g6")
+        step("ro: before tap", function() R.clicks, R.cbBefore, R.pickups = R.n["ro.g6"] or 0, R.cb, FO.stats().pickups end)
+        rkey("key ENTER", "tap enter", 1.0, function()
+            check((R.n["ro.g6"] or 0) == R.clicks + 1 and FO.stats().pickups == R.pickups and FO._carry() == nil and R.cb == R.cbBefore,
+                "ROTAP a short Enter clicks the gear once (%d), no pickup", R.n["ro.g6"] or 0)
+        end)
+        moveTo("ro away", neutral)
+        step("ro: close", function()
+            local s, fs = RM.stats(), FO.stats()
+            check(s.faults == 0 and fs.faults == 0 and s.drags >= 6 and s.drops >= 3 and fs.pickups >= 4 and fs.drops >= 2,
+                "ROSTATS drags %d, drops %d, cancels %d, lifts %d, line moves %d; pickups %d, carry moves %d, drops %d, cancels %d; faults %d/%d",
+                s.drags, s.drops, s.dragCancels, s.lifts, s.lineMoves, fs.pickups, fs.carryMoves, fs.drops, fs.carryCancels, s.faults, fs.faults)
+            UI.screen.close(R.W)
+            check(#liveAll(SCREEN_SHORT) == 0, "ROEND every window closed")
+            return msAfter(0.8), 3
+        end)
+    end
+    MM.reorderSteps()
 end
 
 -- Core story 31: core.ui.game's bad-input cases and the createserver scenario (gamescreen.lua next to this file).

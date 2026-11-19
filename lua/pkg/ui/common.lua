@@ -43,9 +43,20 @@ C.ROW_SHORT = "WBP_" .. C.NAME .. "Row_C"
 C.ROW_CLASS = C.ROW_PKG .. "." .. C.ROW_SHORT
 -- Core story 36 (0.15.1): the row's OnMouseEnter override calls <Core>_OnHover on itself (focus.lua hooks it).
 C.HOVER_FN = C.ROW_CLASS .. ":" .. C.NAME .. "_OnHover"
+-- Core story 38 (0.16.0): drag to reorder. The row's OnDragDetected override calls <Core>_OnDragStart and its
+-- OnDragCancelled <Core>_OnDragCancel; the list's OnDrop override calls <Core>_OnDrop (reorder.lua hooks all three); the
+-- window's OnKeyUp override calls <Core>_OnNavUp (focus.lua: releasing A / Enter drops a held row). WBP_<Core>Lift is a
+-- dragged row's lifted copy (SizeBox "Box" -> Border "Background" -> HorizontalBox "HBox").
+C.DRAGSTART_FN = C.ROW_CLASS .. ":" .. C.NAME .. "_OnDragStart"
+C.DRAGCANCEL_FN = C.ROW_CLASS .. ":" .. C.NAME .. "_OnDragCancel"
+C.DROP_FN = C.LIST_CLASS .. ":" .. C.NAME .. "_OnDrop"
+C.LIFT_PKG = "/Game/Mods/" .. C.NAME .. "/WBP_" .. C.NAME .. "Lift"
+C.LIFT_SHORT = "WBP_" .. C.NAME .. "Lift_C"
+C.LIFT_CLASS = C.LIFT_PKG .. "." .. C.LIFT_SHORT
 C.SCREEN_PKG = "/Game/Mods/" .. C.NAME .. "/WBP_" .. C.NAME .. "Screen"
 C.SCREEN_SHORT = "WBP_" .. C.NAME .. "Screen_C"
 C.SCREEN_CLASS = C.SCREEN_PKG .. "." .. C.SCREEN_SHORT
+C.NAVUP_FN = C.SCREEN_CLASS .. ":" .. C.NAME .. "_OnNavUp" -- core story 38
 -- Story 24 (core 0.8.0): WBP_<Core>Image (SizeBox "Box" -> Image "Img") and core's icon textures (Icons/T_<Key>).
 C.IMAGE_PKG = "/Game/Mods/" .. C.NAME .. "/WBP_" .. C.NAME .. "Image"
 C.IMAGE_SHORT = "WBP_" .. C.NAME .. "Image_C"
@@ -234,6 +245,17 @@ function C.clickInput(id)
     if not f then return end
     local ok, err = pcall(f, id)
     if not ok then C.warnOnce("focus input", "the input mode after a click was not set: %s", (tostring(err):match("^[^\n]*"))) end
+end
+
+-- Core story 38: fn(list) run first by every change a dependent makes to a list (its order, a child added, removed,
+-- shown or hidden, a row's lock, its reorderable flag, its removal): a drag or a carry in that list is cancelled before
+-- the change (reorder.lua sets it). Never raises.
+C.onListChange = nil
+function C.listChanged(el)
+    local f = C.onListChange
+    if not f or not el then return end
+    local ok, err = pcall(f, el)
+    if not ok then C.warnOnce("reorder interrupt", "cancelling a reorder after a list change failed: %s", (tostring(err):match("^[^\n]*"))) end
 end
 
 -- One log line per key for the life of this Lua state.

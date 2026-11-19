@@ -1013,5 +1013,84 @@ ExecuteInGameThreadAfterFrames = AFTER_FRAMES
 E.removeEntry(e13)
 ok(hookCount("MainMenu_C:Construct") == 1, "pop-in: no new Construct hook (only the generic test want's)")
 
+-- ---------------------------------------------------------------- core story 38: reorderable, onReorder, locked, setLocked
+-- (a function of its own: the main chunk is at Lua's 200-locals limit)
+;(function()
+    local LC = "nucleus.ui.list.create: "
+    local RC = "nucleus.ui.row.create: "
+    local SLK = "nucleus.ui.row.setLocked: "
+    local function lc(extra)
+        return function()
+            local o = { id = "l38", place = { host = "journal", corner = "top-left" }, size = { 300, 200 } }
+            for k, v in pairs(extra) do o[k] = v end
+            return LS.create(o)
+        end
+    end
+    raises(lc({ reorderable = "yes" }), LC .. "reorderable must be a boolean or nil, got 'yes'", "38 reorderable: a string")
+    raises(lc({ reorderable = 1 }), LC .. "reorderable must be a boolean or nil, got 1", "38 reorderable: a number")
+    raises(lc({ reorderable = true, onReorder = "f" }), LC .. "onReorder must be a function or nil, got 'f'", "38 onReorder: a string")
+    raises(lc({ onReorder = function() end }), LC .. "onReorder needs reorderable = true", "38 onReorder without reorderable")
+    raises(lc({ reorderable = false, onReorder = function() end }), LC .. "onReorder needs reorderable = true", "38 onReorder with reorderable = false")
+    raises(lc({ order = true }), LC .. "unknown key 'order' (valid: gap, id, onReorder, place, reorderable, size, style)", "38 list: the valid keys list the new ones")
+    ok(C.els["l38"] == nil, "38 list: a bad create makes nothing")
+    local f = function() end
+    local l38 = lc({ reorderable = true, onReorder = f })()
+    ok(C.els["l38"].reorderable == true and C.els["l38"].onReorder == f, "38 list: reorderable and onReorder kept")
+    lc({})()
+    ok(C.els["l38"].reorderable == false and C.els["l38"].onReorder == nil, "38 list: the same-id create updates both")
+    raises(function() RS.create{ id = "r38", place = { list = l38 }, locked = "no" } end, RC .. "locked must be a boolean or nil, got 'no'", "38 locked: a string")
+    raises(function() RS.create{ id = "r38", place = { list = l38 }, nope = 1 } end, RC .. "unknown key 'nope' (valid: control, gap, help, id, label, like, locked, place, style)", "38 row: the valid keys list locked")
+    local r38 = RS.create{ id = "r38", place = { list = l38 }, locked = true }
+    ok(C.els["r38"].locked == true, "38 row: locked kept")
+    RS.create{ id = "r38", place = { list = l38 } }
+    ok(C.els["r38"].locked == false, "38 row: the same-id create updates locked")
+    local loose = RS.create{ id = "r38b", place = { host = "journal", corner = "bottom-left" }, locked = true }
+    ok(C.els["r38b"].locked == true, "38 row: any row takes locked")
+    raises(function() RS.setLocked(r38) end, SLK .. "expected 2 arguments (handle, locked), got 1", "38 setLocked: one argument")
+    raises(function() RS.setLocked(r38, true, 1) end, SLK .. "expected 2 arguments (handle, locked), got 3", "38 setLocked: three arguments")
+    raises(function() RS.setLocked(r38, "yes") end, SLK .. "locked must be a boolean, got 'yes'", "38 setLocked: a string")
+    raises(function() RS.setLocked(r38, nil) end, SLK .. "locked must be a boolean, got nil", "38 setLocked: nil")
+    raises(function() RS.setLocked("r38", true) end, SLK .. "expected a row handle, got 'r38'", "38 setLocked: not a handle")
+    raises(function() RS.setLocked(l38, true) end, SLK .. "not a row handle ('l38' is a list)", "38 setLocked: a list handle")
+    raises(function() RS.setLocked({}, true) end, SLK .. "not a row handle (use the handle that row.create returned)", "38 setLocked: a foreign table")
+    RS.setLocked(r38, true)
+    ok(C.els["r38"].locked == true, "38 setLocked(true)")
+    RS.setLocked(r38, false)
+    ok(C.els["r38"].locked == false, "38 setLocked(false)")
+    RS.remove(r38)
+    raises(function() RS.setLocked(r38, true) end, "nucleus.ui.row: handle 'r38' was removed", "38 setLocked: a removed row")
+    -- before connect and off the game thread
+    C.bound = false
+    raises(function() RS.setLocked(loose, true) end, "nucleus.ui: row.setLocked called before connect", "38 setLocked before connect")
+    C.bound = true
+    local realDeref = Nucleus_Deref
+    Nucleus_Deref = function() error("off the game thread") end
+    raises(function() RS.setLocked(loose, true) end, "nucleus.ui.row.setLocked called off the game thread", "38 setLocked off the game thread")
+    raises(function() LS.create{ id = "l38c", place = { host = "journal", corner = "top-left" }, size = { 300, 200 }, reorderable = true } end,
+        "nucleus.ui.list.create called off the game thread", "38 list.create off the game thread")
+    Nucleus_Deref = realDeref
+    RS.remove(loose)
+    LS.remove(l38)
+    -- the pure model
+    local RO = require("nucleus.ui.reorder")
+    local function r(id, o) local e = { id = id, kind = "row", visible = true, removed = false } for k, v in pairs(o or {}) do e[k] = v end return e end
+    local a, b, c, d = r("a"), r("b"), r("c"), r("d")
+    local lk = r("lk", { locked = true })
+    local t = { id = "t", kind = "text", visible = true, removed = false }
+    local g = r("g", { like = "Overlay_28" })
+    local ch = { a, lk, b, c, t, d, g }
+    local lo, hi = RO.segment(ch, 3)
+    ok(lo == 3 and hi == 4, "38 segment: between a locked row and a text", lo .. "," .. hi)
+    lo, hi = RO.segment(ch, 6)
+    ok(lo == 6 and hi == 6, "38 segment: a game-style row is fixed", lo .. "," .. hi)
+    local V, p = RO.slots(ch, 4)
+    ok(#V == 2 and p == 2, "38 slots: b and c, c second")
+    local m = RO.moved(ch, c, 0)
+    ok(m and table.concat((function() local o = {} for i, e in ipairs(m) do o[i] = e.id end return o end)(), " ") == "a lk c b t d g", "38 moved: c before b")
+    ok(RO.moved(ch, c, 3) == nil and RO.moved(ch, c, -1) == nil and RO.moved(ch, lk, 0) == nil, "38 moved: out of range, a locked row")
+    ok(RO.step(ch, a, 1) == nil and RO.step(ch, d, -1) == nil, "38 step: a row alone in its segment can't move")
+    ok(RO.movable(r("x", { visible = false })) == false and RO.movable(r("x", { removed = true })) == false, "38 movable: hidden or removed rows aren't")
+end)()
+
 print(string.format("menu_test: %d passed, %d failed", pass, failN))
 if failN > 0 then os.exit(1) end

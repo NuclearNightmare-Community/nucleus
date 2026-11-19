@@ -145,23 +145,28 @@ local function readOrder(el, list)
     return out
 end
 
--- Applies a validated order: one rebuild of the live box, or nothing when the order is the same.
+-- Applies a validated order: one rebuild of the live box, or nothing when the order is the same. Core story 38: also
+-- reorder.lua's own moves (PN._applyOrder); returns whether the order changed.
 local function applyOrder(el, newList)
     local same = true
     for i, ch in ipairs(newList) do if el.children[i] ~= ch then same = false break end end
-    if same then return end
+    if same then return false end
     el.children = newList
     local w = X._liveWidget(el)
-    if not w then return end -- pending or closed: the next attach uses the new order
+    if not w then return true end -- pending or closed: the next attach uses the new order
     local box = X._boxOf(el, w)
     if box then X._rebuildBox(el, box) end
+    return true
 end
+PN._applyOrder = applyOrder
 
 function PN.setOrder(h, list, ...)
     C.enter("panel.setOrder")
     local el = C.element(h, "panel.setOrder", "panel")
     if select("#", ...) > 0 then C.fail("%s.panel.setOrder: expected 2 arguments (handle, order), got %d", C.UI, 2 + select("#", ...)) end
-    applyOrder(el, readOrder(el, list))
+    local order = readOrder(el, list)
+    C.listChanged(el) -- core story 38: a drag or a carry in a list is cancelled first (it never calls onReorder)
+    applyOrder(el, order)
 end
 
 function PN.move(h, child, index, ...)
@@ -180,6 +185,7 @@ function PN.move(h, child, index, ...)
     for i, ch in ipairs(el.children) do list[i] = ch end
     table.remove(list, cur)
     table.insert(list, index, cel)
+    C.listChanged(el) -- core story 38
     applyOrder(el, list)
 end
 

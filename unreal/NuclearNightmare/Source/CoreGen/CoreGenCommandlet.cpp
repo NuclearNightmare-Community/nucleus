@@ -1,6 +1,7 @@
 #include "CoreGenCommandlet.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "Blueprint/DragDropOperation.h"
 #include "Blueprint/SlateBlueprintLibrary.h"
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetBlueprintGeneratedClass.h"
@@ -748,10 +749,12 @@ namespace
 	 * (the focused Button) answers a navigation key with Handled plus Slate's own navigation request, so nothing bubbles
 	 * to the window. The preview pass tunnels from the window down to the focused widget first; Lua leaves a key it
 	 * doesn't handle (Accept on a Button, any key while a text box has focus) to the focused widget.
+	 * Core story 38: the same graph as the OnKeyUp override (Override), calling <Core>_OnNavUp: a key's release that no
+	 * focused widget handled (a Button handles its own Accept release) bubbles to the window; Lua drops a held row there.
 	 */
-	bool AddKeyDown(UWidgetBlueprint* WBP, FName NavFn)
+	bool AddKeyDown(UWidgetBlueprint* WBP, FName NavFn, FName Override = TEXT("OnPreviewKeyDown"))
 	{
-		UEdGraph* Gr = FBlueprintEditorUtils::CreateNewGraph(WBP, TEXT("OnPreviewKeyDown"), UEdGraph::StaticClass(), UEdGraphSchema_K2::StaticClass());
+		UEdGraph* Gr = FBlueprintEditorUtils::CreateNewGraph(WBP, Override, UEdGraph::StaticClass(), UEdGraphSchema_K2::StaticClass());
 		FBlueprintEditorUtils::AddFunctionGraph<UClass>(WBP, Gr, /*bIsUserCreated*/ false, UUserWidget::StaticClass());
 		TArray<UK2Node_FunctionEntry*> Entries;
 		Gr->GetNodesOfClass(Entries);
@@ -759,7 +762,7 @@ namespace
 		Gr->GetNodesOfClass(Results);
 		if (Entries.Num() != 1 || Results.Num() != 1)
 		{
-			UE_LOG(LogCoreGen, Error, TEXT("SCREEN: the OnPreviewKeyDown override has %d entry and %d result nodes (want 1 and 1)"), Entries.Num(), Results.Num());
+			UE_LOG(LogCoreGen, Error, TEXT("SCREEN: the %s override has %d entry and %d result nodes (want 1 and 1)"), *Override.ToString(), Entries.Num(), Results.Num());
 			return false;
 		}
 		UK2Node_FunctionEntry* Entry = Entries[0];
@@ -812,6 +815,52 @@ namespace
 		G.Link(Br, UEdGraphSchema_K2::PN_Else, No, PN_Exec);
 		G.Link(U, PN_Ret, No, PN_Ret);
 		return true;
+	}
+
+	/**
+	 * Core story 38: an override of one of UUserWidget's events that has a return value or an out parameter (a function
+	 * graph, as OnPreviewKeyDown): its graph, its entry node and its one result node (made when the graph has none).
+	 */
+	bool OverrideGraph(UWidgetBlueprint* WBP, FName Name, UEdGraph*& Gr, UK2Node_FunctionEntry*& Entry, UK2Node_FunctionResult*& Result)
+	{
+		Gr = FBlueprintEditorUtils::CreateNewGraph(WBP, Name, UEdGraph::StaticClass(), UEdGraphSchema_K2::StaticClass());
+		FBlueprintEditorUtils::AddFunctionGraph<UClass>(WBP, Gr, /*bIsUserCreated*/ false, UUserWidget::StaticClass());
+		TArray<UK2Node_FunctionEntry*> Entries;
+		Gr->GetNodesOfClass(Entries);
+		TArray<UK2Node_FunctionResult*> Results;
+		Gr->GetNodesOfClass(Results);
+		if (Entries.Num() != 1 || Results.Num() > 1)
+		{
+			UE_LOG(LogCoreGen, Error, TEXT("%s: the %s override has %d entry and %d result nodes (want 1 and at most 1)"), *WBP->GetName(), *Name.ToString(), Entries.Num(), Results.Num());
+			return false;
+		}
+		Entry = Entries[0];
+		for (UEdGraphPin* P : Entry->Pins) if (P->PinType.PinCategory == UEdGraphSchema_K2::PC_Exec) P->BreakAllPinLinks();
+		if (Results.Num() == 1)
+		{
+			Result = Results[0];
+		}
+		else
+		{
+			FGraphNodeCreator<UK2Node_FunctionResult> RC(*Gr);
+			Result = RC.CreateNode(false);
+			Result->FunctionReference = Entry->FunctionReference;
+			RC.Finalize();
+		}
+		for (UEdGraphPin* P : Result->Pins) if (P->PinType.PinCategory == UEdGraphSchema_K2::PC_Exec) P->BreakAllPinLinks();
+		return true;
+	}
+
+	/** A second result node of an override graph (the else path), placed by G. */
+	UK2Node_FunctionResult* ExtraResult(FGraph& G, UK2Node_FunctionResult* Like)
+	{
+		FGraphNodeCreator<UK2Node_FunctionResult> RC(*G.G);
+		UK2Node_FunctionResult* N = RC.CreateNode(false);
+		N->FunctionReference = Like->FunctionReference;
+		G.Place(N);
+		N->NodePosY = 200;
+		RC.Finalize();
+		return N;
 	}
 
 	/** theme.game.textHover / theme.game.text: a content tint that draws the game's text colour in its hover colour. */
@@ -1309,13 +1358,19 @@ namespace
 	 *   SetBackgroundMaterial(Material, R, G, B, A, Padding), SetBackgroundSolid() as on the text widget
 	 *   SetTag(NewTag: String)                                                  CoreTag = NewTag
 	 *   SetListSize(W, H: Float)                                                Box width and height overrides
+	 * Core story 38 (drag to reorder): Background holds an Overlay "Layer" -> [Scroll, Image "Line"]. Line is the
+	 * insertion line (HitTestInvisible, Collapsed until Lua shows it; top-aligned, the list's width, 2 units high; Lua
+	 * sets its colour and moves it by its Overlay slot's top padding). OnDrop (override): DropOp = Operation, DropLeft =
+	 * (the effecting button is the left mouse button), <Core>_OnDrop() (DropCount += 1; each dependent's Lua post-hooks
+	 * it), then true (the drop is handled: the source row gets no OnDragCancelled; Lua cancels a drop it refuses).
 	 */
 	UWidgetBlueprint* BuildList(const FString& Dir, const FString& Core)
 	{
 		UWidgetBlueprint* WBP = CastChecked<UWidgetBlueprint>(NewBlueprint(Dir / FString::Printf(TEXT("WBP_%sList"), *Core),
 			UUserWidget::StaticClass(), UWidgetBlueprint::StaticClass(), UWidgetBlueprintGeneratedClass::StaticClass()));
+		const FString DropFn = Core + TEXT("_OnDrop");
 		CheckNames({TEXT("SetBackground"), TEXT("SetBackgroundPadding"), TEXT("SetBackgroundMaterial"), TEXT("SetBackgroundSolid"),
-			TEXT("SetTag"), TEXT("SetListSize")});
+			TEXT("SetTag"), TEXT("SetListSize"), *DropFn});
 
 		UWidgetTree* T = WBP->WidgetTree;
 		USizeBox* Box = T->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Box"));
@@ -1326,11 +1381,19 @@ namespace
 		USizeBoxSlot* BgSlot = CastChecked<USizeBoxSlot>(Box->AddChild(Background));
 		BgSlot->SetHorizontalAlignment(HAlign_Fill);
 		BgSlot->SetVerticalAlignment(VAlign_Fill);
+		// Core story 38: an Overlay between Background and Scroll, so the insertion line can sit over the rows.
+		UOverlay* Layer = T->ConstructWidget<UOverlay>(UOverlay::StaticClass(), TEXT("Layer"));
+		Layer->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		Layer->bIsVariable = true;
+		UBorderSlot* LayerSlot = CastChecked<UBorderSlot>(Background->AddChild(Layer));
+		LayerSlot->SetPadding(FMargin(0.f));
+		LayerSlot->SetHorizontalAlignment(HAlign_Fill);
+		LayerSlot->SetVerticalAlignment(VAlign_Fill);
 		UScrollBox* Scroll = T->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("Scroll"));
 		Scroll->SetVisibility(ESlateVisibility::Visible);
 		Scroll->SetOrientation(Orient_Vertical);
 		Scroll->bIsVariable = true;
-		UBorderSlot* ScrollSlot = CastChecked<UBorderSlot>(Background->AddChild(Scroll));
+		UOverlaySlot* ScrollSlot = CastChecked<UOverlaySlot>(Layer->AddChild(Scroll));
 		ScrollSlot->SetPadding(FMargin(0.f));
 		ScrollSlot->SetHorizontalAlignment(HAlign_Fill);
 		ScrollSlot->SetVerticalAlignment(VAlign_Fill);
@@ -1338,17 +1401,35 @@ namespace
 		VBox->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 		VBox->bIsVariable = true;
 		Scroll->AddChild(VBox);
-		for (const TCHAR* W : {TEXT("Box"), TEXT("Background"), TEXT("Scroll"), TEXT("VBox")}) WBP->OnVariableAdded(W);
+		UImage* Line = T->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("Line"));
+		{
+			FSlateBrush LineBrush;
+			LineBrush.TintColor = FSlateColor(FLinearColor::White);
+			LineBrush.ImageSize = FVector2D(2.f, 2.f);
+			Line->SetBrush(LineBrush);
+		}
+		Line->SetVisibility(ESlateVisibility::Collapsed);
+		Line->bIsVariable = true;
+		UOverlaySlot* LineSlot = CastChecked<UOverlaySlot>(Layer->AddChild(Line));
+		LineSlot->SetPadding(FMargin(0.f));
+		LineSlot->SetHorizontalAlignment(HAlign_Fill);
+		LineSlot->SetVerticalAlignment(VAlign_Top);
+		for (const TCHAR* W : {TEXT("Box"), TEXT("Background"), TEXT("Layer"), TEXT("Scroll"), TEXT("VBox"), TEXT("Line")}) WBP->OnVariableAdded(W);
+		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("DropOp"), ObjT(UDragDropOperation::StaticClass()), TEXT(""));
+		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("DropLeft"), BoolT(), TEXT("false"));
+		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("DropCount"), IntT(), TEXT("0"));
 
 		FFunc SetBg = AddSetBackground(WBP);
 		FFunc SetPad = AddFunction(WBP, TEXT("SetBackgroundPadding"), {{TEXT("Padding"), RealT()}}, {});
 		FFunc SetTag = AddTag(WBP);
 		FMaterialFns Mat = AddBackgroundMaterial(WBP);
 		FFunc SetSize = AddFunction(WBP, TEXT("SetListSize"), {{TEXT("W"), RealT()}, {TEXT("H"), RealT()}}, {});
+		FFunc OnDrop = AddFunction(WBP, FName(DropFn), {}, {});
 		if (!Compile(WBP)) return nullptr;
 		FillBackground(WBP, SetBg, SetPad);
 		FillTag(WBP, SetTag);
 		FillBackgroundMaterial(WBP, Mat);
+		FillCounter(WBP, OnDrop, TEXT("DropCount"));
 		{
 			FGraph G(WBP, SetSize.G);
 			UK2Node_VariableGet* GetBox = G.Get(TEXT("Box"));
@@ -1360,7 +1441,33 @@ namespace
 			G.Link(SetSize.Entry, TEXT("H"), SetH, TEXT("InHeightOverride"));
 			G.Chain({SetSize.Entry, SetW, SetH});
 		}
-		if (!Compile(WBP) || !Save(WBP)) return nullptr;
+		{
+			// Core story 38: OnDrop -> DropOp, DropLeft, <Core>_OnDrop(), true.
+			UEdGraph* Gr = nullptr;
+			UK2Node_FunctionEntry* Entry = nullptr;
+			UK2Node_FunctionResult* Res = nullptr;
+			if (!OverrideGraph(WBP, TEXT("OnDrop"), Gr, Entry, Res)) return nullptr;
+			FGraph G(WBP, Gr);
+			G.X = 400;
+			UK2Node_VariableSet* SetOp = G.Set(TEXT("DropOp"));
+			G.Link(Entry, TEXT("Operation"), SetOp, TEXT("DropOp"));
+			UK2Node_CallFunction* Btn = G.Call(UKismetInputLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetInputLibrary, PointerEvent_GetEffectingButton));
+			G.Link(G.Pin(Entry, TEXT("PointerEvent")), G.Pin(Btn, TEXT("Input")));
+			UK2Node_CallFunction* Left = KeyIs(G, G.Pin(Btn, PN_Ret), EKeys::LeftMouseButton);
+			UK2Node_VariableSet* SetLeft = G.Set(TEXT("DropLeft"));
+			G.Link(Left, PN_Ret, SetLeft, TEXT("DropLeft"));
+			UK2Node_CallFunction* Call = G.CallSelf(FName(DropFn));
+			G.Place(Res);
+			G.Default(Res, PN_Ret, TEXT("true"));
+			G.Chain({Entry, SetOp, SetLeft, Call, Res});
+		}
+		if (!Compile(WBP)) return nullptr;
+		const bool bOwnDrop = WBP->GeneratedClass->FindFunctionByName(TEXT("OnDrop"), EIncludeSuperFlag::ExcludeSuper) != nullptr;
+		const bool bOwnDropFn = WBP->GeneratedClass->FindFunctionByName(FName(DropFn), EIncludeSuperFlag::ExcludeSuper) != nullptr;
+		UE_LOG(LogCoreGen, Display, TEXT("LIST %s OnDrop override=%s %s=%s"), *WBP->GetPathName(), bOwnDrop ? TEXT("true") : TEXT("false"),
+			*DropFn, bOwnDropFn ? TEXT("true") : TEXT("false"));
+		if (!bOwnDrop || !bOwnDropFn) { UE_LOG(LogCoreGen, Error, TEXT("LIST: the OnDrop override or %s did not compile into the class"), *DropFn); return nullptr; }
+		if (!Save(WBP)) return nullptr;
 		return WBP;
 	}
 
@@ -1375,14 +1482,28 @@ namespace
 	 *   <Core>_OnHover()                                                        HoverCount += 1; the OnMouseEnter
 	 *                                                                           override calls it (core story 36: the
 	 *                                                                           focus band follows the mouse)
-	 * The row's event graph is CoreGen's: it is cleared and holds only that OnMouseEnter override (core story 36).
+	 * The row's event graph is CoreGen's: it is cleared and holds only that OnMouseEnter override (core story 36) and
+	 * OnDragCancelled (core story 38).
+	 * Core story 38 (drag to reorder): Bool Draggable (Lua sets it on movable rows of a reorderable list in the top
+	 * window), DragOp (a DragDropOperation) and DragOk.
+	 *   OnMouseButtonDown (override)       Draggable and the left button: DetectDragIfPressed(event, self, left button)
+	 *                                       (Slate's dead zone), else Unhandled (a press on a control stays the control's:
+	 *                                       it handles the press before the row sees it)
+	 *   OnDragDetected (override)          DragOp = a new DragDropOperation, DragOk = false, <Core>_OnDragStart() (DragCount
+	 *                                       += 1; Lua's post-hook sets the drag visual and DragOk), then Operation = DragOk ?
+	 *                                       DragOp : None
+	 *   OnDragCancelled (event)            <Core>_OnDragCancel() (DragCancelCount += 1): the drop landed nowhere, or
+	 *                                       Escape
 	 */
 	UWidgetBlueprint* BuildRow(const FString& Dir, const FString& Core)
 	{
 		UWidgetBlueprint* WBP = CastChecked<UWidgetBlueprint>(NewBlueprint(Dir / FString::Printf(TEXT("WBP_%sRow"), *Core),
 			UUserWidget::StaticClass(), UWidgetBlueprint::StaticClass(), UWidgetBlueprintGeneratedClass::StaticClass()));
 		const FString HoverFn = Core + TEXT("_OnHover");
-		CheckNames({TEXT("SetBackground"), TEXT("SetBackgroundPadding"), TEXT("SetBackgroundMaterial"), TEXT("SetBackgroundSolid"), TEXT("SetTag"), *HoverFn});
+		const FString DragStartFn = Core + TEXT("_OnDragStart"); // core story 38
+		const FString DragCancelFn = Core + TEXT("_OnDragCancel");
+		CheckNames({TEXT("SetBackground"), TEXT("SetBackgroundPadding"), TEXT("SetBackgroundMaterial"), TEXT("SetBackgroundSolid"), TEXT("SetTag"), *HoverFn,
+			*DragStartFn, *DragCancelFn});
 
 		UWidgetTree* T = WBP->WidgetTree;
 		UBorder* Background = RootBackground(T);
@@ -1404,11 +1525,79 @@ namespace
 		FMaterialFns Mat = AddBackgroundMaterial(WBP);
 		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("HoverCount"), IntT(), TEXT("0"));
 		FFunc OnHover = AddFunction(WBP, FName(HoverFn), {}, {});
+		// Core story 38: drag to reorder.
+		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("Draggable"), BoolT(), TEXT("false"));
+		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("DragOp"), ObjT(UDragDropOperation::StaticClass()), TEXT(""));
+		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("DragOk"), BoolT(), TEXT("false"));
+		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("DragCount"), IntT(), TEXT("0"));
+		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("DragCancelCount"), IntT(), TEXT("0"));
+		FFunc OnDragStart = AddFunction(WBP, FName(DragStartFn), {}, {});
+		FFunc OnDragCancel = AddFunction(WBP, FName(DragCancelFn), {}, {});
 		if (!Compile(WBP)) return nullptr;
 		FillBackground(WBP, SetBg, SetPad);
 		FillTag(WBP, SetTag);
 		FillBackgroundMaterial(WBP, Mat);
 		FillCounter(WBP, OnHover, TEXT("HoverCount"));
+		FillCounter(WBP, OnDragStart, TEXT("DragCount"));
+		FillCounter(WBP, OnDragCancel, TEXT("DragCancelCount"));
+		{
+			// Core story 38: OnMouseButtonDown -> Draggable and the left button ? DetectDragIfPressed : Unhandled.
+			UEdGraph* Gr = nullptr;
+			UK2Node_FunctionEntry* Entry = nullptr;
+			UK2Node_FunctionResult* Yes = nullptr;
+			if (!OverrideGraph(WBP, TEXT("OnMouseButtonDown"), Gr, Entry, Yes)) return nullptr;
+			FGraph G(WBP, Gr);
+			G.X = 400;
+			UEdGraphPin* Ev = G.Pin(Entry, TEXT("MouseEvent"));
+			UK2Node_VariableGet* GetDraggable = G.Get(TEXT("Draggable"));
+			UK2Node_CallFunction* Btn = G.Call(UKismetInputLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetInputLibrary, PointerEvent_GetEffectingButton));
+			G.Link(Ev, G.Pin(Btn, TEXT("Input")));
+			UK2Node_CallFunction* Left = KeyIs(G, G.Pin(Btn, PN_Ret), EKeys::LeftMouseButton);
+			UK2Node_CallFunction* And = G.Call(UKismetMathLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, BooleanAND));
+			G.Link(GetDraggable, TEXT("Draggable"), And, TEXT("A"));
+			G.Link(Left, PN_Ret, And, TEXT("B"));
+			UK2Node_IfThenElse* Br = G.Branch();
+			G.Link(And, PN_Ret, Br, UEdGraphSchema_K2::PN_Condition);
+			G.Chain({Entry, Br});
+			UK2Node_CallFunction* Detect = G.Call(UWidgetBlueprintLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UWidgetBlueprintLibrary, DetectDragIfPressed));
+			G.Link(Ev, G.Pin(Detect, TEXT("PointerEvent")));
+			G.Default(Detect, TEXT("DragKey"), EKeys::LeftMouseButton.GetFName().ToString());
+			G.Link(Br, UEdGraphSchema_K2::PN_Then, Detect, PN_Exec);
+			G.Place(Yes);
+			G.Link(Detect, PN_Then, Yes, PN_Exec);
+			G.Link(Detect, PN_Ret, Yes, PN_Ret);
+			UK2Node_FunctionResult* No = ExtraResult(G, Yes);
+			UK2Node_CallFunction* U = G.Call(UWidgetBlueprintLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UWidgetBlueprintLibrary, Unhandled));
+			G.Link(Br, UEdGraphSchema_K2::PN_Else, No, PN_Exec);
+			G.Link(U, PN_Ret, No, PN_Ret);
+		}
+		{
+			// Core story 38: OnDragDetected -> DragOp = new operation, DragOk = false, <Core>_OnDragStart(),
+			// Operation = DragOk ? DragOp : None.
+			UEdGraph* Gr = nullptr;
+			UK2Node_FunctionEntry* Entry = nullptr;
+			UK2Node_FunctionResult* Yes = nullptr;
+			if (!OverrideGraph(WBP, TEXT("OnDragDetected"), Gr, Entry, Yes)) return nullptr;
+			FGraph G(WBP, Gr);
+			G.X = 400;
+			UK2Node_CallFunction* Make = G.Call(UWidgetBlueprintLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UWidgetBlueprintLibrary, CreateDragDropOperation));
+			G.K2->TrySetDefaultObject(*G.Pin(Make, TEXT("OperationClass")), UDragDropOperation::StaticClass());
+			UK2Node_VariableSet* SetOp = G.Set(TEXT("DragOp"));
+			G.Link(Make, PN_Ret, SetOp, TEXT("DragOp"));
+			UK2Node_VariableSet* SetOk = G.Set(TEXT("DragOk"));
+			G.Default(SetOk, TEXT("DragOk"), TEXT("false"));
+			UK2Node_CallFunction* Call = G.CallSelf(FName(DragStartFn));
+			UK2Node_VariableGet* GetOk = G.Get(TEXT("DragOk"));
+			UK2Node_IfThenElse* Br = G.Branch();
+			G.Link(GetOk, TEXT("DragOk"), Br, UEdGraphSchema_K2::PN_Condition);
+			G.Chain({Entry, Make, SetOp, SetOk, Call, Br});
+			UK2Node_VariableGet* GetOp = G.Get(TEXT("DragOp"));
+			G.Place(Yes);
+			G.Link(Br, UEdGraphSchema_K2::PN_Then, Yes, PN_Exec);
+			G.Link(GetOp, TEXT("DragOp"), Yes, TEXT("Operation"));
+			UK2Node_FunctionResult* No = ExtraResult(G, Yes);
+			G.Link(Br, UEdGraphSchema_K2::PN_Else, No, PN_Exec);
+		}
 		{
 			// Event graph: OnMouseEnter -> <Core>_OnHover(), nothing else (core story 36).
 			UEdGraph* EG = FBlueprintEditorUtils::FindEventGraph(WBP);
@@ -1420,6 +1609,12 @@ namespace
 			Enter->SetEnabledState(ENodeEnabledState::Enabled, false);
 			G.X = 400;
 			G.Chain({Enter, G.CallSelf(FName(HoverFn))});
+			// Core story 38: OnDragCancelled -> <Core>_OnDragCancel().
+			Y += 300;
+			UK2Node_Event* Cancelled = FKismetEditorUtilities::AddDefaultEventNode(WBP, EG, TEXT("OnDragCancelled"), UUserWidget::StaticClass(), Y);
+			if (!Cancelled) { UE_LOG(LogCoreGen, Error, TEXT("ROW: no OnDragCancelled event node")); return nullptr; }
+			Cancelled->SetEnabledState(ENodeEnabledState::Enabled, false);
+			G.Chain({Cancelled, G.CallSelf(FName(DragCancelFn))});
 		}
 		if (!Compile(WBP)) return nullptr;
 		const bool bOwnEnter = WBP->GeneratedClass->FindFunctionByName(TEXT("OnMouseEnter"), EIncludeSuperFlag::ExcludeSuper) != nullptr;
@@ -1427,7 +1622,72 @@ namespace
 		UE_LOG(LogCoreGen, Display, TEXT("ROW %s OnMouseEnter override=%s %s=%s"), *WBP->GetPathName(),
 			bOwnEnter ? TEXT("true") : TEXT("false"), *HoverFn, bOwnHover ? TEXT("true") : TEXT("false"));
 		if (!bOwnEnter || !bOwnHover) { UE_LOG(LogCoreGen, Error, TEXT("ROW: the OnMouseEnter override or %s did not compile into the class"), *HoverFn); return nullptr; }
+		// Core story 38: the drag overrides and counters.
+		bool bDragAll = true;
+		for (const FString& Fn : {FString(TEXT("OnMouseButtonDown")), FString(TEXT("OnDragDetected")), FString(TEXT("OnDragCancelled")), DragStartFn, DragCancelFn})
+		{
+			const bool bOwn = WBP->GeneratedClass->FindFunctionByName(FName(Fn), EIncludeSuperFlag::ExcludeSuper) != nullptr;
+			UE_LOG(LogCoreGen, Display, TEXT("ROW %s %s=%s"), *WBP->GetPathName(), *Fn, bOwn ? TEXT("true") : TEXT("false"));
+			bDragAll &= bOwn;
+		}
+		if (!bDragAll) { UE_LOG(LogCoreGen, Error, TEXT("ROW: a drag override or counter did not compile into the class")); return nullptr; }
 		if (!Save(WBP)) return nullptr;
+		return WBP;
+	}
+
+	/**
+	 * Core story 38: WBP_<Core>Lift, the lifted copy of a dragged row (the drag visual Slate draws at the pointer):
+	 * SizeBox "Box" -> Border "Background" -> HorizontalBox "HBox", all hit-test invisible. Lua sizes it like the row,
+	 * gives it the band's look and puts copies of the row's texts into HBox (images and controls are not copied).
+	 * Functions:
+	 *   SetLiftSize(W, H: Float)                                                Box width and height overrides
+	 *   SetBackground(R, G, B, A), SetBackgroundPadding(Padding)                as on the text widget
+	 *   SetBackgroundMaterial(Material, R, G, B, A, Padding), SetBackgroundSolid() as on the text widget
+	 */
+	UWidgetBlueprint* BuildLift(const FString& Dir, const FString& Core)
+	{
+		UWidgetBlueprint* WBP = CastChecked<UWidgetBlueprint>(NewBlueprint(Dir / FString::Printf(TEXT("WBP_%sLift"), *Core),
+			UUserWidget::StaticClass(), UWidgetBlueprint::StaticClass(), UWidgetBlueprintGeneratedClass::StaticClass()));
+		CheckNames({TEXT("SetLiftSize"), TEXT("SetBackground"), TEXT("SetBackgroundPadding"), TEXT("SetBackgroundMaterial"), TEXT("SetBackgroundSolid")});
+		UWidgetTree* T = WBP->WidgetTree;
+		USizeBox* Box = T->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Box"));
+		Box->SetVisibility(ESlateVisibility::HitTestInvisible);
+		Box->bIsVariable = true;
+		T->RootWidget = Box;
+		UBorder* Background = RootBackground(T);
+		Background->SetVisibility(ESlateVisibility::HitTestInvisible);
+		USizeBoxSlot* BgSlot = CastChecked<USizeBoxSlot>(Box->AddChild(Background));
+		BgSlot->SetHorizontalAlignment(HAlign_Fill);
+		BgSlot->SetVerticalAlignment(VAlign_Fill);
+		UHorizontalBox* HBox = T->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("HBox"));
+		HBox->SetVisibility(ESlateVisibility::HitTestInvisible);
+		HBox->bIsVariable = true;
+		UBorderSlot* BoxSlot = CastChecked<UBorderSlot>(Background->AddChild(HBox));
+		BoxSlot->SetPadding(FMargin(0.f));
+		BoxSlot->SetHorizontalAlignment(HAlign_Fill);
+		BoxSlot->SetVerticalAlignment(VAlign_Fill);
+		for (const TCHAR* W : {TEXT("Box"), TEXT("Background"), TEXT("HBox")}) WBP->OnVariableAdded(W);
+
+		FFunc SetSize = AddFunction(WBP, TEXT("SetLiftSize"), {{TEXT("W"), RealT()}, {TEXT("H"), RealT()}}, {});
+		FFunc SetBg = AddSetBackground(WBP);
+		FFunc SetPad = AddFunction(WBP, TEXT("SetBackgroundPadding"), {{TEXT("Padding"), RealT()}}, {});
+		FMaterialFns Mat = AddBackgroundMaterial(WBP);
+		if (!Compile(WBP)) return nullptr;
+		FillBackground(WBP, SetBg, SetPad);
+		FillBackgroundMaterial(WBP, Mat);
+		{
+			FGraph G(WBP, SetSize.G);
+			UK2Node_VariableGet* GetBox = G.Get(TEXT("Box"));
+			UK2Node_CallFunction* SetW = G.Call(USizeBox::StaticClass(), GET_FUNCTION_NAME_CHECKED(USizeBox, SetWidthOverride));
+			G.Link(GetBox, TEXT("Box"), SetW, PN_Self);
+			G.Link(SetSize.Entry, TEXT("W"), SetW, TEXT("InWidthOverride"));
+			UK2Node_CallFunction* SetH = G.Call(USizeBox::StaticClass(), GET_FUNCTION_NAME_CHECKED(USizeBox, SetHeightOverride));
+			G.Link(GetBox, TEXT("Box"), SetH, PN_Self);
+			G.Link(SetSize.Entry, TEXT("H"), SetH, TEXT("InHeightOverride"));
+			G.Chain({SetSize.Entry, SetW, SetH});
+		}
+		if (!Compile(WBP) || !Save(WBP)) return nullptr;
+		UE_LOG(LogCoreGen, Display, TEXT("LIFT %s generated"), *WBP->GetPathName());
 		return WBP;
 	}
 
@@ -1585,13 +1845,17 @@ namespace
 	 *                                       Key_GetNavigationActionFromKey (Accept 0, Back 1, Invalid 3), Escape and
 	 *                                       Gamepad_FaceButton_Right always Back; NavHandled = false; <Core>_OnNav();
 	 *                                       Handled when NavHandled, else Unhandled
+	 *   <Core>_OnNavUp()                    NavUpCount += 1 (core story 38)
+	 *   OnKeyUp (override)                  the same as OnPreviewKeyDown, calling <Core>_OnNavUp: a key's release that
+	 *                                       bubbled to the window (core story 38: releasing A / Enter drops a held row)
 	 */
 	UWidgetBlueprint* BuildScreen(const FString& Dir, const FString& Core)
 	{
 		UWidgetBlueprint* WBP = CastChecked<UWidgetBlueprint>(NewBlueprint(Dir / FString::Printf(TEXT("WBP_%sScreen"), *Core),
 			UUserWidget::StaticClass(), UWidgetBlueprint::StaticClass(), UWidgetBlueprintGeneratedClass::StaticClass()));
 		const FString NavFn = Core + TEXT("_OnNav");
-		CheckNames({TEXT("SetBackdrop"), TEXT("SetTag"), *NavFn});
+		const FString NavUpFn = Core + TEXT("_OnNavUp"); // core story 38
+		CheckNames({TEXT("SetBackdrop"), TEXT("SetTag"), *NavFn, *NavUpFn});
 
 		UWidgetTree* T = WBP->WidgetTree;
 		UOverlay* Root = T->ConstructWidget<UOverlay>(UOverlay::StaticClass(), TEXT("Root"));
@@ -1639,13 +1903,16 @@ namespace
 		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("NavAction"), IntT(), TEXT("3"));
 		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("NavHandled"), BoolT(), TEXT("false"));
 		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("NavCount"), IntT(), TEXT("0"));
+		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("NavUpCount"), IntT(), TEXT("0"));
 
 		FFunc SetBackdrop = AddFunction(WBP, TEXT("SetBackdrop"), {{TEXT("R"), RealT()}, {TEXT("G"), RealT()}, {TEXT("B"), RealT()}, {TEXT("A"), RealT()}}, {});
 		FFunc SetTag = AddTag(WBP);
 		FFunc OnNav = AddFunction(WBP, FName(NavFn), {}, {});
+		FFunc OnNavUp = AddFunction(WBP, FName(NavUpFn), {}, {});
 		if (!Compile(WBP)) return nullptr;
 		FillTag(WBP, SetTag);
 		FillCounter(WBP, OnNav, TEXT("NavCount"));
+		FillCounter(WBP, OnNavUp, TEXT("NavUpCount"));
 		{
 			FGraph G(WBP, SetBackdrop.G);
 			UK2Node_VariableGet* GetBd = G.Get(TEXT("Backdrop"));
@@ -1656,14 +1923,19 @@ namespace
 			G.Chain({SetBackdrop.Entry, Set});
 		}
 		if (!AddKeyDown(WBP, FName(NavFn))) return nullptr;
+		if (!AddKeyDown(WBP, FName(NavUpFn), TEXT("OnKeyUp"))) return nullptr; // core story 38: a held row's drop
 		if (!Compile(WBP)) return nullptr;
 		UUserWidget* CDO = CastChecked<UUserWidget>(WBP->GeneratedClass->GetDefaultObject());
 		CDO->SetIsFocusable(true);
 		CDO->MarkPackageDirty();
 		const bool bOwnKeyDown = WBP->GeneratedClass->FindFunctionByName(TEXT("OnPreviewKeyDown"), EIncludeSuperFlag::ExcludeSuper) != nullptr;
-		UE_LOG(LogCoreGen, Display, TEXT("SCREEN %s class default focusable=%s OnPreviewKeyDown override=%s"), *WBP->GetPathName(),
-			CDO->IsFocusable() ? TEXT("true") : TEXT("false"), bOwnKeyDown ? TEXT("true") : TEXT("false"));
+		const bool bOwnKeyUp = WBP->GeneratedClass->FindFunctionByName(TEXT("OnKeyUp"), EIncludeSuperFlag::ExcludeSuper) != nullptr;
+		const bool bOwnNavUp = WBP->GeneratedClass->FindFunctionByName(FName(NavUpFn), EIncludeSuperFlag::ExcludeSuper) != nullptr;
+		UE_LOG(LogCoreGen, Display, TEXT("SCREEN %s class default focusable=%s OnPreviewKeyDown override=%s OnKeyUp override=%s %s=%s"), *WBP->GetPathName(),
+			CDO->IsFocusable() ? TEXT("true") : TEXT("false"), bOwnKeyDown ? TEXT("true") : TEXT("false"), bOwnKeyUp ? TEXT("true") : TEXT("false"),
+			*NavUpFn, bOwnNavUp ? TEXT("true") : TEXT("false"));
 		if (!bOwnKeyDown) { UE_LOG(LogCoreGen, Error, TEXT("SCREEN: the OnPreviewKeyDown override did not compile into the class")); return nullptr; }
+		if (!bOwnKeyUp || !bOwnNavUp) { UE_LOG(LogCoreGen, Error, TEXT("SCREEN: the OnKeyUp override or %s did not compile into the class"), *NavUpFn); return nullptr; }
 		if (!Save(WBP)) return nullptr;
 		return WBP;
 	}
@@ -2818,6 +3090,7 @@ int32 UCoreGenCommandlet::Main(const FString& Params)
 	if (!BuildButton(Dir, Core)) return 1;
 	if (!BuildList(Dir, Core)) return 1;
 	if (!BuildRow(Dir, Core)) return 1;
+	if (!BuildLift(Dir, Core)) return 1; // core story 38: the lifted copy of a dragged row
 	if (!BuildScreen(Dir, Core)) return 1;
 	if (!BuildImage(Dir, Core)) return 1;
 	// Mod Manager story 4 (core 0.10.0): the choice and the slider (the checkbox is an icon-only button).
