@@ -33,8 +33,8 @@ namespace core_native::intercept
     // Engine tick pre-callback (every tick): clears every suspension. Catches everything.
     void tick_pre(RC::Unreal::Hook::TCallbackIterationData<void>&, RC::Unreal::UEngine*, float, bool);
 
-    // Releases (and un-roots) every rule of one mod; returns how many. Never throws.
+    // Releases every rule of one mod (and lets its replacement go); returns how many. Never throws.
     size_t release_mod(const std::string& mod);
-    // Releases (and un-roots) every rule; returns how many. Never throws.
+    // Releases every rule (and lets the replacements go); returns how many. Never throws.
     size_t release_all();
 } // namespace core_native::intercept
