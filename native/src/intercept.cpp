@@ -22,12 +22,15 @@
 // a script function the caller's code pointer has already moved on. Everything runs inside try/catch: a C++ exception
 // or an SEH fault is logged once per rule and the game's function runs; the hook must never throw (UE4SS would remove
 // it). g_mutex is held only around reads and writes of the rule table, never across a call into the engine.
+// A rule ends with its function or its exact target: each install first drops rules whose weak pointers no longer
+// resolve (prune_dead), so dependents install again on each screen open.
 //
 // Rules (AGENTS.md, "C++ mods"): only LuaMadeSimple and other UE4SS.dll exports, never the Lua C API; no Func swap; no
 // native (FUNC_Native) or byte-pattern targets.
 
 #include <excpt.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -205,7 +208,7 @@ namespace core_native::intercept
                 d->refs = item->GetRefCount();
                 d->root = item->IsRootSet() ? 1 : 0;
                 d->unreachable = item->IsUnreachable() ? 1 : 0;
-                d->garbage = item->HasAnyFlags(static_cast<EInternalObjectFlags>(1 << 21)) ? 1 : 0;
+                d->garbage = item->HasAnyFlags(static_cast<EInternalObjectFlags>(k_internal_garbage)) ? 1 : 0;
                 return 1;
             }
             __except (seh_filter(GetExceptionCode()))
@@ -405,22 +408,47 @@ namespace core_native::intercept
             }
         }
 
-        // Any thread (release, a stopping Lua mod, unload).
-        void unhold(const FWeakObjectPtr& value)
+        bool on_game_thread()
+        {
+            return g_game_thread_known.load(std::memory_order_acquire) && std::this_thread::get_id() == g_game_thread;
+        }
+
+        // Any thread (release, a stopping Lua mod, unload). The game instance's array is edited only on the game thread:
+        // off it (hot reload stops Lua mods and unloads core on UE4SS's event-loop thread) a GC scan or a game-thread
+        // AddValue could run at the same time, so the entry stays (a small, bounded leak until the process ends) and true
+        // is returned (the caller logs how many).
+        bool unhold(const FWeakObjectPtr& value)
         {
             const uint64_t key = hold_key(value);
             Held h{};
             {
                 std::lock_guard lock(g_hold_mutex);
                 auto it = g_held.find(key);
-                if (it == g_held.end()) return;
-                if (--it->second.count > 0) return;
+                if (it == g_held.end()) return false;
+                if (--it->second.count > 0) return false;
                 h = it->second;
                 g_held.erase(it);
             }
-            if (!h.added || h.offset <= 0) return;
+            if (!h.added || h.offset <= 0) return false;
+            if (!on_game_thread()) return true;
             unsigned long fault{};
             if (unhold_raw(&h.gi, h.offset, h.raw, &fault) < 0) log_fault(g_fn_release, "letting a replacement object go", fault, key);
+            return false;
+        }
+
+        // Game thread (install): drops every rule whose function or exact target no longer resolves (weak pointers read
+        // outside the lock), lets their replacements go, refreshes the hot set and logs how many.
+        void prune_dead();
+
+        // unhold for each value, with one line for the entries left in place off the game thread.
+        void unhold_each(const std::vector<FWeakObjectPtr>& values)
+        {
+            size_t kept = 0;
+            for (const auto& v : values)
+            {
+                if (unhold(v)) ++kept;
+            }
+            if (kept > 0) logf("intercept: kept {} replacement(s) referenced by the game instance (released off the game thread)", kept);
         }
 
         // ------------------------------------------------------------------ the table (call with g_mutex held)
@@ -576,25 +604,32 @@ namespace core_native::intercept
 
         void apply(Hook::TCallbackIterationData<void>& data, UObject* context, UFunction* node, void* result)
         {
-            Pick exact{}, any{};
+            // Exact candidates: every rule on this function whose target pointer equals context. A stale rule (its target
+            // gone, the address reused by a new card) may share the pointer with the valid one; the weak check below
+            // decides, so a later stale candidate never hides a valid one.
+            constexpr size_t k_max_exact = 8;
+            std::array<Pick, k_max_exact> exacts{};
+            size_t n_exact = 0;
+            Pick any{};
             {
                 std::lock_guard lock(g_mutex);
                 for (const auto& r : g_rules)
                 {
                     if (r.fn_raw != node) continue;
-                    Pick* p = r.any ? &any : (r.target_raw == context ? &exact : nullptr);
-                    if (!p) continue;
-                    *p = Pick{true, r.id, r.any, r.fn_weak, r.target_weak, r.value_weak, r.action, k_allow[r.entry].ret};
+                    const Pick p{true, r.id, r.any, r.fn_weak, r.target_weak, r.value_weak, r.action, k_allow[r.entry].ret};
+                    if (r.any) any = p;
+                    else if (r.target_raw == context && n_exact < k_max_exact) exacts[n_exact++] = p;
                 }
             }
-            if (!exact.set && !any.set) return;
+            if (n_exact == 0 && !any.set) return;
 
             // The weak pointers again (serial check): the function and the target are still the objects the rule was
             // made for, never another object that took over the address.
             Pick* chosen = nullptr;
             unsigned long fault{};
-            if (exact.set)
+            for (size_t i = 0; i < n_exact && !chosen; ++i)
             {
+                Pick& exact = exacts[i];
                 UObject* f = weak_get(&exact.fn_weak, &fault);
                 UObject* t = fault ? nullptr : weak_get(&exact.target_weak, &fault);
                 if (fault)
@@ -653,12 +688,49 @@ namespace core_native::intercept
             if (Rule* r = find_locked(chosen->id)) ++r->applied;
         }
 
+        void prune_dead()
+        {
+            struct Probe
+            {
+                int64_t id;
+                bool any;
+                FWeakObjectPtr fn;
+                FWeakObjectPtr target;
+            };
+            std::vector<Probe> probes;
+            {
+                std::lock_guard lock(g_mutex);
+                probes.reserve(g_rules.size());
+                for (const auto& x : g_rules) probes.push_back({x.id, x.any, x.fn_weak, x.target_weak});
+            }
+            std::vector<int64_t> dead;
+            for (const auto& p : probes)
+            {
+                unsigned long fault{};
+                const bool fn_gone = weak_get(&p.fn, &fault) == nullptr;
+                const bool target_gone = !fn_gone && !p.any && weak_get(&p.target, &fault) == nullptr;
+                // A fault reads as gone: such a rule can never be applied safely either.
+                if (fn_gone || target_gone) dead.push_back(p.id);
+            }
+            if (dead.empty()) return;
+            size_t n{};
+            std::vector<FWeakObjectPtr> values;
+            {
+                std::lock_guard lock(g_mutex);
+                values = take_locked([&](const Rule& x) { return std::find(dead.begin(), dead.end(), x.id) != dead.end(); }, &n);
+            }
+            unhold_each(values);
+            if (n > 0) logf("intercept: dropped {} rule(s) whose function or target is gone", n);
+        }
+
         auto line_of(const Rule& r) -> std::string
         {
             return std::format("id={} mod={} fn={} target={} action={} seen={} applied={} suspended={}", r.id, r.mod, k_allow[r.entry].path, r.target_name,
                                r.action == Action::Skip ? "skip" : "replace", r.seen, r.applied, r.suspended ? "true" : "false");
         }
     } // namespace
+
+    const size_t g_allow_count = k_allow_n;
 
     // ------------------------------------------------------------------ the callbacks
 
@@ -716,7 +788,7 @@ namespace core_native::intercept
                 std::lock_guard lock(g_mutex);
                 values = take_locked([&](const Rule& r) { return r.mod == mod; }, &n);
             }
-            for (const auto& v : values) unhold(v);
+            unhold_each(values);
             return n;
         }
         catch (...)
@@ -736,7 +808,7 @@ namespace core_native::intercept
                 std::lock_guard lock(g_mutex);
                 values = take_locked([](const Rule&) { return true; }, &n);
             }
-            for (const auto& v : values) unhold(v);
+            unhold_each(values);
             return n;
         }
         catch (...)
@@ -855,6 +927,10 @@ namespace core_native::intercept
                 value_raw = v;
             }
 
+            // Rules whose function or exact target is gone (a closed screen's cards, a reloaded class) end here, whoever
+            // owns them, before the same-key and cap checks: they never match again and must not count toward the caps.
+            prune_dead();
+
             FWeakObjectPtr old_value{};
             bool had_old_value = false;
             Result r;
@@ -878,6 +954,7 @@ namespace core_native::intercept
                     rule.id = same->id;
                     rule.seen = same->seen;
                     rule.applied = same->applied;
+                    rule.suspended = same->suspended; // a re-install inside runOriginal's f stays suspended until resumed
                     if (same->action == Action::Replace)
                     {
                         old_value = same->value_weak;
@@ -898,7 +975,7 @@ namespace core_native::intercept
             }
             // New value first, then the old one: a rule that keeps its object never drops to zero holds.
             if (action == Action::Replace) hold(rule.value_weak, value_raw, holder);
-            if (had_old_value) unhold(old_value);
+            if (had_old_value) unhold_each({old_value});
             return r;
         });
     }
@@ -923,7 +1000,7 @@ namespace core_native::intercept
                 size_t n{};
                 values = take_locked([&](const Rule& y) { return y.id == id; }, &n);
             }
-            for (const auto& v : values) unhold(v);
+            unhold_each(values);
             r.boolean = true;
             return r;
         });

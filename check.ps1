@@ -1000,9 +1000,9 @@ $intercept = $started + @(
     "\[$T\] OK FNSKIPPED enter: "
     "\[$T\] OK FNLUACALL "
     "\[$T\] OK FNSKIPPED lua: "
-    # the three skipped calls, the real click after runOriginal and the Lua call after the raising one; never a call
-    # runOriginal let through (the same-key rule's onCall logs nothing)
-    "#5|\[$T\] FNONCALL \d+ "
+    # the three skipped calls, the real click after runOriginal, the Lua call after the raising one and the one after
+    # the tick cleared a suspension; never a call runOriginal let through (the same-key rule's onCall logs nothing)
+    "#6|\[$T\] FNONCALL \d+ "
     # Other card; replace the tooltip (Lua call, card B unchanged, a real hover); any vs exact.
     "\[$T\] OK FNOTHER a real click on card B toggled it"
     "\[$T\] OK FNOTHERBACK "
@@ -1019,7 +1019,13 @@ $intercept = $started + @(
     "\[$T\] OK FNRUNORIGQUIET "
     "\[$T\] OK FNAGAIN "
     "\[$T\] OK FNRAISE "
+    "\[$T\] OK FNTICKCLEAR "
     "\[$T\] OK FNABACK "
+    # The same key with a new replacement keeps the rule, holds the new one and lets the old go; a game-thread release
+    # lets the last one go (forced GCs); the tooltip rule installed again for the reload.
+    "\[$T\] OK FNSWAPVAL "
+    "\[$T\] OK FNRELFREE "
+    "\[$T\] OK FNTIPAGAIN "
     # Two mods: the peer's any skip on the Bat click; its refusal of card A's click (held by the test dependent).
     "\[$Peer\] PEERFN bat any skip id=\d+"
     "\[$Peer\] PEERFN refused: fn\.intercept: .*EnemySlot_Button_C:BndEvt__EnemySlot_Button_Button_48_.* is already intercepted by $T"
@@ -1043,13 +1049,17 @@ $intercept = $started + @(
     "\[$T\] OK FN2EMPTY after the reload FnList is empty \(0 bytes, 0 rules\)"
     "\[$T\] OK FN2TOGGLE card A toggles again"
     "\[$T\] OK FN2TOGGLE card bat toggles again"
-    "\[$T\] OK FN2LETGO "   # released rules let their replacement go: a forced GC collects it
+    # The reload releases the tooltip rule off the game thread: its entry stays in the game instance (one line), and
+    # a forced GC in pass 2 leaves that TextBlock.
+    "#1|\[$N\] native: intercept: kept 1 replacement\(s\) referenced by the game instance \(released off the game thread\)"
+    "\[$T\] OK FN2KEPT "
+    "\[$T\] OK FNWORLDREL "
     "\[$T\] END result=PASS"
     # The hook stays: no callback removed, no fault, no WARN from the interception.
     "!\[$N\] native: intercept: WARN"
 )
 # The fn-live-* group: the cases that need the screen (target and value handles and classes, the cap, another mod's rule).
-foreach ($id in 'target-class', 'target-freed', 'target-unknown', 'value-dead', 'value-class', 'value-nogi', 'noreturn', 'tip-bat-class', 'other-release',
+foreach ($id in 'target-class', 'target-freed', 'target-unknown', 'value-dead', 'value-class', 'value-nogi', 'value-world', 'noreturn', 'tip-bat-class', 'other-release',
                 'other-suspend', 'other-wrelease', 'other-key', 'same-key', 'cap-mod') {
     $intercept += "\[$T\] OK CASE cs\.fn-live-$id "
 }

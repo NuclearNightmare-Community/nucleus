@@ -13,7 +13,8 @@
 --   runOriginal(id, f, ...)     suspends the rule, calls f(...) under pcall, resumes it, then returns f's results or
 --                               raises f's error again. The game's function runs for every call f makes.
 --   list() -> { { id, mod, fn, target, action, seen, applied, suspended } ... }   every mod's rules
--- Errors are raised as "fn.<op>: <problem>". Game thread only (list too: it is cheap there).
+-- Errors are raised as "fn.<op>: <problem>". intercept, release and runOriginal: game thread only; list: any thread
+-- (<Core>_FnList touches no UObject).
 --
 -- onCall: one RegisterHook post-hook per function path per Lua state, registered at most once. The hook returns
 -- nothing, so it never overwrites the result. It acts only while this state owns a rule on that function whose
@@ -271,7 +272,7 @@ function API.release(id, ...)
     enter("release")
     local ok, r = pcall(native("_FnRelease"), id)
     if not ok then rethrow("release", "_FnRelease", r) end
-    if r == true then S.rules[id] = nil end
+    S.rules[id] = nil -- released, or already gone (pruned with its target): either way no longer this state's
     return r == true
 end
 

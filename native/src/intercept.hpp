@@ -22,6 +22,7 @@ namespace core_native::intercept
     extern const std::string g_fn_release;   // <Core>_FnRelease
     extern const std::string g_fn_suspend;   // <Core>_FnSuspend
     extern const std::string g_fn_list;      // <Core>_FnList
+    extern const size_t g_allow_count;       // functions on the allowlist
 
     int l_intercept(const Lua& lua);
     int l_release(const Lua& lua);

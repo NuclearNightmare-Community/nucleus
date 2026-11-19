@@ -248,8 +248,7 @@ namespace core_native
     {
         *fault = 0;
         *bits = 0;
-        // UE5 values that UE4SS's UE4-era enums don't name: EInternalObjectFlags::Garbage and EObjectFlags::RF_MirroredGarbage.
-        constexpr int32_t k_internal_garbage = 1 << 21;
+        // UE5 value that UE4SS's UE4-era enums don't name: EObjectFlags::RF_MirroredGarbage (k_internal_garbage: core_shared.hpp).
         constexpr int32_t k_rf_mirrored_garbage = 0x40000000;
         __try
         {
