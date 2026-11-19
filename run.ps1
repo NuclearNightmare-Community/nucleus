@@ -18,8 +18,7 @@
   "drag <x1> <y1> <x2> <y2>" (the left button down at the first point, ten moves to the second, up there; to the front
   first, like a click), "type <text>" (1-16 of 0-9 . , a-z -, each posted as WM_CHAR to the game window) and
   "key BACK", "key TAB", "key ESCAPE" (posted like Enter). Core story 27's window keys add "key LEFT" and "key RIGHT"
-  (arrow keys, extended, like UP and DOWN). Core story 43 (intercept) adds "hotreload": the game window to the front,
-  then Ctrl+R pressed (UE4SS's hot reload). Core story 38 (a row dragged and held in steps) adds "press <x> <y>" (the
+  (arrow keys, extended, like UP and DOWN). Core story 38 (a row dragged and held in steps) adds "press <x> <y>" (the
   left button down there, kept), "glide <x> <y>" (ten real moves there from where the cursor is, the buttons as they
   are), "release <x> <y>" (the left button up there), "rrelease <x> <y>" (a right press and release there while the left
   button is held; each to the front first, like a click) and "keydown <KEY>" / "keyup <KEY>" (only that half of a
@@ -47,6 +46,8 @@ param(
     [switch] $AllowOtherDrivers # run even when another runner's test mod is enabled in the copy (tools/run-guard)
 )
 $ErrorActionPreference = 'Stop'
+# Core story 43: intercept presses Ctrl+R, which only the VM run enables (Invoke-NNBSpRun -HotReload); never on the host.
+if ($Scenario -eq 'intercept' -and $Target -ne 'vm') { Write-Host 'refused: the intercept scenario runs only in the VM (-Target vm): it needs UE4SS''s hot reload, which only the VM run turns on.'; exit 1 }
 $hostTimeout = switch ($Scenario) { 'ui' { 900 } 'menu' { 900 } 'createserver' { 900 } 'gameinsert' { 900 } 'nativerow' { 900 } 'intercept' { 900 } 'journal' { 1200 } 'soak' { 1000 } default { 420 } }
 if ($TimeoutSec -le 0 -and $Target -eq 'host') { $TimeoutSec = $hostTimeout }
 $here     = $PSScriptRoot
@@ -247,17 +248,6 @@ function Invoke-Request([string] $cmd) {
         return
     }
     if ($cmd -cmatch '^shot [A-Za-z0-9._-]{1,40}$') { Write-Host "  $cmd skipped (screenshots only in the VM)"; return }
-    if ($cmd -ceq 'hotreload') {
-        # Core story 43: UE4SS's hot reload (Ctrl+R, which UE4SS reads only while the game window is in front), as
-        # mods/cpp-spike/run.ps1 presses it: Lua mods stop, core's DLL unloads, everything starts again.
-        $h = Get-FrontGameWindow 'hotreload'
-        if ($h -eq [IntPtr]::Zero) { return }
-        [CoreRun.Win]::keybd_event(0x11, 0x1D, 0, [UIntPtr]::Zero); [CoreRun.Win]::keybd_event(0x52, 0x13, 0, [UIntPtr]::Zero)
-        Start-Sleep -Milliseconds 80
-        [CoreRun.Win]::keybd_event(0x52, 0x13, 2, [UIntPtr]::Zero); [CoreRun.Win]::keybd_event(0x11, 0x1D, 2, [UIntPtr]::Zero)
-        Write-Host '  pressed Ctrl+R'
-        return
-    }
     $vk, $scan, $label = $null, $null, $null
     $ext = 0
     # Core story 38: "keydown <KEY>" / "keyup <KEY>" post only that half of "key <KEY>".

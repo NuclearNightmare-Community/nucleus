@@ -371,7 +371,7 @@ class CoreNative : public CppUserModBase
         // every-tick callback clears suspensions (engine_tick_pre runs once only).
         m_hooks.push_back(Hook::RegisterProcessLocalScriptFunctionPreCallback(&intercept::plsf_pre, {false, false, owner, STR("intercept_plsf_pre")}));
         m_hooks.push_back(Hook::RegisterEngineTickPreCallback(&intercept::tick_pre, {false, true, owner, STR("intercept_tick_pre")}));
-        logf("intercept: callback registered ({} allowlisted functions)", 4);
+        logf("intercept: callback registered ({} allowlisted functions)", intercept::g_allow_count);
     }
 };
 

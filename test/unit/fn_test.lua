@@ -165,7 +165,9 @@ eq(errOf(A.intercept, { fn = "p", target = "dead", action = "skip" }), "fn.inter
 
 -- ---------------------------------------------------------------- release
 eq(A.release(1), true, "release(own) -> true")
+F._S.rules[2] = { path = "/p", applied = 0 }
 eq(A.release(2), false, "release(unknown) -> false")
+eq(F._S.rules[2], nil, "release: a rule already gone (pruned) is forgotten by this state too")
 eq(errOf(A.release, 7), "fn.release: rule 7 belongs to OtherMod, not NucleusSkelTest", "release(another mod's) raises, mapped")
 eq(errOf(A.release, 1.5), "fn.release: id must be an integer (one intercept returned), got 1.5", "release(1.5)")
 eq(errOf(A.release), "fn.release: id must be an integer (one intercept returned), got nil", "release()")

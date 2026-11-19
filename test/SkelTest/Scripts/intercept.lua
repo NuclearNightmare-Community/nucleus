@@ -25,8 +25,12 @@
 --       dependent stops  UninstallMod("<Core>SkelPeer"): its rule is gone and the Bat card toggles
 --       core reload      two rules left installed; Scripts/intercept-pass.txt written and a "hotreload" request
 --                        (Ctrl+R): Lua stops and core's DLL unloads
+--       after runOriginal: a suspension left on is cleared by the next tick (FNTICKCLEAR); the tooltip rule's value
+--                        swapped (same key) and released on the game thread, each followed by a forced GC (FNSWAPVAL,
+--                        FNRELFREE), then installed again
 --     Pass 2 (main.lua runs again after the reload; intercept-pass.txt says so): FnList empty, card A and the Bat card
---     toggle again (each put back). check.ps1 finds the old instance's released and unloading lines.
+--     toggle again (each put back); the replacement released off the game thread at the reload is still kept by the
+--     game instance after a forced GC (FN2KEPT). check.ps1 finds the old instance's released, kept and unloading lines.
 --   Cards are always left as found. Create is never clicked: no session is made.
 -- Never keeps a UObject across steps: each step finds what it needs again; only paths, handles and numbers are kept.
 return function(X, GS)
@@ -237,6 +241,13 @@ return function(X, GS)
     local function ruleById(id) for _, r in ipairs(core().fn.list()) do if r.id == id then return r end end return nil end
     local function counts(id) local r = ruleById(id) return r and r.seen or -1, r and r.applied or -1 end
     local function addrOf(o) return v(o) and try(function() return o:GetAddress() end) or nil end
+    -- Liveness through KismetSystemLibrary:IsValid as a UFunction (AGENTS.md: UE4SS's IsValid() passes destroyed objects).
+    local function kslAlive(o)
+        if o == nil then return false end
+        return try(function()
+            return StaticFindObject("/Script/Engine.KismetSystemLibrary:IsValid")(StaticFindObject("/Script/Engine.Default__KismetSystemLibrary"), o)
+        end) == true
+    end
 
     local function clickOn(label, finder)
         step("fn: click " .. label, function()
@@ -452,9 +463,55 @@ return function(X, GS)
                 "FNRAISE runOriginal re-raised f's error (%s), the rule resumed (suspended=%s), the next Lua call skipped (%s, applied %d->%d)",
                 tostring(err), tostring(r and r.suspended), tostring(st), ap0, ap1)
         end)
+        -- A suspension nobody resumes is cleared at the next engine tick.
+        step("fn: suspend left on", function()
+            nat("_FnSuspend")(T.click, true)
+            return msAfter(0.5), 3
+        end)
+        step("fn: tick clear", function()
+            local r = ruleById(T.click)
+            local ap0 = r and r.applied or -1
+            callClick("A")
+            local ap1 = select(2, counts(T.click))
+            check(r ~= nil and r.suspended == false and ap1 == ap0 + 1, "FNTICKCLEAR a suspension left on is cleared by the next engine tick (suspended=%s, a Lua call applied %d->%d)",
+                tostring(r and r.suspended), ap0, ap1)
+        end)
         step("fn: A back", function()
             W.runOriginal(T.click, function() callClick("A") end)
             check(state("A") == T.a0, "FNABACK card A put back with runOriginal (%s)", tostring(state("A")))
+        end)
+
+        -- The same key with a new replacement: the game instance holds the new one and lets the old one go; a release
+        -- on the game thread lets the last one go. Then the tooltip rule is installed again for the reload.
+        local function newTip(name)
+            local tb = StaticConstructObject(StaticFindObject("/Script/UMG.TextBlock"), gi(), FName(name))
+            tb:SetText(FText(TIP_TEXT))
+            return tb
+        end
+        step("fn: swap value", function()
+            local tb2 = newTip("NucleusFnTip2")
+            T.tb2Addr, T.tb2H = addrOf(tb2), core().ref(tb2)
+            T.swapId = W.intercept{ fn = P_TIP, target = card("A"), action = "replace", value = tb2 }
+            StaticFindObject("/Script/Engine.Default__KismetSystemLibrary"):CollectGarbage()
+            return msAfter(2), 5
+        end)
+        step("fn: swap check", function()
+            local ra = card("A"):GetToolTipWidget()
+            local oldGone = core().deref(T.tbH) == nil
+            check(T.swapId == T.tip and addrOf(ra) == T.tb2Addr and oldGone, "FNSWAPVAL the same key with a new TextBlock keeps rule %s (%s); after a forced GC card A's tooltip is the new one (%s) and the old one is gone (%s)",
+                tostring(T.tip), tostring(T.swapId), tostring(addrOf(ra) == T.tb2Addr), tostring(oldGone))
+            T.relOk = W.release(T.tip)
+            StaticFindObject("/Script/Engine.Default__KismetSystemLibrary"):CollectGarbage()
+            return msAfter(2), 5
+        end)
+        step("fn: release frees", function()
+            local gone = core().deref(T.tb2H) == nil
+            core().free(T.tb2H)
+            check(T.relOk == true and gone, "FNRELFREE release(%s) -> %s; after a forced GC its TextBlock is gone (%s)", tostring(T.tip), tostring(T.relOk), tostring(gone))
+            local tb3 = newTip("NucleusFnTip3")
+            T.tbAddr, T.tbH = addrOf(tb3), core().ref(tb3)
+            T.tip = W.intercept{ fn = P_TIP, target = card("A"), action = "replace", value = tb3 }
+            check(addrOf(card("A"):GetToolTipWidget()) == T.tbAddr, "FNTIPAGAIN the tooltip rule installed again (rule %s)", tostring(T.tip))
         end)
 
         -- ---- row 6: two mods (SkelPeer's any skip on the Bat click; its refusal of card A's click)
@@ -496,6 +553,21 @@ return function(X, GS)
             case(P .. "value-nogi", nI .. "(tip, <card B>, 'replace', <a TextBlock in /Engine/Transient>) [no game instance]", f(I, P_TIP, hB, "replace", hLoose),
                 E.err("has no game instance to keep it alive (create it with the game instance as its outer)"))
             core().free(hLoose)
+            -- a replacement whose outer is the player controller: no game instance in its outer chain, found through
+            -- GameplayStatics:GetGameInstance (the fallback); installed on card B's tooltip, then released
+            local pcObj = FindFirstOf("PlayerController")
+            if kslAlive(pcObj) then
+                local worldTb = StaticConstructObject(StaticFindObject("/Script/UMG.TextBlock"), pcObj, FName("NucleusFnWorldTip"))
+                local hWorld = core().ref(worldTb)
+                local idW
+                case(P .. "value-world", nI .. "(tip, <card B>, 'replace', <a TextBlock whose outer is the player controller>) [GetGameInstance fallback]",
+                    function() idW = I(P_TIP, hB, "replace", hWorld) return idW end,
+                    E.ret("an integer id", function(r) return math.type(r[1]) == "integer" and r[1] > 0 end))
+                if idW then check(R(idW) == true, "FNWORLDREL the player-controller TextBlock's rule %s released", tostring(idW)) end
+                core().free(hWorld)
+            else
+                check(false, "CASE %svalue-world no live player controller", P)
+            end
             case(P .. "noreturn", nI .. "(click, <card B>, 'replace', <a TextBlock>) [the click returns nothing]", f(I, P_CLICK, hB, "replace", T.tbH),
                 E.err(nI .. ": 'replace' needs a function that returns an object; " .. P_CLICK .. " returns nothing"))
             case(P .. "tip-bat-class", nI .. "(Bat tooltip, <card B>, 'skip', nil) [an EnemySlot card on the Bat function]", f(I, P_BTIP, hB, "skip", nil), E.err("is not a BatSlot_Button1_C"))
@@ -598,18 +670,19 @@ return function(X, GS)
                 local s2 = state(key)
                 check(s0 ~= nil and s1 == flipped(s0) and s2 == s0, "FN2TOGGLE card %s toggles again (%s -> %s -> %s)", key, tostring(s0), tostring(s1), tostring(s2))
             end
-            -- The released rules let their replacement go: the game instance no longer keeps pass 1's TextBlock.
+            -- The reload released pass 1's tooltip rule off the game thread (UE4SS's event-loop thread), so the game
+            -- instance still keeps its TextBlock (the documented, bounded leak): a forced GC leaves it.
             local g = gi()
-            T2.tipPath = g and (g:GetFullName():gsub("^%S+ ", "")) .. ".NucleusFnTip"
+            T2.tipPath = g and (g:GetFullName():gsub("^%S+ ", "")) .. ".NucleusFnTip3"
             local tb = T2.tipPath and StaticFindObject(T2.tipPath)
-            T2.tipBefore = tb ~= nil and v(tb)
+            T2.tipBefore = tb ~= nil and kslAlive(tb)
             StaticFindObject("/Script/Engine.Default__KismetSystemLibrary"):CollectGarbage()
             return msAfter(2), 5
         end)
-        step("fn2: let go", function()
+        step("fn2: kept", function()
             local tb = T2.tipPath and StaticFindObject(T2.tipPath)
-            local alive = tb ~= nil and v(tb)
-            check(T2.tipBefore == true and not alive, "FN2LETGO after the reload and a forced garbage collection pass 1's replacement TextBlock is gone (before %s, after %s)",
+            local alive = tb ~= nil and kslAlive(tb)
+            check(T2.tipBefore == true and alive, "FN2KEPT after the reload and a forced garbage collection pass 1's replacement, released off the game thread, is still kept by the game instance (before %s, after %s)",
                 tostring(T2.tipBefore), tostring(alive))
         end)
     end

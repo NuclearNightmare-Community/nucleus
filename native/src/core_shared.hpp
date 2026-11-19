@@ -87,6 +87,8 @@ namespace core_native
         OF_Archetype = 1u << 1,          // RF_ArchetypeObject
         OF_Garbage = 1u << 2,            // UE5: EInternalObjectFlags::Garbage (1 << 21) or RF_MirroredGarbage (0x40000000)
     };
+    // UE5's EInternalObjectFlags::Garbage, which UE4SS's UE4-era enum doesn't name.
+    constexpr int32_t k_internal_garbage = 1 << 21;
     int object_flags(int32_t index, const void* target, uint32_t* bits, unsigned long* fault);
 
     // FWeakObjectPtr::Get() under SEH. Reads only GUObjectArray (by the stored index), never the object. nullptr when

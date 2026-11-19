@@ -71,12 +71,19 @@ local function interceptPeer(core)
     local handle
     local done = false
     local function try(f) local ok, v = pcall(f) if ok then return v end return nil end
+    -- Liveness through KismetSystemLibrary:IsValid as a UFunction (AGENTS.md: UE4SS's IsValid() passes destroyed objects).
+    local function alive(o)
+        if o == nil then return false end
+        return try(function()
+            return StaticFindObject("/Script/Engine.KismetSystemLibrary:IsValid")(StaticFindObject("/Script/Engine.Default__KismetSystemLibrary"), o)
+        end) == true
+    end
     local okL, res = pcall(LoopInGameThreadWithDelay, 250, function()
         if done then if handle then pcall(CancelDelayedAction, handle) end return end
         if try(function() return ModRef:GetSharedVariable(FN_CUE) end) ~= 1 then return end
         local screen
         for _, w in ipairs(FindAllOf("CreateServer_C") or {}) do
-            if try(function() return w:IsValid() and w:IsInViewport() end) then screen = w end
+            if alive(w) and try(function() return w:IsInViewport() end) then screen = w end
         end
         if not screen then return end
         done = true
@@ -86,8 +93,9 @@ local function interceptPeer(core)
             local arr = screen.EnemySlotButtons
             for i = 1, arr:GetArrayNum() do
                 local c = arr[i]
-                if c:IsValid() and c.EnemyType == 0 then cardA = c end
+                if alive(c) and c.EnemyType == 0 then cardA = c end
             end
+            if not cardA then say("PEERFN UNEXPECTED card A not found") return end
             local id = core.fn.intercept{ fn = BAT_CLICK, action = "skip" }
             say("PEERFN bat any skip id=%s", tostring(id))
             local okA, errA = pcall(core.fn.intercept, { fn = A_CLICK, target = cardA, action = "skip" })
