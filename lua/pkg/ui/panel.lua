@@ -178,6 +178,7 @@ function PN.move(h, child, index, ...)
     local n = #el.children
     if math.type(index) ~= "integer" then C.fail("%s.panel.move: index must be an integer from 1 to %d, got %s", C.UI, n, C.describe(index)) end
     if index < 1 or index > n then C.fail("%s.panel.move: index %d is out of range (1 to %d)", C.UI, index, n) end
+    C.listChanged(el) -- core story 38: a drag or a carry is cancelled first (its pickup order back), then the move
     local cur
     for i, ch in ipairs(el.children) do if ch == cel then cur = i break end end
     if cur == index then return end
@@ -185,7 +186,6 @@ function PN.move(h, child, index, ...)
     for i, ch in ipairs(el.children) do list[i] = ch end
     table.remove(list, cur)
     table.insert(list, index, cel)
-    C.listChanged(el) -- core story 38
     applyOrder(el, list)
 end
 

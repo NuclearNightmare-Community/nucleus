@@ -20,8 +20,9 @@
 -- while the pointer is still). OnDrop on the list calls <Core>_OnDrop: a left release over the list drops (one rebuild
 -- when the order changed, then onReorder, focus on the moved row); a right release, a release over another list, Escape
 -- (Slate's; the row's OnDragCancelled calls <Core>_OnDragCancel), a drop nowhere, B or Back, the window or the list
--- going, or any API change to the list (C.listChanged) cancels: no change, no callback. The loop stops when the drag
--- ends or when WidgetBlueprintLibrary:IsDragDropping() turns false (a drop this state never saw: cancelled).
+-- going, or any API change to the list (C.listChanged) cancels: no change, no callback. The loop runs during a drag, a
+-- hold or a carry (focus.lua's keys); a drag ends there too when WidgetBlueprintLibrary:IsDragDropping() turns false (a
+-- drop this state never saw: cancelled), and the loop stops once none of the three is on.
 --
 -- Rules of story 37: every hook body runs under pcall with C.inDispatch raised (cached assets and classes only; no hook
 -- or LoadMap hook registered there) and one C.warnOnce for a fault; another mod's tag, a stale widget, an off-thread
@@ -167,8 +168,8 @@ end
 
 -- ---------------------------------------------------------------- where it works
 
-RO.cb = {} -- set by focus.lua: globalTop(rec), focusRow(row, scroll), remember(), carrying(), busy(), tick(),
-           -- interrupt(list), dragEnded()
+RO.cb = {} -- set by focus.lua: globalTop(rec), focusRow(row, scroll, start), remember(), carrying(), busy(), tick(),
+           -- interrupt(list), ensure()
 
 -- The open window record a list sits in, or nil (lists sit directly on a host).
 function RO.windowOf(list)
@@ -448,7 +449,6 @@ local function finish(cancelled)
     if lw then setLine(list, lw, nil) elseif list then list.lineShown = nil end
     if cancelled then S.dragCancels = S.dragCancels + 1 end
     if not (RO.cb.busy and RO.cb.busy()) then stopLoop() end
-    if RO.cb.dragEnded then pcall(RO.cb.dragEnded) end
     return d
 end
 
@@ -708,8 +708,8 @@ local function ensureHooks()
 end
 RO._ensureHooks = ensureHooks
 
--- Keeps every row's Blueprint flag Draggable equal to "movable in an active list" (written only when it changes or
--- the widget is new).
+-- Keeps every row's Blueprint flag Draggable equal to "movable in an active list" (written only when the live
+-- widget's flag differs).
 local flagsOn = 0 -- rows whose Draggable is true now (the tick keeps syncing while any is)
 function RO.sync()
     local n = 0
@@ -722,13 +722,16 @@ function RO.sync()
                     if want or ch.dragFlag then
                         local w = liveWidget(ch)
                         if w then
-                            local addr = w:GetAddress()
-                            if ch.dragFlag ~= want or ch.dragAddr ~= addr then
+                            -- the live widget's own flag decides (an address can be reused by a new widget)
+                            local okR, cur = pcall(C.prop, w, "Draggable")
+                            if not okR or cur ~= want then
                                 local ok = pcall(function() w.Draggable = want end)
-                                if ok then ch.dragFlag, ch.dragAddr = want, addr end
+                                if ok then ch.dragFlag = want end
+                            else
+                                ch.dragFlag = want
                             end
                         else
-                            ch.dragFlag, ch.dragAddr = nil, nil
+                            ch.dragFlag = nil
                         end
                     end
                     if ch.dragFlag then n = n + 1 end

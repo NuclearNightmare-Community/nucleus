@@ -2224,6 +2224,35 @@ do
         ok(T.keyUp(wr, A.accept) == true and FO._carry() == nil and T.agree(k[1]) and T.ncalls(k[1]) == nk, "story 38 hold " .. k[1] .. ": release drops, focus back, no change")
     end
     ok(#T.cbs == 0, "story 38: no callback without an order change", #T.cbs)
+    -- A plain button (a gear in r6): a tap clicks once; a hold picks the row up and the release drops it without a click
+    B.create{ id = "r38g6", place = { row = rows[6] }, icon = { icon = "gear" }, iconSize = 28, dimmed = true, onClick = T.rec("r38g6") }
+    tick()
+    FO.used(C.els["r38g6"], true)
+    FO._input("keys")
+    ok(T.agree("r38g6"), "story 38 setup: r6's gear focused", SC.stats().focus)
+    local ng = T.ncalls("r38g6")
+    ok(T.key(wr, INV_DIR, A.accept) == false and FO._hold() ~= nil, "story 38 tap button: Accept left to the Button, a hold starts")
+    T.fire(T.CLICK, T.tagged("r38g6")) -- the Button's own click on the key's release
+    clock = clock + 500000
+    T.roTick()
+    ok(T.ncalls("r38g6") == ng + 1 and FO._hold() == nil and FO._carry() == nil, "story 38 tap button: it clicks once, no pickup")
+    T.key(wr, INV_DIR, A.accept)
+    clock = clock + 500000
+    T.roTick()
+    ok(FO._carry() and FO._carry().rowId == "r38r6" and F.focus == T.tagged("r38r6"), "story 38 hold button: its row is picked up, focus on the row")
+    ok(T.keyUp(wr, A.accept) == true and FO._carry() == nil and T.ncalls("r38g6") == ng + 1 and T.agree("r38g6"),
+        "story 38 hold button: the release drops it, no click, focus back on the gear")
+    -- A checkbox: a hold picks up and drops without toggling
+    FO.used(C.els["r38c4"], true)
+    FO._input("keys")
+    local nc4, was4 = T.ncalls("r38c4"), C.els["r38c4"].checked
+    T.key(wr, INV_DIR, A.accept)
+    clock = clock + 500000
+    T.roTick()
+    ok(FO._carry() and FO._carry().rowId == "r38r4", "story 38 hold checkbox: its row is picked up")
+    ok(T.keyUp(wr, A.accept) == true and FO._carry() == nil and T.ncalls("r38c4") == nc4 and C.els["r38c4"].checked == was4 and T.agree("r38c4"),
+        "story 38 hold checkbox: the release drops it without toggling")
+    ok(#T.cbs == 0, "story 38 tap and hold on a button and a checkbox: no callback", #T.cbs)
 
     -- Carry: grip focused (r3); Enter, Down, Down, Enter -> moved 2 down live, one onReorder at the drop
     for _ = 1, 12 do if T.agree("r38r3") then break end T.key(wr, D.up, INV_ACT) end
@@ -2290,6 +2319,19 @@ do
     ok(FO._carry() == nil and T.ids("r38l") == table.concat(want, " ") and #T.cbs == 1 and C.els["r38r2"].carryBg == nil,
         "story 38 interrupted: setOrder cancels the carry first, its own order applies, no callback", T.ids("r38l"))
     ok(T.keyUp(wr, A.accept) == false and #T.cbs == 1, "story 38 interrupted: setOrder never calls onReorder")
+    -- Interrupted: panel.move during a carry: the pickup order back first, then that one move
+    for _ = 1, 12 do if T.agree("r38c2") then break end T.key(wr, D.up, INV_ACT) end
+    T.key(wr, INV_DIR, A.accept); clock = clock + 500000; T.roTick()
+    local pick = {}
+    for i, ch in ipairs(C.els["r38l"].children) do pick[i] = ch.id end
+    T.key(wr, D.down, INV_ACT)
+    ok(FO._carry() ~= nil and T.ids("r38l") ~= table.concat(pick, " "), "story 38 move setup: carried one slot down")
+    for i, id in ipairs(pick) do if id == "r38r9" then table.remove(pick, i) break end end
+    table.insert(pick, 2, "r38r9")
+    PNL.move(L, C.els["r38r9"].handle, 2)
+    ok(FO._carry() == nil and T.ids("r38l") == table.concat(pick, " ") and #T.cbs == 1,
+        "story 38 interrupted: panel.move cancels the carry first, then only its own move applies, no callback", T.ids("r38l"))
+    T.keyUp(wr, A.accept)
     -- Interrupted: a child removed; a row locked; a hover-free focus change
     for _, how in ipairs({ "remove", "lock", "focus" }) do
         for _ = 1, 12 do if T.agree("r38c2") then break end T.key(wr, D.up, INV_ACT) end
@@ -2483,6 +2525,24 @@ do
     LS.create{ id = "r38l", place = { screen = R, corner = "top-left" }, size = { 600, 200 }, reorderable = true }
     tick()
     ok(T.tagged("r38r4").Draggable == true, "story 38 same-id create: reorderable on again")
+    -- A row's widget replaced by a new one at the same address: its flags are written again (the live widget decides)
+    do
+        local WBL = F.objects["/Script/UMG.Default__WidgetBlueprintLibrary"]
+        for _, id in ipairs({ "r38r3", "r38r5" }) do
+            local el = C.els[id]
+            local old = handles[el.ref]
+            local nw = WBL:Create(nil, ROWCLASS)
+            nw.__addr, nw.tag, nw.parent, nw.Slot = old.__addr, old.tag, old.parent, old.Slot
+            handles[el.ref] = nw
+            if id == "r38r3" then
+                ok(FO._targetOf(el) == nw and nw.bIsFocusable == true, "story 38 reused address: a grip row's new widget is made focusable")
+            else
+                RO.sync()
+                ok(nw.Draggable == true, "story 38 reused address: a movable row's new widget gets Draggable")
+            end
+            handles[el.ref] = old
+        end
+    end
     SC.close(R)
     ok(FO.stats().faults == faults0 and RO.stats().faults == roFaults0 and C.inDispatch == 0, "story 38: no fault", RO.stats().faults - roFaults0)
 end
