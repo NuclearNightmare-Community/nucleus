@@ -6,7 +6,7 @@ All notable changes to Nucleus are recorded here. The format follows [Keep a Cha
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
 
-For players: the focus chip (keyboard or gamepad) is now light blue instead of red, so it stands out behind a ticked checkbox's red tick; the focused icon or text on it is dark (white read poorly on the light blue).
+For players: the focus chip (keyboard or gamepad) is now light blue instead of red, so it can't be mistaken for a ticked checkbox's red tick; the focused icon or text on it is dark (white read poorly on the light blue), so a focused ticked checkbox shows a dark filled box inside the blue frame.
 
 ### Changed
 
