@@ -22,7 +22,7 @@
 param(
     [string] $Instance,
     [string] $Log,
-    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'createserver', 'gameinsert', 'nativerow', 'soak', 'manual', 'net-host', 'net-client', 'net-vanilla-host',
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'createserver', 'gameinsert', 'nativerow', 'intercept', 'soak', 'manual', 'net-host', 'net-client', 'net-vanilla-host',
                  'presence-host', 'presence-client', 'presence-vanilla-host')]
     [string] $Scenario = 'skeleton',
     [ValidateSet('host', 'vm')] [string] $Target = 'host'
@@ -967,6 +967,88 @@ $nrCaseIds = @('key', 'like-num', 'like-empty', 'like-65', 'like-space', 'like-d
 foreach ($p in 'menu1', 'match1') {
     foreach ($id in $nrCaseIds) { $badInput += "\[$T\] OK CASE $p\.ui-nr-$id " }
 }
+# Core story 43 (CAP-13, core 0.18.0): function interception's bad-input group (intercept.lua), in both worlds and off
+# the game thread: the four natives' arguments, the allowlist, not loaded, and the core.fn wrappers.
+$fnCaseIds = @('i-noargs', 'i-three', 'i-five', 'i-path-nil', 'i-path-num', 'i-path-table', 'i-target-str', 'i-target-float', 'i-target-nil',
+               'i-target-bool', 'i-action-nil', 'i-action-num', 'i-value-str', 'i-value-float', 'i-value-table', 'i-path-empty', 'i-path-513',
+               'i-path-4k', 'i-offlist', 'i-offlist-case', 'i-offlist-space', 'i-offlist-native', 'i-offlist-ctrl', 'i-offlist-512',
+               'i-offlist-class', 'i-target-neg', 'i-target-2\^53', 'i-target-minint', 'i-action-bad', 'i-action-empty', 'i-skip-value',
+               'i-replace-noreturn', 'i-replace-novalue', 'i-replace-value0', 'i-replace-valueneg', 'i-notloaded',
+               'r-noargs', 'r-two', 'r-nil', 'r-str', 'r-float', 'r-0', 'r-neg', 'r-2\^53', 'r-maxint', 'r-unknown', 'r-rand4',
+               's-noargs', 's-one', 's-three', 's-id-str', 's-id-0', 's-on-nil', 's-on-int', 's-on-str', 's-unknown',
+               'l-arg', 'l-nil', 'l-ok',
+               'w-nil', 'w-nofn', 'w-target-num', 'w-value-str', 'w-oncall-num', 'w-mod', 'w-offlist', 'w-action', 'w-release-str',
+               'w-release-unknown', 'w-run-nil', 'w-run-unknown', 'w-list-arg', 'w-list-ok', 'w-has')
+foreach ($p in 'menu1', 'match1') {
+    foreach ($id in $fnCaseIds) { $badInput += "\[$T\] OK CASE $p\.fn-$id " }
+    foreach ($id in 'intercept', 'release', 'suspend', 'list', 'w-intercept', 'w-release', 'w-run') { $badInput += "\[$T\] OK CASE $p\.off-fn-$id " }
+}
+# Core story 43: function interception on the create-world screen's enemy cards, one launch written for the VM at
+# 1280x720 (run.ps1 -Scenario intercept -Target vm), two passes around a Ctrl+R hot reload. END result=PASS (pass 2)
+# and no FAIL line (pass 1, "!... FAIL" in $started) mean every check the test made passed; these name the matrix rows.
+$intercept = $started + @(
+    "\[$N\] native: intercept: callback registered "
+    "#2|\[$T\] SCENARIO intercept "
+    "\[$T\] FNPASS 1"
+    "\[$T\] FNPASS 2"
+    "\[$T\] OK FNCARDS "
+    # Skip a click: a real click, Enter on the focused card (the gamepad-style press) and a Lua call, each skipped with
+    # seen/applied +1 and onCall(A) once, on the next frame.
+    "\[$T\] OK FNSKIP rule \d+ on card A's click"
+    "\[$T\] OK FNSKIPPED real-click: "
+    "\[$T\] OK FNFOCUS "
+    "\[$T\] OK FNSKIPPED enter: "
+    "\[$T\] OK FNLUACALL "
+    "\[$T\] OK FNSKIPPED lua: "
+    # the three skipped calls, the real click after runOriginal and the Lua call after the raising one; never a call
+    # runOriginal let through (the same-key rule's onCall logs nothing)
+    "#5|\[$T\] FNONCALL \d+ "
+    # Other card; replace the tooltip (Lua call, card B unchanged, a real hover); any vs exact.
+    "\[$T\] OK FNOTHER a real click on card B toggled it"
+    "\[$T\] OK FNOTHERBACK "
+    "\[$T\] OK FNTIPA "
+    "\[$T\] OK FNTIPB card B's GetToolTipWidget\(\) -> W_ToolTip_EnemySelect_C"
+    "\[$T\] OK FNHOVER a real hover over card A"
+    "\[$T\] OK FNANY "
+    "\[$T\] OK FNANYREL "
+    # runOriginal: toggles, no onCall for it, the next real click skipped again, a raising f re-raised and resumed.
+    "\[$T\] OK FNRUNORIG "
+    "\[$T\] OK FNRUNORIGQUIET "
+    "\[$T\] OK FNAGAIN "
+    "\[$T\] OK FNRAISE "
+    "\[$T\] OK FNABACK "
+    # Two mods: the peer's any skip on the Bat click; its refusal of card A's click (held by the test dependent).
+    "\[$Peer\] PEERFN bat any skip id=\d+"
+    "\[$Peer\] PEERFN refused: fn\.intercept: .*EnemySlot_Button_C:BndEvt__EnemySlot_Button_Button_48_.* is already intercepted by $T"
+    "!\[$Peer\] PEERFN (UNEXPECTED|failed)"
+    "\[$T\] OK FNPEER "
+    "\[$T\] OK FNPEERBAT "
+    "\[$T\] OK FNCAP 16 rules of $T "
+    "\[$T\] OK FNCAPREL "
+    # Dependent stops: the peer's rule released with its Lua (one line), the Bat card toggles.
+    "\[$T\] FNUNINSTALL $Peer"
+    "#1|\[$N\] native: intercept: released 1 rule\(s\) of $Peer \(Lua stopped\)"
+    "\[$T\] OK FNPEERGONE "
+    # Core reload with two rules installed: UE4SS stops every Lua mod before it unloads core's DLL, so the test
+    # dependent's two rules go with its Lua (story spec change log, 2026-11-19), and the old instance's unloading line
+    # follows; after the reload FnList is empty and the cards toggle.
+    "\[$T\] OK FNPRERELOAD 2 rules of $T and 0 of others installed"
+    "\[$T\] FNRELOAD "
+    "\[$N\] native: intercept: released 2 rule\(s\) of $T \(Lua stopped\)"
+    "\[$N\] native: unloading: unregistered 3 hooks, dropped \d+ handles, released 0 intercepts"
+    "#2|\[$N\] native: loaded, version $Ver "
+    "\[$T\] OK FN2EMPTY after the reload FnList is empty \(0 bytes, 0 rules\)"
+    "\[$T\] OK FN2TOGGLE card A toggles again"
+    "\[$T\] OK FN2TOGGLE card bat toggles again"
+    "\[$T\] END result=PASS"
+    # The hook stays: no callback removed, no fault, no WARN from the interception.
+    "!\[$N\] native: intercept: WARN"
+)
+# The fn-live-* group: the cases that need the screen (target and value handles and classes, the cap, another mod's rule).
+foreach ($id in 'target-class', 'target-freed', 'target-unknown', 'value-dead', 'value-class', 'noreturn', 'tip-bat-class', 'other-release',
+                'other-suspend', 'other-wrelease', 'other-key', 'same-key', 'cap-mod') {
+    $intercept += "\[$T\] OK CASE cs\.fn-live-$id "
+}
 # Core story 31: the create-server screen as a host, one launch written for the VM at 1280x720 (run.ps1 -Scenario
 # createserver -Target vm). END result=PASS already means every check the test made passed; these name the ones the
 # acceptance criteria rest on.
@@ -1215,6 +1297,7 @@ $expect = @{
     'createserver' = $createServer
     'gameinsert' = $gameInsert
     'nativerow' = $nativeRow
+    'intercept' = $intercept
     'soak'      = $soak
     'manual'    = $manual
     'bad-input' = $badInput

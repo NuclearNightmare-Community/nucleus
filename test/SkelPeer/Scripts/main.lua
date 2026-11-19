@@ -11,6 +11,9 @@
 -- menu (Mod Manager story 4: two mods' controls on one screen): one checkbox "peer.cb" on the title-screen menu
 -- (bottom-right); it logs one PEERCB line per change it hears. The test dependent clicks it through the OS with its own
 -- controls live; check.ps1 checks that the peer heard exactly its own click and none of the test dependent's.
+-- intercept (core story 43: several dependents): in pass 1 an any skip on the Bat card's click, and card A's click
+-- (held by the test dependent) refused, logged as PEERFN lines; nothing in pass 2. The test dependent then stops it
+-- with UninstallMod.
 -- It never travels, presses keys or logs FAIL.
 local scriptDir = debug.getinfo(1, "S").source:gsub("^@", ""):match("^(.*)[/\\]")
 local ME = scriptDir:match("([^/\\]+)[/\\][Ss]cripts$")
@@ -54,10 +57,59 @@ local function settingsPeer(core)
     if okL then handle = res else say("PEERSET could not start its loop: %s", tostring(res)) end
 end
 
+-- Core story 43 (intercept, pass 1): once the test dependent's rule on card A's click is in (cue <core>.test.fn.cue = 1)
+-- and the create-world screen is open, an any skip on the Bat card's click, then card A's click, which the test
+-- dependent holds: refused. Sets <core>.test.fn.peer to 1 (done) or 2 (something unexpected). Pass 2 (after the
+-- test dependent's Ctrl+R; its Scripts/intercept-pass.txt exists): nothing.
+local FN_CUE, FN_DONE = CORE:lower() .. ".test.fn.cue", CORE:lower() .. ".test.fn.peer"
+local function interceptPeer(core)
+    local pf = io.open(mods .. "/" .. TARGET .. "/Scripts/intercept-pass.txt", "r")
+    if pf then pf:close() say("PEERFN pass 2: nothing to do") return end
+    local CLICK = "BndEvt__EnemySlot_Button_Button_48_K2Node_ComponentBoundEvent_0_OnButtonClickedEvent__DelegateSignature"
+    local A_CLICK = "/Game/Graphics/MainMenu/EnemySelect/EnemySlot_Button.EnemySlot_Button_C:" .. CLICK
+    local BAT_CLICK = "/Game/Graphics/MainMenu/EnemySelect/BatSlot_Button1.BatSlot_Button1_C:" .. CLICK
+    local handle
+    local done = false
+    local function try(f) local ok, v = pcall(f) if ok then return v end return nil end
+    local okL, res = pcall(LoopInGameThreadWithDelay, 250, function()
+        if done then if handle then pcall(CancelDelayedAction, handle) end return end
+        if try(function() return ModRef:GetSharedVariable(FN_CUE) end) ~= 1 then return end
+        local screen
+        for _, w in ipairs(FindAllOf("CreateServer_C") or {}) do
+            if try(function() return w:IsValid() and w:IsInViewport() end) then screen = w end
+        end
+        if not screen then return end
+        done = true
+        local result = 2
+        local ok, err = pcall(function()
+            local cardA
+            local arr = screen.EnemySlotButtons
+            for i = 1, arr:GetArrayNum() do
+                local c = arr[i]
+                if c:IsValid() and c.EnemyType == 0 then cardA = c end
+            end
+            local id = core.fn.intercept{ fn = BAT_CLICK, action = "skip" }
+            say("PEERFN bat any skip id=%s", tostring(id))
+            local okA, errA = pcall(core.fn.intercept, { fn = A_CLICK, target = cardA, action = "skip" })
+            if okA then say("PEERFN UNEXPECTED card A's click was not refused (rule %s)", tostring(errA))
+            else say("PEERFN refused: %s", tostring(errA)) result = 1 end
+        end)
+        if not ok then say("PEERFN failed: %s", tostring(err)) end
+        ModRef:SetSharedVariable(FN_DONE, result)
+        if handle then pcall(CancelDelayedAction, handle) end
+    end)
+    if okL then handle = res else say("PEERFN could not start its loop: %s", tostring(res)) end
+end
+
 local clicks = 0
 client.connect{
     mod = ME, need = NEED,
     onReady = function(core)
+        if SCENARIO == "intercept" then
+            local ok, err = pcall(interceptPeer, core)
+            if not ok then say("PEERFN failed: %s", tostring(err)) end
+            return
+        end
         if SCENARIO == "bad-input" then
             local ok, err = pcall(settingsPeer, core)
             if not ok then say("PEERSET failed: %s", tostring(err)) end

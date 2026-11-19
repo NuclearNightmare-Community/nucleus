@@ -1,8 +1,9 @@
 // Core's native part (docs: _bmad-output/specs/spec-core-v0/api-contract.md, "C++ natives").
 //
 // Registers <Core>_NativeVersion, <Core>_ClockMicros, <Core>_Ref, <Core>_Deref, <Core>_RefFree and the objectives natives
-// (objectives.cpp: <Core>_SetObjectives, <Core>_DescribeObjectives, <Core>_SetTraitorTaskState) into every Lua mod's state in
-// on_lua_start, before that mod's main.lua runs. <Core> is CORE_NAME (core_config.hpp, generated from mod.json
+// (objectives.cpp: <Core>_SetObjectives, <Core>_DescribeObjectives, <Core>_SetTraitorTaskState) and the function
+// interception natives (intercept.cpp, core story 43: <Core>_FnIntercept, <Core>_FnRelease, <Core>_FnSuspend,
+// <Core>_FnList) into every Lua mod's state in on_lua_start, before that mod's main.lua runs. <Core> is CORE_NAME (core_config.hpp, generated from mod.json
 // "name"); nothing here spells the name. Weak handles are FWeakObjectPtr (GUObjectArray index + serial number), so a
 // handle never resolves to an object that took over a freed object's slot or address.
 //
@@ -36,6 +37,7 @@
 
 #include "core_shared.hpp"
 #include "core_config.hpp"
+#include "intercept.hpp"
 #include "objectives.hpp"
 
 // QueryPerformanceCounter/Frequency (<Core>_ClockMicros). After the UE4SS headers, so their own Windows setup wins.
@@ -58,21 +60,6 @@ namespace
     const std::string g_fn_deref = std::string{CORE_NAME} + "_Deref";
     const std::string g_fn_free = std::string{CORE_NAME} + "_RefFree";
     const std::string g_fn_clock = std::string{CORE_NAME} + "_ClockMicros";
-
-    // FWeakObjectPtr::Get() under SEH. Reads only GUObjectArray (by the stored index), never the object.
-    UObject* weak_get(const FWeakObjectPtr* weak, unsigned long* fault)
-    {
-        *fault = 0;
-        __try
-        {
-            return weak->Get();
-        }
-        __except (seh_filter(GetExceptionCode()))
-        {
-            *fault = GetExceptionCode();
-            return nullptr;
-        }
-    }
 
     // Exactly one integer argument (Lua integer subtype; floats and numeric strings are refused, never coerced).
     auto one_integer(const Lua& lua, const std::string& fn, const char* name) -> int64_t
@@ -265,6 +252,16 @@ namespace
     }
 } // namespace
 
+// Function interception (intercept.cpp) takes its target and value objects as handles from this table.
+bool core_native::handle_weak(int64_t handle, FWeakObjectPtr* out)
+{
+    std::lock_guard guard{g_weak_mutex};
+    auto it = g_weak.find(handle);
+    if (it == g_weak.end()) return false;
+    *out = it->second;
+    return true;
+}
+
 class CoreNative : public CppUserModBase
 {
     std::vector<Hook::GlobalCallbackId> m_hooks;
@@ -306,6 +303,10 @@ class CoreNative : public CppUserModBase
                 lua.register_function(objectives::g_fn_set.c_str(), &objectives::l_set_objectives);
                 lua.register_function(objectives::g_fn_describe.c_str(), &objectives::l_describe_objectives);
                 lua.register_function(objectives::g_fn_traitor.c_str(), &objectives::l_set_traitor_task_state);
+                lua.register_function(intercept::g_fn_intercept.c_str(), &intercept::l_intercept);
+                lua.register_function(intercept::g_fn_release.c_str(), &intercept::l_release);
+                lua.register_function(intercept::g_fn_suspend.c_str(), &intercept::l_suspend);
+                lua.register_function(intercept::g_fn_list.c_str(), &intercept::l_list);
             }
             catch (const std::exception& e)
             {
@@ -316,24 +317,43 @@ class CoreNative : public CppUserModBase
                 logf("ERROR registering natives into a Lua mod: unknown C++ exception");
             }
         });
+        // Core story 43: a Lua mod's interception rules go when its Lua stops (UninstallMod, RestartMod, hot reload).
+        register_on_lua_stop([](CppUserModBase*, CStringView mod_name, Lua&, Lua&, Lua&, Lua*) {
+            try
+            {
+                const std::string mod = mod_name.data ? to_string(StringType{mod_name.data, mod_name.size}) : std::string{};
+                const size_t n = intercept::release_mod(mod);
+                if (n > 0) logf("intercept: released {} rule(s) of {} (Lua stopped)", n, mod);
+            }
+            catch (const std::exception& e)
+            {
+                logf("ERROR releasing a stopped Lua mod's intercepts: {}", e.what());
+            }
+            catch (...)
+            {
+                logf("ERROR releasing a stopped Lua mod's intercepts: unknown C++ exception");
+            }
+        });
     }
 
     ~CoreNative() override
     {
-        // Hot reload unloads this DLL: nothing may keep pointing into it.
+        // Hot reload unloads this DLL: nothing may keep pointing into it. The callbacks go first (UnregisterCallback
+        // waits for a running one to finish), then the rules and their roots.
         try
         {
             for (auto id : m_hooks)
             {
                 Hook::UnregisterCallback(id);
             }
+            const size_t intercepts = intercept::release_all();
             size_t handles{};
             {
                 std::lock_guard guard{g_weak_mutex};
                 handles = g_weak.size();
                 g_weak.clear();
             }
-            logf("unloading: unregistered {} hooks, dropped {} handles", m_hooks.size(), handles);
+            logf("unloading: unregistered {} hooks, dropped {} handles, released {} intercepts", m_hooks.size(), handles, intercepts);
         }
         catch (...)
         {
@@ -343,7 +363,15 @@ class CoreNative : public CppUserModBase
 
     void unreal_init()
     {
-        m_hooks.push_back(Hook::RegisterEngineTickPreCallback(&engine_tick_pre, {true, true, ensure_str(std::string{CORE_NAME}), STR("engine_tick_pre")}));
+        const auto owner = ensure_str(std::string{CORE_NAME});
+        m_hooks.push_back(Hook::RegisterEngineTickPreCallback(&engine_tick_pre, {true, true, owner, STR("engine_tick_pre")}));
+        // Core story 43: function interception. One pre-callback for every Blueprint function call (non-readonly: it
+        // may prevent the original), registered once and unregistered only in the destructor (never from inside a
+        // callback: UnregisterCallback deadlocks there). With no rule it returns after one atomic load. A separate
+        // every-tick callback clears suspensions (engine_tick_pre runs once only).
+        m_hooks.push_back(Hook::RegisterProcessLocalScriptFunctionPreCallback(&intercept::plsf_pre, {false, false, owner, STR("intercept_plsf_pre")}));
+        m_hooks.push_back(Hook::RegisterEngineTickPreCallback(&intercept::tick_pre, {false, true, owner, STR("intercept_tick_pre")}));
+        logf("intercept: callback registered ({} allowlisted functions)", 4);
     }
 };
 

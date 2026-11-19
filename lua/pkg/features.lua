@@ -50,6 +50,8 @@ M.HAND = {
     -- core story 38 (0.16.0, UI-16): drag to reorder rows in a list (list.create's reorderable and onReorder, row.create's
     -- locked; ui.row is a module, so its new setLocked by hand)
     "ui.list.reorderable", "ui.row.setLocked",
+    -- core story 43 (0.18.0, CAP-13): function interception (core.fn is a module, so its entry point by hand)
+    "fn.intercept",
 }
 
 -- The UI part of the api table: path -> { module, function } (client.lua builds api.ui from this).
@@ -107,7 +109,8 @@ M.UI = {
 -- settings: Mod Manager story 5 (core.settings, a module: get, getAll, set, setFor, describe, watch, unwatch).
 -- net: core story 22 (core.net, a module: publish, read, watch, unwatch, role; story 23 adds presence, watchPresence,
 -- compatible, versionsCompatible).
-M.BASE = { call = "function", ref = "function", deref = "function", free = "function", clock = "module", settings = "module", net = "module" }
+-- fn: core story 43 (core.fn, a module: intercept, release, runOriginal, list).
+M.BASE = { call = "function", ref = "function", deref = "function", free = "function", clock = "module", settings = "module", net = "module", fn = "module" }
 
 -- buildUi(U) -> ui table, missing: U maps module names to loaded modules. A function missing from its module is left
 -- out (and named in missing), so the generated feature list never claims it.

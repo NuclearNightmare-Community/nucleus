@@ -273,6 +273,20 @@ namespace core_native
         }
     }
 
+    UObject* weak_get(const FWeakObjectPtr* weak, unsigned long* fault)
+    {
+        *fault = 0;
+        __try
+        {
+            return weak->Get();
+        }
+        __except (seh_filter(GetExceptionCode()))
+        {
+            *fault = GetExceptionCode();
+            return nullptr;
+        }
+    }
+
     namespace
     {
         std::atomic<uint32_t> g_faults{0};
