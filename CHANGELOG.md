@@ -2,6 +2,17 @@
 
 All notable changes to Nucleus are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). From 0.5.0 a dependent's `need` and `dependsOn` are minimum versions (`>=0.5.0`), so a newer Nucleus never asks dependents to raise them. Up to 0.3.0, below 1.0.0 a dependent connected only to the same minor version (`need = "0.3.0"` accepted 0.3.x).
 
+## [0.17.1] - 2026-11-19
+
+Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
+
+For players: with a keyboard or a gamepad, a focused checkbox now looks as it does unfocused inside a light blue ring: a ticked one keeps its tick, an unticked one stays dark and empty, so ticked and unticked no longer look swapped. Pressing A or another gamepad button no longer drops the focus chip: only the mouse itself switches to the mouse look.
+
+### Fixed
+
+- A chipped checkbox's icon keeps its own colours (core story 42). Story 41's dark ink (`theme.game.focusChipInk`) tinted the checkbox's ticked / unticked texture, so a focused ticked box became a dark filled square and an unticked one showed blue through it. Now a checkbox on the chip draws its icon in the colours its own style gives it unfocused (dimmed, the game's text / text hover, or white; `button.lua` `ownColors`); every other chipped control keeps the ink. Behind a chipped checkbox's icon a dark box now shows (`WBP_<name>Button`'s new `Image "IconBack"` in an `Overlay "IconStack"` inside `IconBox`, set by the new `SetIconBack(Show, R, G, B, A)`; collapsed by default) in `theme.game.focusChipBack` (the panel's dark, sRGB #101418), so the box's transparent inside no longer shows the light chip: an unticked box is dark and empty inside the chip's ring. It is hidden when the chip leaves and never shown on another kind. With a pak older than 0.17.1 (no `SetIconBack`) one WARN names the focus chip and it is not called again in that Lua state. The chip's colour, size and scale and every button's layout are unchanged.
+- The focus chip stays after a gamepad press (core story 42). The game runs CommonUI: on gamepad input its analog cursor moves or hides the platform cursor and can turn the Accept button into a simulated mouse click, which core took for a real pointer move (a hover) or a mouse click and so switched to mouse mode. A hover or a click now switches to mouse mode only when the game's `CommonInputSubsystem` (the window's player controller's local player, `SubsystemBlueprintLibrary:GetLocalPlayerSubsystem`) does not report gamepad input: a hover while `GetCurrentInputType() == Gamepad` is ignored (counted in `hoverIgnored`, the pointer re-recorded); a click while it is Gamepad or `bIsGamepadSimulatedClick` is set keeps the mode. Only clicks read the simulated-click flag, so a flag left set after a simulated click never blocks a real mouse hover. Without CommonInput (class missing, no subsystem, a failing call, which logs one WARN naming the focus chip) story 39's rules apply; after a miss the class is not looked up again in that Lua state. Every valid navigation key now records the pointer (also one left to the focused widget, such as Accept), so content moving under a still pointer after it is not a hover. The Accept key's own click stays the key's (story 39). No public API change; Lua and the pak (the button widget's `IconBack`).
+
 ## [0.17.0] - 2026-11-19
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.

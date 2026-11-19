@@ -891,8 +891,8 @@ namespace
 
 	/**
 	 * WBP_<Core>Button (story 15): SizeBox "Box" (story 2) -> Button "Btn" -> HorizontalBox "Content" (core story 24) ->
-	 * [SizeBox "IconBox" (collapsed until SetIcon) -> Image "Icon"], Spacer "IconGap" (8 x 1, collapsed), TextBlock "Label"
-	 * (white, drop shadow, size 18, centred). Lua makes an icon-only button by collapsing Label and IconGap and setting
+	 * [SizeBox "IconBox" (collapsed until SetIcon) -> Overlay "IconStack" (core story 42) -> [Image "IconBack", Image "Icon"]],
+	 * Spacer "IconGap" (8 x 1, collapsed), TextBlock "Label" (white, drop shadow, size 18, centred). Lua makes an icon-only button by collapsing Label and IconGap and setting
 	 * Box's width and height overrides to the icon's size, and shows IconGap for an icon with a label. Functions:
 	 *   SetLabel(NewLabel: String)          Label.SetText(NewLabel)
 	 *   SetEnabledState(Enabled: Bool)      Btn.SetIsEnabled(Enabled) (a disabled button never fires OnClicked)
@@ -925,6 +925,11 @@ namespace
 	 *                                       NormalTextColor. Nothing when FocusLook already equals Focused; SetColors and
 	 *                                       SetMaterials (a fresh style) turn FocusLook off, SetContentColors and
 	 *                                       OnUnhovered keep the hover colour while it is on
+	 * Core story 42 (a chipped checkbox keeps its dark inside):
+	 *   SetIconBack(Show: Bool, R, G, B, A: Float)   IconBack (a solid box behind Icon, filling IconBox; Collapsed by
+	 *                                       default) in colour (R, G, B, A), HitTestInvisible when Show, else Collapsed.
+	 *                                       Lua shows it only behind a chipped checkbox, so its transparent inside stays
+	 *                                       dark on the light chip. It changes no size: IconBox's overrides size it
 	 * Lua draws it disabled at the theme's opacity (SetRenderOpacity on the widget), its icon included.
 	 */
 	UWidgetBlueprint* BuildButton(const FString& Dir, const FString& Core)
@@ -933,7 +938,7 @@ namespace
 			UUserWidget::StaticClass(), UWidgetBlueprint::StaticClass(), UWidgetBlueprintGeneratedClass::StaticClass()));
 		const FString ClickFn = Core + TEXT("_OnClicked");
 		CheckNames({TEXT("SetLabel"), TEXT("SetEnabledState"), TEXT("SetColors"), TEXT("SetTag"), *ClickFn,
-			TEXT("SetMaterials"), TEXT("SetLabelLook"), TEXT("SetIcon"), TEXT("ClearIcon"), TEXT("SetContentColors"), TEXT("SetFocusLook")});
+			TEXT("SetMaterials"), TEXT("SetLabelLook"), TEXT("SetIcon"), TEXT("ClearIcon"), TEXT("SetContentColors"), TEXT("SetFocusLook"), TEXT("SetIconBack")});
 
 		UWidgetTree* T = WBP->WidgetTree;
 		USizeBox* Box = T->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Box"));
@@ -970,12 +975,25 @@ namespace
 		IconBox->SetWidthOverride(24.f);
 		IconBox->SetHeightOverride(24.f);
 		IconBox->bIsVariable = true;
+		// Core story 42: IconBox holds an Overlay [IconBack, Icon]: IconBack (a brush with no image draws a solid box in
+		// its colour) fills the box behind the icon, collapsed until SetIconBack shows it; Icon on top, as before.
+		UOverlay* IconStack = T->ConstructWidget<UOverlay>(UOverlay::StaticClass(), TEXT("IconStack"));
+		IconStack->SetVisibility(ESlateVisibility::HitTestInvisible);
+		USizeBoxSlot* StackSlot = CastChecked<USizeBoxSlot>(IconBox->AddChild(IconStack));
+		StackSlot->SetHorizontalAlignment(HAlign_Fill);
+		StackSlot->SetVerticalAlignment(VAlign_Fill);
+		UImage* IconBack = T->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("IconBack"));
+		IconBack->SetVisibility(ESlateVisibility::Collapsed);
+		IconBack->bIsVariable = true;
 		UImage* Icon = T->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("Icon"));
 		Icon->SetVisibility(ESlateVisibility::HitTestInvisible);
 		Icon->bIsVariable = true;
-		USizeBoxSlot* IconSlot = CastChecked<USizeBoxSlot>(IconBox->AddChild(Icon));
-		IconSlot->SetHorizontalAlignment(HAlign_Fill);
-		IconSlot->SetVerticalAlignment(VAlign_Fill);
+		for (UImage* Img : {IconBack, Icon})
+		{
+			UOverlaySlot* S = CastChecked<UOverlaySlot>(IconStack->AddChild(Img));
+			S->SetHorizontalAlignment(HAlign_Fill);
+			S->SetVerticalAlignment(VAlign_Fill);
+		}
 		USpacer* IconGap = T->ConstructWidget<USpacer>(USpacer::StaticClass(), TEXT("IconGap"));
 		IconGap->SetSize(FVector2D(8.f, 1.f));
 		IconGap->SetVisibility(ESlateVisibility::Collapsed);
@@ -991,6 +1009,7 @@ namespace
 		WBP->OnVariableAdded(TEXT("Btn"));
 		WBP->OnVariableAdded(TEXT("Content"));
 		WBP->OnVariableAdded(TEXT("IconBox"));
+		WBP->OnVariableAdded(TEXT("IconBack"));
 		WBP->OnVariableAdded(TEXT("Icon"));
 		WBP->OnVariableAdded(TEXT("IconGap"));
 		WBP->OnVariableAdded(TEXT("Label"));
@@ -1042,8 +1061,30 @@ namespace
 		}
 		FFunc SetContent = AddFunction(WBP, TEXT("SetContentColors"), ContentIn, {});
 		FFunc SetFocus = AddFunction(WBP, TEXT("SetFocusLook"), {{TEXT("Focused"), BoolT()}}, {});
+		FFunc SetBack = AddFunction(WBP, TEXT("SetIconBack"), {{TEXT("Show"), BoolT()}, {TEXT("R"), RealT()}, {TEXT("G"), RealT()},
+			{TEXT("B"), RealT()}, {TEXT("A"), RealT()}}, {});
 		if (!Compile(WBP)) return nullptr;
 		FillTag(WBP, SetTag);
+		{
+			// Core story 42: SetIconBack(Show, R, G, B, A): IconBack's colour, then HitTestInvisible (Show) or Collapsed.
+			FGraph G(WBP, SetBack.G);
+			UK2Node_VariableGet* GetBack = G.Get(TEXT("IconBack"));
+			UK2Node_CallFunction* Make = ColorFrom(G, SetBack.Entry, TEXT(""));
+			UK2Node_CallFunction* SetC = G.Call(UImage::StaticClass(), GET_FUNCTION_NAME_CHECKED(UImage, SetColorAndOpacity));
+			G.Link(GetBack, TEXT("IconBack"), SetC, PN_Self);
+			G.Link(Make, PN_Ret, SetC, TEXT("InColorAndOpacity"));
+			UK2Node_IfThenElse* Br = G.Branch();
+			G.Link(SetBack.Entry, TEXT("Show"), Br, UEdGraphSchema_K2::PN_Condition);
+			UK2Node_CallFunction* Show = G.Call(UWidget::StaticClass(), GET_FUNCTION_NAME_CHECKED(UWidget, SetVisibility));
+			G.Link(GetBack, TEXT("IconBack"), Show, PN_Self);
+			G.Default(Show, TEXT("InVisibility"), TEXT("HitTestInvisible"));
+			UK2Node_CallFunction* Hide = G.Call(UWidget::StaticClass(), GET_FUNCTION_NAME_CHECKED(UWidget, SetVisibility));
+			G.Link(GetBack, TEXT("IconBack"), Hide, PN_Self);
+			G.Default(Hide, TEXT("InVisibility"), TEXT("Collapsed"));
+			G.Chain({SetBack.Entry, SetC, Br});
+			G.Link(Br, UEdGraphSchema_K2::PN_Then, Show, PN_Exec);
+			G.Link(Br, UEdGraphSchema_K2::PN_Else, Hide, PN_Exec);
+		}
 		{
 			// SetIcon(Texture, W, H): IconBox overrides, Icon's brush resource, IconBox shown (hit-test invisible).
 			FGraph G(WBP, SetIcon.G);
