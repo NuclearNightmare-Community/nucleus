@@ -2077,6 +2077,17 @@ do
     T.move()
     T.fire(T.CLICK, T.tagged("r42c2"))
     ok(T.agree("r42c2") and FO._mode() == "keys" and T.cbChipOwn("r42c2"), "story 42 gamepad-simulated click: keys, the chip stays")
+    -- A stale flag (still set, type MouseAndKeyboard) never blocks a real mouse hover: the flag is read on clicks only
+    ok(FO._gamepadInput() == false and FO._gamepadInput(true) == true, "story 42 the simulated-click flag counts for a click only")
+    T.move()
+    T.hover(T.tagged("r42r3"))
+    ok(T.agree("r42c3") and FO._mode() == "mouse" and T.anyChip() == nil, "story 42 stale flag on a moved hover: mouse mode (a real mouse), no chip", T.anyChip())
+    T.key(wr, D.up, INV_ACT)
+    ok(FO._mode() == "keys" and T.agree("r42c2") and T.cbChipOwn("r42c2"), "story 42 stale flag: a key brings keys and the chip back")
+    -- The flag alone still keeps keys on a click
+    T.move()
+    T.fire(T.CLICK, T.tagged("r42c2"))
+    ok(T.agree("r42c2") and FO._mode() == "keys" and T.cbChipOwn("r42c2"), "story 42 the flag alone on a click: keys, the chip stays")
     sub.bIsGamepadSimulatedClick = false
     -- (4) Gamepad cursor move: a hover is ignored (focus, mode, chip unchanged), the pointer re-recorded
     sub.type = 1
