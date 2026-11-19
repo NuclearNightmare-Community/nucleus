@@ -187,17 +187,37 @@ end
 
 -- Story 24: the label's and the icon's colours (normal, hover): dimmed, both the game's disabled colour; else the
 -- game's text colours on a game face, white on a plain one (the generator's). el.colorKey: what the widget has now.
+-- Core story 42: ownColors(el) -> key, normal, hover: the colours its own style gives it (also a chipped checkbox's).
+local function ownColors(el)
+    if el.dimmed then return "dim", theme.dimmed, theme.dimmed
+    elseif el.gameFace then return "game", theme.game.text, theme.game.textHover end
+    return "plain", theme.white, theme.white
+end
 local function applyColors(el, w)
-    local key, n, h
-    if el.dimmed then key, n, h = "dim", theme.dimmed, theme.dimmed
-    elseif el.gameFace then key, n, h = "game", theme.game.text, theme.game.textHover
-    else key, n, h = "plain", theme.white, theme.white end
+    local key, n, h = ownColors(el)
     if key == el.colorKey then return end
     C.count(); w:SetContentColors(n.r, n.g, n.b, n.a, h.r, h.g, h.b, h.a)
     el.colorKey = key
 end
 
 local function iconOnly(el) return el.icon ~= nil and el.label == "" end
+
+-- Core story 42 (0.17.1): the box behind a chipped checkbox's icon (WBP_<Core>Button's IconBack, SetIconBack): shown in
+-- theme.game.focusChipBack while the checkbox is chipped, so its transparent inside stays dark (the light chip shows
+-- only as the ring around it); hidden by its own style when the chip leaves. el.backOn: the widget shows it now. A pak
+-- without SetIconBack (older than 0.17.1) or a failing call: one WARN naming the focus chip, then it is never called
+-- again in this Lua state (the checkbox keeps its own colours on the chip, without the dark inside).
+local backGone = false
+local function iconBack(el, w, show)
+    if backGone then return end
+    local c = theme.game.focusChipBack
+    local ok, err = pcall(function() C.count(); w:SetIconBack(show, c.r, c.g, c.b, c.a) end)
+    if ok then el.backOn = show or nil return end
+    backGone, el.backOn = true, nil
+    C.warnOnce("focus chip back", "checkbox '%s': the focus chip's dark inside (SetIconBack) failed (is %s's pak current?): %s; a chipped checkbox shows the chip through its inside",
+        el.id, C.NAME, firstLine(err))
+end
+B._resetIconBack = function() backGone = false end
 
 -- Story 24: the icon and the layout. Label only (no icon): the 0.7.0 widget. Icon and label: the icon (iconSize) left
 -- of the label, the gap between them. Icon only: the label and gap collapsed, the box exactly iconSize. el.iconKey:
@@ -273,7 +293,8 @@ style = function(el, w, fresh)
     el.faceOn = nil -- core story 28: a re-style draws the button's own look (the UI tick puts a focus face back)
     -- Core story 39: and no focus chip (its render scales back to 1; the UI tick puts the chip back while it is wanted).
     el.chipOn = nil
-    if fresh then el.chipScaled = nil end -- a new widget has scale 1
+    if fresh then el.chipScaled, el.backOn = nil, nil end -- a new widget has scale 1 and no IconBack shown
+    if el.backOn then iconBack(el, w, false) end -- core story 42: the dark inside goes with the chip
     if el.chipScaled then
         local okS, errS = pcall(B._chipOff, el, w)
         if not okS then C.warnOnce("focus chip scale", "button '%s': the focus chip's scale was not reset: %s", el.id, firstLine(errS)) end
@@ -357,7 +378,9 @@ end
 -- labelled button keeps its focus face then, so its layout never moves); its label and icon in the chip's ink
 -- (theme.game.focusChipInk, core story 41; el.colorKey = "focus": its own style puts its colours back). An icon-only
 -- one also gets a render scale: Btn s = (size + 2p) / size per axis, Content 1 / s, so the chip reaches p units beyond
--- the icon while the icon and the layout stay as they are.
+-- the icon while the icon and the layout stay as they are. Core story 42 (0.17.1): a checkbox's content keeps its own
+-- colours (ownColors: dimmed, the game's text / text hover, or white) on the chip, and its IconBack shows behind the
+-- icon in theme.game.focusChipBack (iconBack): its inside stays dark, the chip is the ring around it.
 -- Sets el.chipOn ("strong" | "solid") once the face is on. False when no chip can be drawn now. Raises on a failed
 -- widget call (the caller logs it once).
 function B._chip(el, w, mid, p)
@@ -379,9 +402,13 @@ function B._chip(el, w, mid, p)
         C.count(); w:SetColors(c.r, c.g, c.b, c.a, c.r, c.g, c.b, c.a, c.r, c.g, c.b, c.a, el.styledIconOnly and 0 or el.style.pad)
     end
     el.faceOn = nil
-    local ink = g.focusChipInk
+    -- Core story 42: a checkbox's icon is its state (the game's ticked / unticked textures): the ink would tint it (a
+    -- ticked box became a dark filled square), so a chipped checkbox keeps the colours it has unfocused.
+    local n, h = g.focusChipInk, g.focusChipInk
+    if el.kind == "checkbox" then local _; _, n, h = ownColors(el) end
     el.colorKey = "focus"
-    C.count(); w:SetContentColors(ink.r, ink.g, ink.b, ink.a, ink.r, ink.g, ink.b, ink.a)
+    C.count(); w:SetContentColors(n.r, n.g, n.b, n.a, h.r, h.g, h.b, h.a)
+    if el.kind == "checkbox" and not el.backOn then iconBack(el, w, true) end
     if el.styledIconOnly and p and p > 0 and el.iconSize and el.iconSize.w > 0 and el.iconSize.h > 0 then
         local sx, sy = (el.iconSize.w + 2 * p) / el.iconSize.w, (el.iconSize.h + 2 * p) / el.iconSize.h
         el.chipScaled = true

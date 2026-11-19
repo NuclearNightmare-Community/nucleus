@@ -61,6 +61,12 @@
 -- Lone controls and BACK keep story 27/28's looks; focusRowStrong doesn't affect the chip. Core story 41 (0.15.5): the
 -- chip is light blue, one theme value (theme.game.focusChipColor, #6dd5ed linear), and what is drawn on it (icon,
 -- label, a choice's value, a slider's number) is theme.game.focusChipInk.
+-- Core story 42 (0.17.1): a chipped checkbox's icon keeps its own colours (the ink tinted its ticked / unticked texture)
+-- over a dark box behind it (button.lua iconBack: the button widget's IconBack, so its inside stays dark in the ring),
+-- and only real mouse input switches to mouse mode: a hover while the game's CommonInputSubsystem reports gamepad input
+-- (its current input type: CommonUI's analog cursor) is ignored, and a click while it does or while its
+-- gamepad-simulated click flag is set (clicks only) keeps the mode; the Accept key's own click stays the key's, and
+-- every valid navigation key records the pointer (gamepadInput).
 -- Each window remembers its last-focused element (by id): after a close the next window down gets it back.
 -- Core story 38 (0.16.0, UI-16): rows of a reorderable list move with the keyboard and the gamepad (reorder.lua holds
 -- the shared model and the mouse drag). A movable row (reorder.lua's rule) with no focusable of its own is a focus stop
@@ -595,6 +601,38 @@ local function samePointer()
     if not p then return false end -- unreadable: never blocks a hover
     return math.abs(p.x - pointerAt.x) < 1 and math.abs(p.y - pointerAt.y) < 1
 end
+-- Core story 42 (0.17.1): is the gamepad the current input? The game runs CommonUI: on gamepad input its analog cursor
+-- moves or hides the platform cursor and can turn the Accept button into a simulated mouse click, which would look like
+-- a real pointer move or a mouse click here. CommonInputSubsystem (the window's player controller's local player) knows:
+-- true while its current input type is Gamepad (ECommonInputType 1); for a click (click true) also when its
+-- bIsGamepadSimulatedClick is set. A hover never reads that flag: it can stay set after the simulated click, and a stale
+-- flag must not block a real mouse hover (the type reads MouseAndKeyboard as soon as the mouse moves). A missing class
+-- or no subsystem: false (story 39's rules); a failing call: false and one WARN naming the focus chip.
+-- The class is a native one, found by StaticFindObject; after a miss it is not looked up again in this Lua state (a
+-- miss scans every object). No UObject is kept across calls, no asset is loaded and no hook registered.
+local CI_CLASS = "/Script/CommonInput.CommonInputSubsystem"
+local CI_GAMEPAD = 1
+local ciMissing = false
+local function gamepadInput(click)
+    if ciMissing then return false end
+    local ok, yes = pcall(function()
+        local cls = StaticFindObject(CI_CLASS)
+        if not C.valid(cls) then ciMissing = true return false end
+        local pc = cb.owner and cb.owner()
+        if not C.valid(pc) then return false end
+        local sub = StaticFindObject("/Script/Engine.Default__SubsystemBlueprintLibrary"):GetLocalPlayerSubsystem(pc, cls)
+        if not C.valid(sub) then return false end
+        if sub:GetCurrentInputType() == CI_GAMEPAD then return true end
+        return click == true and sub.bIsGamepadSimulatedClick == true
+    end)
+    if not ok then
+        C.warnOnce("focus chip gamepad", "the focus chip's gamepad check (CommonInputSubsystem) failed: %s", firstLine(yes))
+        return false
+    end
+    return yes == true
+end
+F._gamepadInput = gamepadInput
+F._resetGamepadInput = function() ciMissing = false end
 -- Core story 39: the input mode becomes m ("keys" | "mouse"): the last input sets it. A change re-applies the current
 -- element's look of every open window of this state that shows one (chip on or off at once). Returns whether it changed.
 local function reapply()
@@ -616,11 +654,13 @@ F._input = input
 local acceptKey = nil
 local ACCEPT_US = 1500000
 -- A click on id (F.used, or C.clickInput: the menu entry (nil), a window's BACK): the mouse, unless it is the click of
--- the Accept key just pressed on that element.
+-- the Accept key just pressed on that element. Core story 42: and not while the gamepad is the current input or the
+-- click is CommonUI's gamepad-simulated one (its Accept button as a click): the mode stays.
 local function clickInput(id)
     local a = acceptKey
     acceptKey = nil
     if a and id ~= nil and a.id == id and C.micros and (C.micros() - a.t) < ACCEPT_US then return end
+    if gamepadInput(true) then return end
     input("mouse")
 end
 C.onClickInput = clickInput
@@ -1046,6 +1086,9 @@ local function navBody(ctx)
         acceptKey = nil
         changed = mode ~= "keys"
         mode = "keys"
+        -- Core story 42: every valid key records the pointer (handled or left to the focused widget): content moving
+        -- under a still pointer after it (an Accept's click, a list rebuilt) is not a hover.
+        rememberPointer()
     end
     navDepth = navDepth + 1
     local okN, handled = pcall(F.nav, rec, dir, act)
@@ -1093,6 +1136,13 @@ local function hoverBody(ctx)
     local rec = C.windows[host:sub(8)]
     if not (rec and rec.open) or not globalTop(rec) then return ignore() end
     if samePointer() then return ignore() end -- content moved under a still pointer
+    -- Core story 42: a pointer moved by CommonUI's analog cursor under gamepad input is not the mouse's: focus and mode
+    -- stay; the position is recorded so the cursor's next still enter is content moving. The input type only: the
+    -- simulated-click flag is for clicks (a stale one must not block a real mouse hover).
+    if gamepadInput() then
+        rememberPointer()
+        return ignore()
+    end
     local lines = F.lines(host, backIdOf(rec))
     local li = nil
     for i, l in ipairs(lines) do if l.owner == row.id then li = i break end end
