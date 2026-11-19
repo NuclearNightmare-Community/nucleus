@@ -161,7 +161,9 @@ do
         CinematicWearColor = copy(g.focusChipColor),
     }
     g.focusChipSolid = copy(g.focusChipColor)      -- the chip without an instance (a brush colour)
-    g.focusChipInk = copy(M.white)                 -- the content on the chip; white reads clearly on the blue (story 41)
+    -- the content on the chip (story 41): near-black, the window's panel colour (sRGB #101418, linear), because white read
+    -- poorly on the light blue in the first VM shot (sp-mm-chip-cfg.png: white gear on #6dd5ed, contrast about 1.6:1)
+    g.focusChipInk = { r = 0.0052, g = 0.0070, b = 0.0091, a = 1 }
 end
 
 -- Mod Manager story 4 (core 0.10.0): the controls. A checkbox shows the game's checkbox textures (falling back to core's

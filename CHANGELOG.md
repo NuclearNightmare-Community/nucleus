@@ -6,11 +6,11 @@ All notable changes to Nucleus are recorded here. The format follows [Keep a Cha
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
 
-For players: the focus chip (keyboard or gamepad) is now light blue instead of red, so it stands out behind a ticked checkbox's red tick.
+For players: the focus chip (keyboard or gamepad) is now light blue instead of red, so it stands out behind a ticked checkbox's red tick; the focused icon or text on it is dark (white read poorly on the light blue).
 
 ### Changed
 
-- The focus chip's colour (core story 41): one theme value, `theme.game.focusChipColor`, #6dd5ed in linear (0.1529, 0.6654, 0.8469), drives every chip (button, checkbox, choice, slider; the instance's `CinematicBaseColor` and `CinematicWearColor` in `focusChipColors` and the solid `focusChipSolid`, both derived from it, same table shape). What is drawn on the chip (icon, label, a choice's value, a slider's number) is one theme value too, `theme.game.focusChipInk` (white). No public API change; Lua only (no new pak).
+- The focus chip's colour (core story 41): one theme value, `theme.game.focusChipColor`, #6dd5ed in linear (0.1529, 0.6654, 0.8469), drives every chip (button, checkbox, choice, slider; the instance's `CinematicBaseColor` and `CinematicWearColor` in `focusChipColors` and the solid `focusChipSolid`, both derived from it, same table shape). What is drawn on the chip (icon, label, a choice's value, a slider's number) is one theme value too, `theme.game.focusChipInk`, near-black (the panel colour, sRGB #101418, linear), because white read poorly on the light blue in the VM shot (a white gear on #6dd5ed, contrast about 1.6:1). No public API change; Lua only (no new pak).
 
 ## [0.15.4] - 2026-11-18
 
