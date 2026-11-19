@@ -289,8 +289,28 @@ return function(X, GS)
     end
 
     local function build1()
-        local T = { calls = 0, lastAddr = nil }
+        local T = { calls = 0, lastAddr = nil, gcs = 0 }
         local W -- core.fn, set in the first step
+        -- A forced garbage collection (KismetSystemLibrary:CollectGarbage, run by the engine on its next tick): the
+        -- replacement TextBlock, held by the tooltip rule, must still be what card A's GetToolTipWidget returns, while
+        -- a control TextBlock with the same outer that nothing holds must be gone (proof that the collection ran).
+        local function gcCheck(label)
+            step("fn: gc " .. label, function()
+                T.gcs = T.gcs + 1
+                local ctl = StaticConstructObject(StaticFindObject("/Script/UMG.TextBlock"), gi(), FName("NucleusFnGcControl" .. T.gcs))
+                T.ctlH = core().ref(ctl)
+                StaticFindObject("/Script/Engine.Default__KismetSystemLibrary"):CollectGarbage()
+                return msAfter(2), 5
+            end)
+            step("fn: gc check " .. label, function()
+                local ctlGone = core().deref(T.ctlH) == nil
+                core().free(T.ctlH)
+                local ra = card("A"):GetToolTipWidget()
+                local kept = addrOf(ra) == T.tbAddr and core().deref(T.tbH) ~= nil
+                check(ctlGone and kept, "FNGC %s: after a forced garbage collection the unheld control TextBlock is gone (%s) and the rule's replacement is still card A's tooltip (%s)",
+                    label, tostring(ctlGone), tostring(kept))
+            end)
+        end
         startup()
         clickOn("START GAME", function() return prop(liveOf(MENU_SHORT), START) end)
         step("fn: screen open", function() return function() return screen() ~= nil and card("A") ~= nil and card("B") ~= nil and card("bat") ~= nil end, 15, "Create Server with its cards" end)
@@ -374,6 +394,7 @@ return function(X, GS)
             check(addrOf(ra) == T.tbAddr, "FNTIPA card A's GetToolTipWidget() from Lua -> the TextBlock (%s)", tostring(addrOf(ra) == T.tbAddr))
             check(bClass == "W_ToolTip_EnemySelect_C", "FNTIPB card B's GetToolTipWidget() -> %s", bClass)
         end)
+        gcCheck("install")
         intoView("hover", "A")
         step("fn: hover before", function() T.th0 = select(2, counts(T.tip)) end)
         step("fn: hover A", function()
@@ -390,6 +411,9 @@ return function(X, GS)
         end)
         step("fn: hover away", function() return X.request("move 4 4"), 40, "move away" end)
         settle("away", 1)
+        -- A forced garbage collection after the hover: the replacement must survive it (it is held by the rule), while a
+        -- control TextBlock nobody holds is collected, which proves the collection ran.
+        gcCheck("hover")
 
         -- ---- row 4: an any skip next to the exact replace
         step("fn: any vs exact", function()
@@ -466,6 +490,12 @@ return function(X, GS)
             case(P .. "value-dead", nI .. "(tip, <card B>, 'replace', <a freed handle>)", f(I, P_TIP, hB, "replace", vFreed),
                 E.err(nI .. ": value handle " .. vFreed .. " is not a live object (unknown or freed)"))
             case(P .. "value-class", nI .. "(tip, <card B>, 'replace', <the game instance>) [not a Widget]", f(I, P_TIP, hB, "replace", hGi), E.err("is not a Widget"))
+            -- a replacement nothing can keep alive: a TextBlock in /Engine/Transient has no game instance (no world)
+            local loose = StaticConstructObject(StaticFindObject("/Script/UMG.TextBlock"), StaticFindObject("/Engine/Transient"), FName("NucleusFnLoose"))
+            local hLoose = core().ref(loose)
+            case(P .. "value-nogi", nI .. "(tip, <card B>, 'replace', <a TextBlock in /Engine/Transient>) [no game instance]", f(I, P_TIP, hB, "replace", hLoose),
+                E.err("has no game instance to keep it alive (create it with the game instance as its outer)"))
+            core().free(hLoose)
             case(P .. "noreturn", nI .. "(click, <card B>, 'replace', <a TextBlock>) [the click returns nothing]", f(I, P_CLICK, hB, "replace", T.tbH),
                 E.err(nI .. ": 'replace' needs a function that returns an object; " .. P_CLICK .. " returns nothing"))
             case(P .. "tip-bat-class", nI .. "(Bat tooltip, <card B>, 'skip', nil) [an EnemySlot card on the Bat function]", f(I, P_BTIP, hB, "skip", nil), E.err("is not a BatSlot_Button1_C"))
@@ -553,6 +583,7 @@ return function(X, GS)
     end
 
     local function build2()
+        local T2 = {}
         step("fn2: screen", function() return function() return screen() ~= nil and card("A") ~= nil and card("bat") ~= nil end, 30, "Create Server still open after the reload" end)
         step("fn2: checks", function()
             os.remove(PASS_FILE)
@@ -567,6 +598,19 @@ return function(X, GS)
                 local s2 = state(key)
                 check(s0 ~= nil and s1 == flipped(s0) and s2 == s0, "FN2TOGGLE card %s toggles again (%s -> %s -> %s)", key, tostring(s0), tostring(s1), tostring(s2))
             end
+            -- The released rules let their replacement go: the game instance no longer keeps pass 1's TextBlock.
+            local g = gi()
+            T2.tipPath = g and (g:GetFullName():gsub("^%S+ ", "")) .. ".NucleusFnTip"
+            local tb = T2.tipPath and StaticFindObject(T2.tipPath)
+            T2.tipBefore = tb ~= nil and v(tb)
+            StaticFindObject("/Script/Engine.Default__KismetSystemLibrary"):CollectGarbage()
+            return msAfter(2), 5
+        end)
+        step("fn2: let go", function()
+            local tb = T2.tipPath and StaticFindObject(T2.tipPath)
+            local alive = tb ~= nil and v(tb)
+            check(T2.tipBefore == true and not alive, "FN2LETGO after the reload and a forced garbage collection pass 1's replacement TextBlock is gone (before %s, after %s)",
+                tostring(T2.tipBefore), tostring(alive))
         end)
     end
 

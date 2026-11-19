@@ -138,19 +138,6 @@ namespace core_native::intercept
         std::atomic<bool> g_any_suspended{false};
         std::atomic<bool> g_warned_callback{false};
 
-        // Rooting: a value object is rooted (SetRootSet) while a rule holds it, counted per object (index and serial), so
-        // two rules may share one object. An object that was already rooted before us is never un-rooted by us.
-        struct Root
-        {
-            int count{};
-            bool ours{};
-        };
-        std::mutex g_root_mutex;
-        std::unordered_map<uint64_t, Root> g_roots;
-        uint64_t root_key(const FWeakObjectPtr& w)
-        {
-            return (static_cast<uint64_t>(static_cast<uint32_t>(w.ObjectIndex)) << 32) | static_cast<uint32_t>(w.ObjectSerialNumber);
-        }
 
         // At most 64 printable bytes of untrusted text, for an error message.
         auto quote(std::string_view s) -> std::string
@@ -190,36 +177,35 @@ namespace core_native::intercept
             }
         }
 
-        // 1 = rooted by us, 0 = already rooted (left alone), -1 = gone, -2 = SEH fault.
-        int root_raw(const FWeakObjectPtr* w, unsigned long* fault)
+        // A GUObjectArray slot as evidence (core story 43 review): the item's raw words, the object there, its serial and
+        // flags. 1 = read, 0 = no item, -1 = SEH fault.
+        struct SlotDump
+        {
+            uint64_t q[3];
+            void* obj;
+            int32_t serial;
+            int32_t refs;
+            int root;
+            int unreachable;
+            int garbage;
+        };
+        int dump_slot_raw(int32_t index, SlotDump* d, unsigned long* fault)
         {
             *fault = 0;
             __try
             {
-                if (!w->Get()) return -1;
-                auto* item = FUObjectArray::IndexToObject(w->ObjectIndex);
-                if (!item) return -1;
-                if (item->IsRootSet()) return 0;
-                item->SetRootSet();
-                return 1;
-            }
-            __except (seh_filter(GetExceptionCode()))
-            {
-                *fault = GetExceptionCode();
-                return -2;
-            }
-        }
-
-        // 1 = un-rooted, 0 = gone (nothing to do), -1 = SEH fault.
-        int unroot_raw(const FWeakObjectPtr* w, unsigned long* fault)
-        {
-            *fault = 0;
-            __try
-            {
-                if (!w->Get()) return 0;
-                auto* item = FUObjectArray::IndexToObject(w->ObjectIndex);
+                auto* item = FUObjectArray::IndexToObject(index);
                 if (!item) return 0;
-                item->UnsetRootSet();
+                const auto* q = reinterpret_cast<const uint64_t*>(item);
+                d->q[0] = q[0];
+                d->q[1] = q[1];
+                d->q[2] = q[2];
+                d->obj = item->GetUObject();
+                d->serial = item->GetSerialNumber();
+                d->refs = item->GetRefCount();
+                d->root = item->IsRootSet() ? 1 : 0;
+                d->unreachable = item->IsUnreachable() ? 1 : 0;
+                d->garbage = item->HasAnyFlags(static_cast<EInternalObjectFlags>(1 << 21)) ? 1 : 0;
                 return 1;
             }
             __except (seh_filter(GetExceptionCode()))
@@ -227,6 +213,16 @@ namespace core_native::intercept
                 *fault = GetExceptionCode();
                 return -1;
             }
+        }
+        auto slot_text(const FWeakObjectPtr& w) -> std::string
+        {
+            SlotDump d{};
+            unsigned long fault{};
+            const int got = dump_slot_raw(w.ObjectIndex, &d, &fault);
+            if (got < 0) return std::format("slot {} unreadable (SEH 0x{:08X})", w.ObjectIndex, fault);
+            if (got == 0) return std::format("slot {} has no item", w.ObjectIndex);
+            return std::format("slot {} serial {} (held {}) object {} root={} unreachable={} garbage={} refs={} item=[{:016X} {:016X} {:016X}]", w.ObjectIndex,
+                               d.serial, w.ObjectSerialNumber, d.obj, d.root, d.unreachable, d.garbage, d.refs, d.q[0], d.q[1], d.q[2]);
         }
 
         unsigned long write_result_raw(void* result, UObject* value)
@@ -242,38 +238,189 @@ namespace core_native::intercept
             }
         }
 
-        // ------------------------------------------------------------------ rooting
-        void root(const FWeakObjectPtr& w)
+        // ------------------------------------------------------------------ keeping a replacement alive
+        // Not SetRootSet. On UE 5.6 the garbage collector takes its roots from GRoots, a set that only the engine's own
+        // FUObjectItem::SetRootFlags (AddToRoot) fills, and its keep-flag pass skips objects that carry RootSet ("tracked
+        // with GRoots"); UE4SS's FUObjectItem::SetRootSet only ORs the flag bit, so an object rooted that way is collected
+        // by the next GC (story 43 review: VM evidence in the story's change log). SetRootFlags isn't exported. So core
+        // keeps a replacement the way the engine's UGameInstance::RegisterReferencedObject does: an entry in the game
+        // instance's reflected UPROPERTY TArray<TObjectPtr<UObject>> ReferencedObjects, which the GC traces for as long
+        // as the game instance lives (the whole process). Counted per object (index and serial), so two rules may share
+        // one; an entry core didn't add is never touched.
+        struct Held
         {
-            const uint64_t key = root_key(w);
-            {
-                std::lock_guard lock(g_root_mutex);
-                auto& r = g_roots[key];
-                if (r.count++ > 0) return;
-            }
-            unsigned long fault{};
-            const int got = root_raw(&w, &fault);
-            if (got == -2) log_fault(g_fn_intercept, "rooting a replacement object", fault, key);
-            std::lock_guard lock(g_root_mutex);
-            auto it = g_roots.find(key);
-            if (it != g_roots.end()) it->second.ours = got == 1;
+            int count{};
+            bool added{};
+            UObject* raw{};         // compared only, never dereferenced
+            FWeakObjectPtr gi{};    // the game instance holding the entry
+            int32_t offset{};       // ReferencedObjects in the game instance
+        };
+        std::mutex g_hold_mutex;
+        std::unordered_map<uint64_t, Held> g_held;
+        uint64_t hold_key(const FWeakObjectPtr& w)
+        {
+            return (static_cast<uint64_t>(static_cast<uint32_t>(w.ObjectIndex)) << 32) | static_cast<uint32_t>(w.ObjectSerialNumber);
         }
 
-        void unroot(const FWeakObjectPtr& w)
+        constexpr const CharType* k_gi_class = STR("/Script/Engine.GameInstance");
+        constexpr const CharType* k_gps_cdo = STR("/Script/Engine.Default__GameplayStatics");
+        constexpr const CharType* k_gps_get_gi = STR("/Script/Engine.GameplayStatics:GetGameInstance");
+
+        // UGameInstance and its ReferencedObjects (an array of object pointers), or a std::runtime_error.
+        auto gi_layout() -> std::pair<UClass*, FArrayProperty*>
         {
-            const uint64_t key = root_key(w);
-            bool ours = false;
+            auto* cls = UObjectGlobals::StaticFindObject<UClass*>(nullptr, nullptr, k_gi_class);
+            if (!cls) throw std::runtime_error("GameInstance class not found");
+            auto* arr = CastField<FArrayProperty>(cls->FindProperty(FName(STR("ReferencedObjects"), FNAME_Find)));
+            auto* inner = arr ? CastField<FObjectProperty>(arr->GetInner()) : nullptr;
+            if (!arr || !inner || inner->GetElementSize() != static_cast<int32_t>(sizeof(void*)) || arr->GetOffset_Internal() <= 0)
             {
-                std::lock_guard lock(g_root_mutex);
-                auto it = g_roots.find(key);
-                if (it == g_roots.end()) return;
-                if (--it->second.count > 0) return;
-                ours = it->second.ours;
-                g_roots.erase(it);
+                throw std::runtime_error("GameInstance.ReferencedObjects is not an array of object pointers");
             }
-            if (!ours) return;
+            return {cls, arr};
+        }
+
+        unsigned long process_event_raw(UObject* obj, UFunction* function, void* parms)
+        {
+            __try
+            {
+                obj->ProcessEvent(function, parms);
+                return 0;
+            }
+            __except (seh_filter(GetExceptionCode()))
+            {
+                return GetExceptionCode();
+            }
+        }
+
+        // The game instance that will hold value: its outer chain first (a replacement made with the game instance as its
+        // outer, as the README asks), else GameplayStatics:GetGameInstance with value as the world context. nullptr when
+        // there is none. Game thread; value proven live.
+        auto game_instance_for(const std::string& fn, UObject* value, UClass* gi_class) -> UObject*
+        {
+            int steps = 0;
+            for (UObject* o = value; o && steps < 64; o = o->GetOuterPrivate(), ++steps)
+            {
+                if (o->IsA(gi_class)) return o;
+            }
+            auto* cdo = UObjectGlobals::StaticFindObject<UObject*>(nullptr, nullptr, k_gps_cdo);
+            auto* function = UObjectGlobals::StaticFindObject<UFunction*>(nullptr, nullptr, k_gps_get_gi);
+            if (!cdo || !function) return nullptr;
+            FProperty* ctx = function->FindProperty(FName(STR("WorldContextObject"), FNAME_Find));
+            FProperty* ret = function->GetReturnProperty();
+            const int32_t size = function->GetParmsSize();
+            constexpr int32_t k_buffer = 64;
+            if (!ctx || !ret || size <= 0 || size > k_buffer || ctx->GetOffset_Internal() < 0 || ctx->GetOffset_Internal() + 8 > size ||
+                ret->GetOffset_Internal() < 0 || ret->GetOffset_Internal() + 8 > size)
+            {
+                return nullptr;
+            }
+            alignas(16) uint8_t parms[k_buffer]{};
+            *reinterpret_cast<UObject**>(parms + ctx->GetOffset_Internal()) = value;
+            const auto fault = process_event_raw(cdo, function, parms);
+            if (fault)
+            {
+                log_fault(fn, "asking GameplayStatics for the game instance", fault, 0);
+                return nullptr;
+            }
+            UObject* gi = *reinterpret_cast<UObject**>(parms + ret->GetOffset_Internal());
+            return gi && gi->IsA(gi_class) ? gi : nullptr;
+        }
+
+        struct RawArray
+        {
+            void* data;
+            int32_t num;
+            int32_t max;
+        };
+
+        // Removes one entry equal to raw from the game instance's ReferencedObjects without reallocating (the last entry
+        // takes its place), so a reader on another thread only ever sees valid pointers. 1 = removed, 0 = not there or
+        // the game instance is gone, -1 = SEH fault.
+        int unhold_raw(const FWeakObjectPtr* gi_weak, int32_t offset, UObject* raw, unsigned long* fault)
+        {
+            *fault = 0;
+            __try
+            {
+                UObject* gi = gi_weak->Get();
+                if (!gi) return 0;
+                auto* a = reinterpret_cast<RawArray*>(reinterpret_cast<uint8_t*>(gi) + offset);
+                if (a->num <= 0 || a->num > a->max || !a->data) return 0;
+                auto** items = static_cast<UObject**>(a->data);
+                for (int32_t i = a->num - 1; i >= 0; --i)
+                {
+                    if (items[i] != raw) continue;
+                    items[i] = items[a->num - 1];
+                    items[a->num - 1] = nullptr;
+                    --a->num;
+                    return 1;
+                }
+                return 0;
+            }
+            __except (seh_filter(GetExceptionCode()))
+            {
+                *fault = GetExceptionCode();
+                return -1;
+            }
+        }
+
+        // Game thread (install). gi was found by game_instance_for and is live.
+        void hold(const FWeakObjectPtr& value, UObject* raw, UObject* gi)
+        {
+            const uint64_t key = hold_key(value);
+            {
+                std::lock_guard lock(g_hold_mutex);
+                auto& h = g_held[key];
+                if (h.count++ > 0) return;
+                h.raw = raw;
+            }
+            bool added = false;
+            int32_t offset = 0;
+            FWeakObjectPtr gi_weak{};
+            try
+            {
+                int32_t gi_index{}, gi_serial{};
+                unsigned long fault{};
+                if (make_weak_raw(gi, &gi_index, &gi_serial, &fault) != 1) throw std::runtime_error("the game instance is not in GUObjectArray");
+                gi_weak.ObjectIndex = gi_index;
+                gi_weak.ObjectSerialNumber = gi_serial;
+                auto [cls, arr] = gi_layout();
+                offset = arr->GetOffset_Internal();
+                FScriptArrayHelper helper(arr, arr->ContainerPtrToValuePtr<void>(gi));
+                const int32_t i = helper.AddValue();
+                *reinterpret_cast<UObject**>(helper.GetRawPtr(i)) = raw;
+                added = true;
+            }
+            catch (const std::exception& e)
+            {
+                logf("intercept: WARN could not hold a replacement in the game instance ({}); it may be collected", e.what());
+            }
+            std::lock_guard lock(g_hold_mutex);
+            auto it = g_held.find(key);
+            if (it != g_held.end())
+            {
+                it->second.added = added;
+                it->second.gi = gi_weak;
+                it->second.offset = offset;
+            }
+        }
+
+        // Any thread (release, a stopping Lua mod, unload).
+        void unhold(const FWeakObjectPtr& value)
+        {
+            const uint64_t key = hold_key(value);
+            Held h{};
+            {
+                std::lock_guard lock(g_hold_mutex);
+                auto it = g_held.find(key);
+                if (it == g_held.end()) return;
+                if (--it->second.count > 0) return;
+                h = it->second;
+                g_held.erase(it);
+            }
+            if (!h.added || h.offset <= 0) return;
             unsigned long fault{};
-            if (unroot_raw(&w, &fault) < 0) log_fault(g_fn_release, "un-rooting a replacement object", fault, key);
+            if (unhold_raw(&h.gi, h.offset, h.raw, &fault) < 0) log_fault(g_fn_release, "letting a replacement object go", fault, key);
         }
 
         // ------------------------------------------------------------------ the table (call with g_mutex held)
@@ -304,7 +451,7 @@ namespace core_native::intercept
             return nullptr;
         }
 
-        // Removes the rules pred selects; returns their value pointers (replace rules) for un-rooting outside the lock.
+        // Removes the rules pred selects; returns their value pointers (replace rules) for letting go outside the lock.
         template <typename Pred>
         auto take_locked(Pred pred, size_t* n) -> std::vector<FWeakObjectPtr>
         {
@@ -487,7 +634,8 @@ namespace core_native::intercept
                 {
                     warn_rule(chosen->id, fault ? &Rule::warned_fault : &Rule::warned_gone,
                               fault ? std::format("rule {}: SEH fault 0x{:08X} while resolving its value; the game's function runs (logged once per rule)", chosen->id, fault)
-                                    : std::format("rule {}: its replacement object is gone; the game's function runs (logged once per rule)", chosen->id));
+                                    : std::format("rule {}: its replacement object is gone ({}); the game's function runs (logged once per rule)", chosen->id,
+                                                  slot_text(chosen->value_weak)));
                     return;
                 }
             }
@@ -568,7 +716,7 @@ namespace core_native::intercept
                 std::lock_guard lock(g_mutex);
                 values = take_locked([&](const Rule& r) { return r.mod == mod; }, &n);
             }
-            for (const auto& v : values) unroot(v);
+            for (const auto& v : values) unhold(v);
             return n;
         }
         catch (...)
@@ -588,7 +736,7 @@ namespace core_native::intercept
                 std::lock_guard lock(g_mutex);
                 values = take_locked([](const Rule&) { return true; }, &n);
             }
-            for (const auto& v : values) unroot(v);
+            for (const auto& v : values) unhold(v);
             return n;
         }
         catch (...)
@@ -695,10 +843,16 @@ namespace core_native::intercept
                 rule.target_raw = t;
                 rule.target_name = to_string(t->GetFullName());
             }
+            UObject* value_raw = nullptr;
+            UObject* holder = nullptr;
             if (action == Action::Replace)
             {
                 UObject* v = handle_object(fn, "value", value, &rule.value_weak);
                 if (!v->IsA(ret_class)) throw ArgError(std::format("{}: value {} is not a {}", fn, quote(to_string(v->GetName())), class_name(ret_class)));
+                // The game instance keeps it alive while the rule holds it (see "keeping a replacement alive").
+                holder = game_instance_for(fn, v, gi_layout().first);
+                if (!holder) throw ArgError(std::format("{}: value {} has no game instance to keep it alive (create it with the game instance as its outer)", fn, quote(to_string(v->GetName()))));
+                value_raw = v;
             }
 
             FWeakObjectPtr old_value{};
@@ -742,9 +896,9 @@ namespace core_native::intercept
                 refresh_hot_locked();
                 r.integer = rule.id;
             }
-            // New value first, then the old one: a rule that keeps its object never drops to zero roots.
-            if (action == Action::Replace) root(rule.value_weak);
-            if (had_old_value) unroot(old_value);
+            // New value first, then the old one: a rule that keeps its object never drops to zero holds.
+            if (action == Action::Replace) hold(rule.value_weak, value_raw, holder);
+            if (had_old_value) unhold(old_value);
             return r;
         });
     }
@@ -769,7 +923,7 @@ namespace core_native::intercept
                 size_t n{};
                 values = take_locked([&](const Rule& y) { return y.id == id; }, &n);
             }
-            for (const auto& v : values) unroot(v);
+            for (const auto& v : values) unhold(v);
             r.boolean = true;
             return r;
         });

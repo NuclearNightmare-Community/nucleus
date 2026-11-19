@@ -1009,6 +1009,9 @@ $intercept = $started + @(
     "\[$T\] OK FNTIPA "
     "\[$T\] OK FNTIPB card B's GetToolTipWidget\(\) -> W_ToolTip_EnemySelect_C"
     "\[$T\] OK FNHOVER a real hover over card A"
+    # The replacement survives a forced garbage collection (an unheld control TextBlock does not), after install and after the hover.
+    "#1|\[$T\] OK FNGC install: "
+    "#1|\[$T\] OK FNGC hover: "
     "\[$T\] OK FNANY "
     "\[$T\] OK FNANYREL "
     # runOriginal: toggles, no onCall for it, the next real click skipped again, a raising f re-raised and resumed.
@@ -1040,12 +1043,13 @@ $intercept = $started + @(
     "\[$T\] OK FN2EMPTY after the reload FnList is empty \(0 bytes, 0 rules\)"
     "\[$T\] OK FN2TOGGLE card A toggles again"
     "\[$T\] OK FN2TOGGLE card bat toggles again"
+    "\[$T\] OK FN2LETGO "   # released rules let their replacement go: a forced GC collects it
     "\[$T\] END result=PASS"
     # The hook stays: no callback removed, no fault, no WARN from the interception.
     "!\[$N\] native: intercept: WARN"
 )
 # The fn-live-* group: the cases that need the screen (target and value handles and classes, the cap, another mod's rule).
-foreach ($id in 'target-class', 'target-freed', 'target-unknown', 'value-dead', 'value-class', 'noreturn', 'tip-bat-class', 'other-release',
+foreach ($id in 'target-class', 'target-freed', 'target-unknown', 'value-dead', 'value-class', 'value-nogi', 'noreturn', 'tip-bat-class', 'other-release',
                 'other-suspend', 'other-wrelease', 'other-key', 'same-key', 'cap-mod') {
     $intercept += "\[$T\] OK CASE cs\.fn-live-$id "
 }
