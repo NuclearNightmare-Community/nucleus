@@ -581,7 +581,8 @@ SECTIONS[#SECTIONS + 1] = { "service", { "service" }, function(world, cls)
         ok("WIRE GameStartService_C at %s, 10 *Starts arrays x %d PlayerStarts (%d Corrective lobby start left out); the nuke flight starts from this service (native on V8.2)",
             vec(at), #objs, corrective)
     else
-        fail("WIRE GameStartService_C at %s: *Starts arrays not filled (%s)", vec(at), table.concat(bad, ", "))
+        local zt = zoned and string.format("; %d start zones (%s), picked Zone%d", #zoned.zones, M.zoneText(zoned), zoned.picked) or ""
+        fail("WIRE GameStartService_C at %s: *Starts arrays not filled (%s)%s", vec(at), table.concat(bad, ", "), zt)
     end
     posCheck(svc, at, r, "GameStartService_C", sm)
 end }
