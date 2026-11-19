@@ -1009,6 +1009,7 @@ namespace
 		WBP->OnVariableAdded(TEXT("Btn"));
 		WBP->OnVariableAdded(TEXT("Content"));
 		WBP->OnVariableAdded(TEXT("IconBox"));
+		WBP->OnVariableAdded(TEXT("IconStack")); // every widget in the tree needs its GUID, variable or not
 		WBP->OnVariableAdded(TEXT("IconBack"));
 		WBP->OnVariableAdded(TEXT("Icon"));
 		WBP->OnVariableAdded(TEXT("IconGap"));
