@@ -14,6 +14,8 @@
 -- intercept (core story 43: several dependents): in pass 1 an any skip on the Bat card's click, and card A's click
 -- (held by the test dependent) refused, logged as PEERFN lines; nothing in pass 2. The test dependent then stops it
 -- with UninstallMod.
+-- scope-host (distribution story 14): deploy.ps1 sets this peer's installed mod.json scope to "host", so core holds
+-- back its onReady until the machine hosts; onReady counts itself in <core>.test.scope.ready and logs PEERSCOPE.
 -- It never travels, presses keys or logs FAIL.
 local scriptDir = debug.getinfo(1, "S").source:gsub("^@", ""):match("^(.*)[/\\]")
 local ME = scriptDir:match("([^/\\]+)[/\\][Ss]cripts$")
@@ -113,6 +115,14 @@ local clicks = 0
 client.connect{
     mod = ME, need = NEED,
     onReady = function(core)
+        if SCENARIO == "scope-host" then
+            local key = CORE:lower() .. ".test.scope.ready"
+            local n = (tonumber(ModRef:GetSharedVariable(key)) or 0) + 1
+            ModRef:SetSharedVariable(key, n)
+            local okR, role = pcall(core.net.role)
+            say("PEERSCOPE ready %d role=%s", n, okR and tostring(role) or ("? " .. tostring(role)))
+            return
+        end
         if SCENARIO == "intercept" then
             local ok, err = pcall(interceptPeer, core)
             if not ok then say("PEERFN failed: %s", tostring(err)) end

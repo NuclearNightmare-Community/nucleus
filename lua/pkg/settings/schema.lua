@@ -14,7 +14,7 @@ local M = {}
 M.MAX_SETTINGS = 64
 M.TYPES = { bool = true, int = true, number = true, enum = true }
 M.CHANGEABLE = { anytime = true, menu = true, lobby = true, restart = true }
-M.SCOPES = { client = true, host = true, all = true }
+M.SCOPES = { client = true, host = true, both = true }
 M.KEY = "^[A-Za-z][A-Za-z0-9_.]*$"
 M.MAX_KEY = 64
 
@@ -115,7 +115,7 @@ local function entry(key, e)
         d.changeable = e.changeable
     else d.changeable = "restart" end
     if e.scope ~= nil then
-        if not M.SCOPES[e.scope] then return nil, "scope must be client, host or all" end
+        if not M.SCOPES[e.scope] then return nil, "scope must be client, host or both" end
         d.scope = e.scope
     end
     if e.source ~= nil then

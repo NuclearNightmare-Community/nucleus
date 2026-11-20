@@ -5796,6 +5796,32 @@ SETS.NR = dofile(scriptDir .. "\\nativerow.lua")({ case = case, E = E, step = st
 SETS.FN = dofile(scriptDir .. "\\intercept.lua")({ case = case, E = E, step = step, check = check, say = say, CORE = CORE,
     core = function() return core end, absR = absR, request = request, waitWorld = waitWorld, scriptDir = scriptDir }, SETS.GAME)
 
+-- Distribution story 14 (scope-host): the host gate, seen from outside. deploy.ps1 installs <Core>SkelPeer with its
+-- mod.json scope set to "host"; the peer counts its onReady calls in <core>.test.scope.ready (and logs PEERSCOPE).
+-- At the title screen (role not host) the peer must stay dormant (no onReady; core logs its one CONNECT dormant line);
+-- after this test dependent hosts Tower Island (SmallMap?listen) the peer gets onReady exactly once. check.ps1 checks
+-- the order of the lines.
+SETS.SCOPE = function()
+    local READY = CORE:lower() .. ".test.scope.ready"
+    local function peerReady() return tonumber(ModRef:GetSharedVariable(READY)) or 0 end
+    waitWorld("menu1", "NewMainMenu", 120)
+    step("menu1: settle", function() return after(10), 15 end) -- 20 of core's 500 ms connect polls at the title
+    step("menu1: peer dormant", function()
+        check(core.net.role() ~= "host", "SCOPEHOST menu1 role=%s (not host)", tostring(core.net.role()))
+        check(peerReady() == 0, "SCOPEHOST menu1 the host-scoped peer had no onReady at the title (%d)", peerReady())
+    end)
+    travel("match1", MATCH_MAP, "listen")
+    waitWorld("match1", "SmallMap", 150)
+    step("match1: peer ready", function()
+        return function() return peerReady() >= 1 end, 30, "the peer's onReady after hosting"
+    end)
+    step("match1: settle", function() return after(5), 10 end)
+    step("match1: once", function()
+        check(core.net.role() == "host", "SCOPEHOST match1 role=%s (host)", tostring(core.net.role()))
+        check(peerReady() == 1, "SCOPEHOST match1 the peer had onReady exactly once after hosting (%d)", peerReady())
+    end)
+end
+
 -- ---------------------------------------------------------------- runner (game thread, every 250 ms)
 local idx, waiting, busy, finished = 0, nil, false, false
 local function finish()
@@ -6006,6 +6032,8 @@ client.connect{
         elseif SCENARIO == "intercept" then
             -- Core story 43: function interception on the create-world screen's cards (two passes around a Ctrl+R)
             SETS.FN.build()
+        elseif SCENARIO == "scope-host" then
+            SETS.SCOPE() -- distribution story 14: the host gate on SkelPeer
         elseif SCENARIO == "journal" then
             core.log.debugEnabled = true -- the journal attach lines (cost per open) are DEBUG; no profiler: real costs
             buildJournal()

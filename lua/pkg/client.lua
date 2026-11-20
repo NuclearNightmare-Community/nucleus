@@ -144,10 +144,21 @@ local function featureCalls(list)
     return has, features
 end
 
--- connect{ mod, need, onReady = fn(core), onFail = fn(message), timeout = seconds } -> true | false, message.
+-- _dormant(scope, role, optOut) -> true while connect holds back onReady (distribution story 14): the mod's mod.json
+-- scope is "host", this machine doesn't host a world (role, the shared <core>.net.role, is not "host") and the mod didn't
+-- opt out (connect{ dormant = false }). Any other scope ("client", "host-plus", "both", unknown, missing) never waits.
+function C._dormant(scope, role, optOut)
+    return scope == "host" and role ~= "host" and optOut ~= true
+end
+
+-- connect{ mod, need, onReady = fn(core), onFail = fn(message), timeout = seconds, dormant = false }
+--   -> true | false, message.
 -- need is the oldest core the mod works with: ">=X.Y.Z" ("^X.Y.Z" and a bare "X.Y.Z" are read as ">=X.Y.Z"). Returns
 -- false when connect refuses at once (bad arguments, the native part missing), after logging the one line and calling
 -- onFail; true when it is waiting for core (onReady or onFail come later, on the game thread). Never raises.
+-- A mod whose mod.json scope is "host" gets onReady only once this machine hosts a world (one "CONNECT dormant" line
+-- until then, no timeout); dormant = false gives it onReady at once. Dormancy only delays onReady, once per machine: a
+-- mod that has had it keeps running when this machine later joins another lobby, so it still checks core.net.role().
 function C.connect(opts)
     if type(opts) ~= "table" or type(opts.mod) ~= "string" then
         local msg = string.format("connect{ mod = <string>, need = '>=X.Y.Z' } needs a table with a string mod, got %s%s.",
@@ -198,8 +209,34 @@ function C.connect(opts)
         return false, msg .. tail
     end
 
+    -- The host gate (story 14). dormant must be nil or a boolean; anything else is reported once and ignored.
+    local optOut = opts.dormant == false
+    if opts.dormant ~= nil and type(opts.dormant) ~= "boolean" then
+        log.warn("connect: dormant must be false or left out, got %s; ignored.", type(opts.dormant))
+    end
+    -- mod.json is read once, on the first attempt that gets this far, and kept for core.net (id) below.
+    local manRead, man, manWhy = false, nil, nil
+    local function manifest()
+        if not manRead then
+            manRead = true
+            if netOk then
+                local okI, m, why = pcall(netm.ownManifest, netDir, netFolder)
+                if okI then man, manWhy = m, why else man, manWhy = nil, tostring(m) end
+            end
+        end
+        return man, manWhy
+    end
+    local dormantLogged = false
+
     local deadline -- set on the first game-thread attempt; covers a wrong mods.txt order and slow first worlds
+    local function hostGate()
+        local m = manifest()
+        return C._dormant(type(m) == "table" and m.scope or nil, ModRef:GetSharedVariable(LOWER .. ".net.role"), optOut)
+    end
+
     local function attempt()
+        -- Already dormant and still not hosting: wait without calling core (the full checks run again once it hosts).
+        if dormantLogged and hostGate() then deadline = os.time() + timeout return end
         deadline = deadline or (os.time() + timeout)
         local expired = os.time() > deadline
         local state = ModRef:GetSharedVariable(LOWER .. ".state")
@@ -226,6 +263,14 @@ function C.connect(opts)
         local ok, reply = C.call("ping")
         if not ok then
             if expired then fail(NAME .. " is not answering its channel (" .. tostring(reply) .. ").") end
+            return
+        end
+        if hostGate() then
+            if not dormantLogged then
+                dormantLogged = true
+                log.info("CONNECT dormant %s: scope host, waiting until this machine hosts", mod)
+            end
+            deadline = os.time() + timeout -- no timeout while dormant; the checks above get a fresh one once it hosts
             return
         end
         done = true
@@ -272,8 +317,7 @@ function C.connect(opts)
         end
         -- Core story 22: core.net, bound to this mod's own id (nil: publish raises; read, watch and role still work).
         if netOk then
-            local okI, man, why = pcall(netm.ownManifest, netDir, netFolder)
-            if not okI then man, why = nil, tostring(man) end
+            local man, why = manifest()
             local id = man and man.id or nil
             local okB, errB = pcall(netm.bind, { call = C.call, log = log, id = id, idWhy = why, micros = clockm.micros })
             if okB then api.net = netm.API
