@@ -811,7 +811,7 @@ SECTIONS[#SECTIONS + 1] = { "sky", { "sky" }, function(world, cls)
     local m = ms[1]
     local h = try(function() return m.StartHour end)
     if not M.checkHour(h) then return fail("WIRE sky marker=%s: StartHour %s isn't 0..24", fname(m), quote(fmtv(h))) end
-    local sky, at, r = spawnAt(world, cls.sky, m, M.GAME.sky[2], { Pitch = 0, Yaw = 0, Roll = 0 })
+    local sky, at = spawnAt(world, cls.sky, m, M.GAME.sky[2], { Pitch = 0, Yaw = 0, Roll = 0 })
     if not sky then return end
     W.spawned[pathOf(m)] = pathOf(sky)
     local want = h * 100

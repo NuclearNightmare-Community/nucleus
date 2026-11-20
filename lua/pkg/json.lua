@@ -74,7 +74,7 @@ function M.decode(text, caps)
         for k, v in pairs(M.CAPS) do C[k] = (math.type(caps[k]) == "integer" and caps[k] > 0) and caps[k] or v end
     end
     local function where(pos)
-        local line, col = 1, 1
+        local line = 1
         local p = 1
         while true do
             local nl = find(text, "\n", p, true)
@@ -82,7 +82,7 @@ function M.decode(text, caps)
             line = line + 1
             p = nl + 1
         end
-        col = pos - p + 1
+        local col = pos - p + 1
         return line .. ":" .. col
     end
     if #text > C.maxBytes then return nil, "1:1 input is " .. #text .. " bytes, cap " .. C.maxBytes end
