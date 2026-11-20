@@ -110,7 +110,9 @@ M.UI = {
 -- net: core story 22 (core.net, a module: publish, read, watch, unwatch, role; story 23 adds presence, watchPresence,
 -- compatible, versionsCompatible).
 -- fn: core story 43 (core.fn, a module: intercept, release, runOriginal, list).
-M.BASE = { call = "function", ref = "function", deref = "function", free = "function", clock = "module", settings = "module", net = "module", fn = "module" }
+-- restart: core story 45 (core.restart, a module: mode, start; Mod Manager story 8's RESTART NOW).
+M.BASE = { call = "function", ref = "function", deref = "function", free = "function", clock = "module", settings = "module", net = "module", fn = "module",
+    restart = "module" }
 
 -- buildUi(U) -> ui table, missing: U maps module names to loaded modules. A function missing from its module is left
 -- out (and named in missing), so the generated feature list never claims it.

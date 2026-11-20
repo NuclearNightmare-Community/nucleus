@@ -108,7 +108,10 @@ local want = { "call", "clock", "deref",
     -- core story 22 (0.11.0): core.net, a module, its functions hand-named; core story 23 (0.12.0): presence, netCompat
     "net", "net.compatible", "net.presence", "net.publish", "net.read", "net.role", "net.unwatch", "net.versionsCompatible", "net.watch",
     "net.watchPresence",
-    "ref", "settings", "ui", "ui.button", "ui.button.icon", "ui.button.setTooltip",
+    "ref",
+    -- core story 45 (0.20.0): core.restart, a module (mode, start)
+    "restart",
+    "settings", "ui", "ui.button", "ui.button.icon", "ui.button.setTooltip",
     -- Mod Manager story 4 (0.10.0): the controls, every function hand-named
     "ui.checkbox", "ui.checkbox.create", "ui.checkbox.get", "ui.checkbox.isShown", "ui.checkbox.remove", "ui.checkbox.set", "ui.checkbox.setEnabled",
     "ui.checkbox.setTooltip", "ui.checkbox.setVisible",
@@ -135,7 +138,13 @@ local want = { "call", "clock", "deref",
     "ui.slider", "ui.slider.create", "ui.slider.get", "ui.slider.isShown", "ui.slider.remove", "ui.slider.set", "ui.slider.setDefault", "ui.slider.setEnabled",
     "ui.slider.setTooltip", "ui.slider.setVisible",
     "ui.text", "ui.text.setTooltip" }
-eq(table.concat(declared, ","), table.concat(want, ","), "declared(): the 0.18.0 feature list (map.setup, ui.journal.regions, ui.look, story 24's, story 4's, story 22's, story 23's, story 27's, story 31's, story 32's, story 33's, story 38's and story 43's names hand-named; settings, net, fn), sorted")
+eq(table.concat(declared, ","), table.concat(want, ","), "declared(): the 0.18.0 feature list (map.setup, ui.journal.regions, ui.look, story 24's, story 4's, story 22's, story 23's, story 27's, story 31's, story 32's, story 33's, story 38's and story 43's names hand-named; settings, net, fn, restart), sorted")
+-- Core story 45: a 0.19.x core's list answers false for restart; this one true.
+do
+    local old = {}
+    for _, n in ipairs(want) do if n ~= "restart" then old[#old + 1] = n end end
+    ok(F.set(old)["restart"] == nil and F.set(declared)["restart"] == true, "0.20.0: restart is a feature, a 0.19.x core's list has none")
+end
 -- Core story 43: a 0.17.x core's list answers false for fn and fn.intercept; this one true.
 do
     local old = {}

@@ -5,7 +5,11 @@
   Every name-bearing identifier comes from mod.json "name" (and "version"). Steps, each timed, logs in build/logs/:
     native     VS 2026 + CMake + Ninja against the pinned UE4SS source (-Ue4ssSrc), Game__Shipping__Win64, targets
                CoreNative (main.dll) and CoreNativeTest (core's test-only DLL, test/SkelNative; build/native-out/test/,
-               never packaged). Then mods/cpp-spike/abi-check.ps1 must report no missing imports for both.
+               never packaged), <name>Restart (the relaunch helper, core story 45: build/native-out/bin/) and
+               <name>RestartTest (its test build, build/native-out/test/, never packaged). Then mods/cpp-spike/abi-check.ps1
+               must report no missing imports for both DLLs, the helper may import only Windows system DLLs (dumpbin
+               /dependents), and Windows Defender scans main.dll and the helper (MpCmdRun -Scan -ScanType 3 -File
+               -DisableRemediation; exit 2, a threat, refuses the build; build/logs/defender.txt records each result).
     blueprint  UE 5.6 (-Engine): compile the editor-only generator, run -run=CoreGen -CoreName=<name>, cook,
                repak pack --version V11 (uncompressed) /Game/Mods/<name>/ as <name>.pak.
                Map markers (map service story 4): CoreGen also writes /Game/Mods/<name>/Map/ (the twelve
@@ -27,7 +31,8 @@
                component that isn't editor-only): its editor-only preview slots and icon must be stripped.
     lua        Stage lua/main.lua and lua/pkg/ (with lua/pkg/ui/, lua/pkg/map/ and lua/pkg/settings/) as Scripts/main.lua and Scripts/<lowercase name>/, plus a generated
                Scripts/<lowercase name>/version.lua.
-    package    build/package/Mods/<name>/{mod.json,dlls/main.dll,Scripts/} and build/package/LogicMods/<name>.pak.
+    package    build/package/Mods/<name>/{mod.json,dlls/main.dll,bin/<name>Restart.exe,Scripts/} and
+               build/package/LogicMods/<name>.pak.
   Never builds anything into or copies UE4SS.dll. Only our own generated assets go into the pak.
   -Ue4ssSrc defaults to ue4ss-src/ here, then ue4ss-src/ in this repo's main checkout. It must be the pinned
   commit with submodules (tools/README.md, "UE4SS C++ mods"); clone it as mods/cpp-spike/build.ps1 does.
@@ -155,7 +160,7 @@ Step 'native' {
     $src = Join-Path $here 'native'
     Run 'native-configure.log' cmake @('-S', $src, '-B', $nativeB, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Game__Shipping__Win64',
         "-DUE4SS_SRC=$($Ue4ssSrc -replace '\\', '/')", "-DCORE_NAME=$name", "-DCORE_VERSION=$version")
-    Run 'native-build.log' cmake @('--build', $nativeB, '--target', 'CoreNative', 'CoreNativeTest')
+    Run 'native-build.log' cmake @('--build', $nativeB, '--target', 'CoreNative', 'CoreNativeTest', "$($name)Restart", "$($name)RestartTest")
     $staged = Join-Path $out 'native-out'
     # Core's DLL (shipped) and core's test-only DLL (test/SkelNative; deploy.ps1 -Test installs it, never packaged).
     foreach ($t in @(@{ Name = 'CoreNative'; Out = 'main.dll' }, @{ Name = 'CoreNativeTest'; Out = 'test\main.dll' })) {
@@ -168,6 +173,40 @@ Step 'native' {
         & $abiCheck -Dll $dest
         if ($LASTEXITCODE) { throw "abi-check.ps1 reports imports the shipped UE4SS.dll lacks ($($t.Name))" }
     }
+    # Core story 45: the relaunch helper (shipped as bin/<name>Restart.exe) and its test build (never packaged).
+    foreach ($t in @(@{ Name = "$($name)Restart"; Out = "bin\$($name)Restart.exe" }, @{ Name = "$($name)RestartTest"; Out = "test\$($name)RestartTest.exe" })) {
+        $exe = Get-ChildItem $nativeB -Recurse -Filter "$($t.Name).exe" | Where-Object { $_.FullName -notlike '*\_deps\*' } | Select-Object -First 1
+        if (-not $exe) { throw "$($t.Name).exe was not produced" }
+        $dest = Join-Path $staged $t.Out
+        New-Item -ItemType Directory -Force (Split-Path $dest) | Out-Null
+        Copy-Item $exe.FullName $dest -Force
+        Write-Host ("   {0} {1:N0} bytes ({2})" -f $t.Out, $exe.Length, $t.Name)
+        # Windows system libraries only (the C runtime is linked in statically): never UE4SS, never anything of ours.
+        $deps = @(& dumpbin /nologo /dependents $dest | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '\.dll$' })
+        $foreign = @($deps | Where-Object { $_ -notmatch '^(?i:kernel32|user32|shell32|ole32|advapi32|api-ms-win-[a-z0-9-]+)\.dll$' })
+        if (-not $deps -or $foreign) { throw "$($t.Name).exe imports $(if ($foreign) { $foreign -join ', ' } else { 'nothing readable' }); only Windows system DLLs are allowed" }
+        Write-Host "   $($t.Out) imports: $($deps -join ', ')"
+    }
+    # Windows Defender scans what ships (main.dll and the helper); a detection refuses the build. Never an exclusion,
+    # never an online scanner (story 8).
+    $scanner = Join-Path $env:ProgramFiles 'Windows Defender\MpCmdRun.exe'
+    if (-not (Test-Path -LiteralPath $scanner -PathType Leaf)) { throw "Windows Defender's scanner not found: $scanner" }
+    $sig = $null
+    try { $sig = (Get-MpComputerStatus -ErrorAction Stop).AntivirusSignatureVersion } catch { }
+    $record = @()
+    foreach ($rel in 'main.dll', "bin\$($name)Restart.exe") {
+        $f = Join-Path $staged $rel
+        $sha = (Get-FileHash -LiteralPath $f -Algorithm SHA256).Hash
+        $text = (@(& $scanner -Scan -ScanType 3 -File $f -DisableRemediation 2>&1 | ForEach-Object { "$_".Trim() } | Where-Object { $_ }) -join ' | ')
+        $code = $LASTEXITCODE
+        if ($code -eq 2) { throw "Windows Defender flagged $rel`: $text (story 8: stop, set the story blocked with this evidence; never add an exclusion)" }
+        if ($code -ne 0) { throw "Windows Defender's scan of $rel failed (MpCmdRun exit $code): $text" }
+        if (-not (Test-Path -LiteralPath $f -PathType Leaf) -or (Get-FileHash -LiteralPath $f -Algorithm SHA256).Hash -ne $sha) { throw "$rel is gone or changed after the Windows Defender scan: $text" }
+        $line = "SCAN $($rel -replace '\\', '/') sha256=$sha result=no threats found$(if ($sig) { " signatures=$sig" })"
+        Write-Host "   defender: $line"
+        $record += $line
+    }
+    Set-Content (Join-Path $logs 'defender.txt') $record
 }
 
 Step 'blueprint' {
@@ -291,7 +330,7 @@ Step 'lua' {
     # each dependent's); modid.lua (the id normalizer) comes with lua/pkg/*.lua above.
     New-Item -ItemType Directory -Force (Join-Path $pkg 'net') | Out-Null
     Copy-Item (Join-Path $here 'lua\pkg\net\*.lua') (Join-Path $pkg 'net')
-    foreach ($f in 'json.lua', 'settings\store.lua', 'settings\schema.lua', 'settings\client.lua', 'modid.lua', 'net\state.lua', 'net\host.lua', 'net\client.lua',
+    foreach ($f in 'json.lua', 'restart.lua', 'settings\store.lua', 'settings\schema.lua', 'settings\client.lua', 'modid.lua', 'net\state.lua', 'net\host.lua', 'net\client.lua',
                 'net\presence.lua', 'net\players.lua') {
         if (-not (Test-Path (Join-Path $pkg $f))) { throw "lua step: $f was not staged" }
     }
@@ -302,15 +341,17 @@ Step 'package' {
     $pkgRoot = Join-Path $out 'package'
     Remove-Item $pkgRoot -Recurse -Force -ErrorAction SilentlyContinue
     $modDir = Join-Path $pkgRoot "Mods\$name"
-    New-Item -ItemType Directory -Force (Join-Path $modDir 'dlls'), (Join-Path $pkgRoot 'LogicMods') | Out-Null
+    New-Item -ItemType Directory -Force (Join-Path $modDir 'dlls'), (Join-Path $modDir 'bin'), (Join-Path $pkgRoot 'LogicMods') | Out-Null
     $parts = @{
         'main.dll'    = Join-Path $out 'native-out\main.dll'
+        'helper'      = Join-Path $out "native-out\bin\$($name)Restart.exe"
         'Scripts'     = Join-Path $out 'lua-out\Scripts'
         "$name.pak"   = Join-Path $out "$name.pak"
     }
     foreach ($p in $parts.GetEnumerator()) { if (-not (Test-Path $p.Value)) { throw "Missing $($p.Key) ($($p.Value)); run its build step" } }
     Copy-Item (Join-Path $here 'mod.json') $modDir
     Copy-Item $parts['main.dll'] (Join-Path $modDir 'dlls\main.dll')
+    Copy-Item $parts['helper'] (Join-Path $modDir "bin\$($name)Restart.exe")
     Copy-Item $parts['Scripts'] $modDir -Recurse
     Copy-Item $parts["$name.pak"] (Join-Path $pkgRoot 'LogicMods')
     Get-ChildItem $pkgRoot -Recurse -File | ForEach-Object {

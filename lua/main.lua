@@ -181,6 +181,15 @@ local function start()
     if #missingNatives > 0 then
         log.error("objectives natives missing from the native part (%s); intel task lists can't be filled. Reinstall %s.", table.concat(missingNatives, ", "), NAME)
     end
+    -- The restart natives (native/src/restart.cpp, core story 45). Checked once; without them core.restart answers
+    -- nil, "native part missing" (lua/pkg/restart.lua), and a Restart now button stays hidden.
+    local missingRestart = {}
+    for _, suffix in ipairs({ "_RestartMode", "_RestartStart" }) do
+        if type(_G[NAME .. suffix]) ~= "function" then missingRestart[#missingRestart + 1] = NAME .. suffix end
+    end
+    if #missingRestart > 0 then
+        log.error("restart natives missing from the native part (%s); core.restart is unavailable. Reinstall %s.", table.concat(missingRestart, ", "), NAME)
+    end
 
     -- The map service: the Start marker's and the game state's BeginPlay hooks (InitGameState post-hook); the setup's
     -- LoadMap part runs from core's one LoadMap post-hook below.

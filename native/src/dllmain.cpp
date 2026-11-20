@@ -3,7 +3,8 @@
 // Registers <Core>_NativeVersion, <Core>_ClockMicros, <Core>_Ref, <Core>_Deref, <Core>_RefFree and the objectives natives
 // (objectives.cpp: <Core>_SetObjectives, <Core>_DescribeObjectives, <Core>_SetTraitorTaskState) and the function
 // interception natives (intercept.cpp, core story 43: <Core>_FnIntercept, <Core>_FnRelease, <Core>_FnSuspend,
-// <Core>_FnList) into every Lua mod's state in on_lua_start, before that mod's main.lua runs. <Core> is CORE_NAME (core_config.hpp, generated from mod.json
+// <Core>_FnList) and the restart natives (restart.cpp, core story 45 / Mod Manager story 8: <Core>_RestartMode,
+// <Core>_RestartStart, which start the relaunch helper bin/<Core>Restart.exe) into every Lua mod's state in on_lua_start, before that mod's main.lua runs. <Core> is CORE_NAME (core_config.hpp, generated from mod.json
 // "name"); nothing here spells the name. Weak handles are FWeakObjectPtr (GUObjectArray index + serial number), so a
 // handle never resolves to an object that took over a freed object's slot or address.
 //
@@ -39,6 +40,7 @@
 #include "core_config.hpp"
 #include "intercept.hpp"
 #include "objectives.hpp"
+#include "restart.hpp"
 
 // QueryPerformanceCounter/Frequency (<Core>_ClockMicros). After the UE4SS headers, so their own Windows setup wins.
 #ifndef WIN32_LEAN_AND_MEAN
@@ -307,6 +309,8 @@ class CoreNative : public CppUserModBase
                 lua.register_function(intercept::g_fn_release.c_str(), &intercept::l_release);
                 lua.register_function(intercept::g_fn_suspend.c_str(), &intercept::l_suspend);
                 lua.register_function(intercept::g_fn_list.c_str(), &intercept::l_list);
+                lua.register_function(restart::g_fn_mode.c_str(), &restart::l_mode);
+                lua.register_function(restart::g_fn_start.c_str(), &restart::l_start);
             }
             catch (const std::exception& e)
             {
