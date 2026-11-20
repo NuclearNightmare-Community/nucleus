@@ -5,8 +5,8 @@
 // from Lua. Everything the helper gets comes from the game process itself: its exe (GetModuleFileNameW(nullptr)), its
 // command line (GetCommandLineW(), verbatim), its working folder (GetCurrentDirectoryW()) and one SYNCHRONIZE handle to
 // this process, the only handle the helper inherits (PROC_THREAD_ATTRIBUTE_HANDLE_LIST). No Lua value reaches the
-// helper's command line: both natives take no arguments. The helper is started at most once per session (a second
-// call answers "already started"); the caller quits the game itself.
+// helper's command line: both natives take no arguments. At most one helper waits at a time (a call while it waits
+// answers "already started"; after it has exited a call starts a new one); the caller quits the game itself.
 //
 // Both natives touch no UObject, so any thread may call them. Every path returns a value or a "nil, reason" pair;
 // argument problems raise "<fn>: takes no arguments"; a C++ exception becomes "<fn>: internal error ..." (guarded()).
@@ -31,7 +31,10 @@ namespace core_native::restart
     namespace
     {
         std::mutex g_mutex;
-        bool g_started = false; // under g_mutex: the helper was started this session
+        // Under g_mutex: a SYNCHRONIZE handle to the helper this session started, while it may still be waiting. Once
+        // it has exited (it relaunched nothing because the game didn't quit within 120 s, or QuitGame failed), the next
+        // start begins a new one.
+        HANDLE g_helper = nullptr;
 
         void no_args(const Lua& lua, const std::string& fn)
         {
@@ -95,8 +98,9 @@ namespace core_native::restart
 
         // Starts the helper; returns the Win32 error code (0 on success). Closes everything it opened.
         DWORD start_helper(const std::wstring& helper, core_restart::Mode mode, const std::wstring& exe, const std::wstring& cwd, DWORD* pid,
-                           bool* too_long)
+                           bool* too_long, HANDLE* helper_handle)
         {
+            *helper_handle = nullptr;
             *too_long = false;
             HANDLE wait = nullptr;
             if (!DuplicateHandle(GetCurrentProcess(), GetCurrentProcess(), GetCurrentProcess(), &wait, SYNCHRONIZE, TRUE, 0)) return GetLastError();
@@ -141,6 +145,8 @@ namespace core_native::restart
                 if (ok)
                 {
                     *pid = pi.dwProcessId;
+                    // Keep only SYNCHRONIZE: enough to ask whether the helper is still waiting.
+                    if (!DuplicateHandle(GetCurrentProcess(), pi.hProcess, GetCurrentProcess(), helper_handle, SYNCHRONIZE, FALSE, 0)) *helper_handle = nullptr;
                     CloseHandle(pi.hThread);
                     CloseHandle(pi.hProcess);
                 }
@@ -174,7 +180,13 @@ namespace core_native::restart
         return guarded(lua, g_fn_start, [&] {
             no_args(lua, g_fn_start);
             std::lock_guard guard{g_mutex};
-            if (g_started) return nil_reason("already started");
+            if (g_helper)
+            {
+                if (WaitForSingleObject(g_helper, 0) == WAIT_TIMEOUT) return nil_reason("already started");
+                CloseHandle(g_helper); // that helper has exited: start a new one, as on a first call
+                g_helper = nullptr;
+                logf("restart: the earlier helper has exited; starting a new one");
+            }
             const std::wstring exe = module_path(nullptr);
             const core_restart::Mode m = core_restart::mode_for(exe);
             if (m == core_restart::Mode::None)
@@ -197,7 +209,8 @@ namespace core_native::restart
             }
             DWORD pid = 0;
             bool too_long = false;
-            const DWORD err = start_helper(helper, m, exe, cwd, &pid, &too_long);
+            HANDLE started = nullptr;
+            const DWORD err = start_helper(helper, m, exe, cwd, &pid, &too_long, &started);
             if (too_long)
             {
                 logf("restart: not started: command line too long");
@@ -208,7 +221,9 @@ namespace core_native::restart
                 logf("restart: not started: start failed: {}", err);
                 return nil_reason(std::format("start failed: {}", err));
             }
-            g_started = true;
+            // Without a handle (duplication failed) a second call can't tell whether it waits: it starts another one,
+            // which is harmless (each relaunches only after this game exits; the second finds Steam or the new game up).
+            g_helper = started;
             logf("restart: helper started (mode={}, pid={})", core_restart::mode_name(m), pid);
             Result r;
             r.kind = Result::Kind::Bool;

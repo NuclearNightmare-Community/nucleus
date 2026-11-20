@@ -189,24 +189,31 @@ Step 'native' {
     }
     # Windows Defender scans what ships (main.dll and the helper); a detection refuses the build. Never an exclusion,
     # never an online scanner (story 8).
+    # build/logs/defender.txt: one line per scan, written as each result comes in (before any refusal), so a detection's
+    # evidence is on record and no earlier build's file survives.
+    $defLog = Join-Path $logs 'defender.txt'
+    Remove-Item -LiteralPath $defLog -ErrorAction SilentlyContinue
     $scanner = Join-Path $env:ProgramFiles 'Windows Defender\MpCmdRun.exe'
-    if (-not (Test-Path -LiteralPath $scanner -PathType Leaf)) { throw "Windows Defender's scanner not found: $scanner" }
-    $sig = $null
-    try { $sig = (Get-MpComputerStatus -ErrorAction Stop).AntivirusSignatureVersion } catch { }
-    $record = @()
+    if (-not (Test-Path -LiteralPath $scanner -PathType Leaf)) { Add-Content $defLog "ERROR scanner not found: $scanner"; throw "Windows Defender's scanner not found: $scanner" }
+    $ver = ''
+    try {
+        $st = Get-MpComputerStatus -ErrorAction Stop
+        $ver = " signatures=$($st.AntivirusSignatureVersion) engine=$($st.AMEngineVersion) platform=$($st.AMProductVersion)"
+    } catch { }
     foreach ($rel in 'main.dll', "bin\$($name)Restart.exe") {
         $f = Join-Path $staged $rel
         $sha = (Get-FileHash -LiteralPath $f -Algorithm SHA256).Hash
         $text = (@(& $scanner -Scan -ScanType 3 -File $f -DisableRemediation 2>&1 | ForEach-Object { "$_".Trim() } | Where-Object { $_ }) -join ' | ')
         $code = $LASTEXITCODE
+        $same = (Test-Path -LiteralPath $f -PathType Leaf) -and (Get-FileHash -LiteralPath $f -Algorithm SHA256).Hash -eq $sha
+        $result = if ($code -eq 2) { "THREAT (MpCmdRun exit 2): $text" } elseif ($code -ne 0) { "FAILED (MpCmdRun exit $code): $text" } elseif (-not $same) { "CHANGED or gone after the scan: $text" } else { 'no threats found' }
+        $line = "SCAN $($rel -replace '\\', '/') sha256=$sha result=$result$ver"
+        Add-Content $defLog $line
+        Write-Host "   defender: $line"
         if ($code -eq 2) { throw "Windows Defender flagged $rel`: $text (story 8: stop, set the story blocked with this evidence; never add an exclusion)" }
         if ($code -ne 0) { throw "Windows Defender's scan of $rel failed (MpCmdRun exit $code): $text" }
-        if (-not (Test-Path -LiteralPath $f -PathType Leaf) -or (Get-FileHash -LiteralPath $f -Algorithm SHA256).Hash -ne $sha) { throw "$rel is gone or changed after the Windows Defender scan: $text" }
-        $line = "SCAN $($rel -replace '\\', '/') sha256=$sha result=no threats found$(if ($sig) { " signatures=$sig" })"
-        Write-Host "   defender: $line"
-        $record += $line
+        if (-not $same) { throw "$rel is gone or changed after the Windows Defender scan: $text" }
     }
-    Set-Content (Join-Path $logs 'defender.txt') $record
 }
 
 Step 'blueprint' {
