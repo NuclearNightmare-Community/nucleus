@@ -2,6 +2,21 @@
 
 All notable changes to Nucleus are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). From 0.5.0 a dependent's `need` and `dependsOn` are minimum versions (`>=0.5.0`), so a newer Nucleus never asks dependents to raise them. Up to 0.3.0, below 1.0.0 a dependent connected only to the same minor version (`need = "0.3.0"` accepted 0.3.x).
 
+## [0.19.0] - 2026-11-19
+
+Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
+
+For players: a mod made only for the host (`scope` `host`) now waits until you host a game before it starts, so it does nothing while you play in someone else's lobby. Other mods load as before.
+
+### Added
+
+- The host gate (distribution story 14; README "Versioning"). `connect` reads the dependent's own `mod.json` `scope` (`nucleus.net.client` `ownManifest` now returns it) and holds back a `host` mod's `onReady` until this machine hosts a world (`<core>.net.role` is `host`): one `CONNECT dormant <mod>: scope host, waiting until this machine hosts` line, no timeout while it waits, no channel calls; then `CONNECT ok` and `onReady` once. `connect{ ..., dormant = false }` opts out; a non-boolean `dormant` logs one WARN and is ignored. `client`, `host-plus`, `both`, and a missing or unknown scope (the retired `all` included) load everywhere as before. Dormancy only delays `onReady`, once per machine: core never refuses or stops a mod because of its scope. Pure decision `C._dormant(scope, role, optOut)`, unit-tested in `test/unit/versioning_test.lua`. New test scenario `scope-host` (VM).
+
+### Changed
+
+- A setting's `scope` in `mod.json` `settings` is `client | host | both`; `all` is left out with `WARN settings: ... left out: scope must be client, host or both`.
+- Core's own `mod.json` `scope` is `client` (was `all`, which the release tools now refuse).
+
 ## [0.18.0] - 2026-11-19
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.

@@ -22,7 +22,7 @@
 param(
     [string] $Instance,
     [string] $Log,
-    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'createserver', 'gameinsert', 'nativerow', 'intercept', 'soak', 'manual', 'net-host', 'net-client', 'net-vanilla-host',
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'createserver', 'gameinsert', 'nativerow', 'intercept', 'scope-host', 'soak', 'manual', 'net-host', 'net-client', 'net-vanilla-host',
                  'presence-host', 'presence-client', 'presence-vanilla-host')]
     [string] $Scenario = 'skeleton',
     [ValidateSet('host', 'vm')] [string] $Target = 'host'
@@ -1300,7 +1300,24 @@ $presenceClient = $started + @(
     "\[$T\] END result=PASS"
     "!\[$N\] ERROR"
 )
+# Distribution story 14: the host gate. SkelPeer, installed with scope host, stays dormant at the title (one CONNECT
+# dormant line, no onReady) and gets CONNECT ok and onReady exactly once after the test dependent hosts Tower Island;
+# the order is checked below.
+$scopeHost = $started + @(
+    "\[$T\] SCENARIO scope-host "
+    "#1|\[$Peer\] CONNECT dormant $Peer`: scope host, waiting until this machine hosts"
+    "#1|\[$Peer\] CONNECT ok $N $Ver "
+    "#1|\[$Peer\] PEERSCOPE ready 1 role=host"
+    "!\[$Peer\] PEERSCOPE ready [02-9]"
+    "\[$T\] OK SCOPEHOST menu1 role="
+    "\[$T\] OK SCOPEHOST menu1 the host-scoped peer had no onReady at the title \(0\)"
+    "\[$T\] OK SCOPEHOST match1 role=host"
+    "\[$T\] OK SCOPEHOST match1 the peer had onReady exactly once after hosting \(1\)"
+    "!\[$Peer\] (ERROR|WARN)"
+    "\[$T\] END result=PASS"
+)
 $expect = @{
+    'scope-host' = $scopeHost
     'presence-host' = $presenceHost
     'presence-vanilla-host' = $presenceVanillaHost
     'presence-client' = $presenceClient
@@ -1424,6 +1441,19 @@ if ($Scenario -eq 'createserver') {
         }
     }
     if ($windows -lt 1) { Write-Host "FAIL: no whole hud tick window in the match (between CSMATCH window 1 and CSMATCH end)"; $failed++ }
+}
+if ($Scenario -eq 'scope-host') {
+    # Distribution story 14: dormant at the title, then the travel to Tower Island, then CONNECT ok and onReady.
+    $at = { param($rx) [Array]::FindIndex([string[]]$lines, [Predicate[string]]{ param($l) $l -match $rx }) }
+    $dormant = & $at "\[$Peer\] CONNECT dormant "
+    $travel = & $at "\[$T\] TRAVEL match1 OpenLevel "
+    $okLine = & $at "\[$Peer\] CONNECT ok "
+    $ready = & $at "\[$Peer\] PEERSCOPE ready 1 "
+    if ($dormant -ge 0 -and $travel -gt $dormant -and $okLine -gt $travel -and $ready -gt $okLine) {
+        Write-Host "ok:   order: CONNECT dormant (line $($dormant + 1)) < TRAVEL (line $($travel + 1)) < CONNECT ok (line $($okLine + 1)) < onReady (line $($ready + 1))"
+    } else {
+        Write-Host "FAIL: order: CONNECT dormant (line $($dormant + 1)), TRAVEL (line $($travel + 1)), CONNECT ok (line $($okLine + 1)), onReady (line $($ready + 1)) are not in that order"; $failed++
+    }
 }
 if ($Scenario -eq 'soak') {
     # Story 7 AC 7: the one-minute windows that lie wholly in the idle match (the first one after "SOAK idle" may

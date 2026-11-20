@@ -370,6 +370,74 @@ if core then
     for _, k in ipairs({ "name", "version", "log", "call", "ref", "deref", "free", "clock" }) do ok(core[k] ~= nil, "api keeps " .. k) end
 end
 
+-- ---------------------------------------------------------------- the host gate (distribution story 14)
+eq(Cl._dormant("host", nil, false), true, "_dormant: host scope, no role yet: dormant")
+eq(Cl._dormant("host", "none", false), true, "_dormant: host scope at the title (role none): dormant")
+eq(Cl._dormant("host", "client", false), true, "_dormant: host scope on a client: dormant")
+eq(Cl._dormant("host", "standalone", false), true, "_dormant: host scope, standalone: dormant")
+eq(Cl._dormant("host", "host", false), false, "_dormant: host scope while hosting: ready")
+eq(Cl._dormant("host", "client", true), false, "_dormant: dormant = false opts out")
+for _, sc in ipairs({ "client", "host-plus", "both", "all", "Host", "", "either" }) do
+    eq(Cl._dormant(sc, "client", false), false, "_dormant: scope '" .. sc .. "' never waits")
+end
+eq(Cl._dormant(nil, "client", false), false, "_dormant: a missing scope never waits")
+eq(Cl._dormant(42, "client", false), false, "_dormant: a non-string scope never waits")
+
+-- The gate through connect: mod.json read through core.net's ownManifest (stubbed here), the role from the shared variable.
+do
+    local NetC = require("nucleus.net.client")
+    local realFind, realMan = NetC.findOwn, NetC.ownManifest
+    local scopeNow
+    NetC.findOwn = function() return "D", "Dep" end
+    NetC.ownManifest = function() return { id = "a.dep", version = "0.1.0", scope = scopeNow, notes = {} } end
+    local function gated(scope, role, extra)
+        scopeNow = scope
+        shared["nucleus.state"], shared["nucleus.version"], shared["nucleus.net.role"] = "ready", "0.6.0", role
+        local res = { ready = 0, failed = nil }
+        local o = { mod = "Gate", need = ">=0.1.0", onReady = function() res.ready = res.ready + 1 end, onFail = function(m) res.failed = m end }
+        for k, v in pairs(extra or {}) do o[k] = v end
+        local r = Cl.connect(o)
+        return r, res
+    end
+    local pings = function() local n = 0 for _, c in ipairs(CALLS) do if c == "ping" then n = n + 1 end end return n end
+
+    local before = linesMatching("CONNECT dormant")
+    local r, res = gated("host", "none")
+    runLoops(); runLoops(); runLoops()
+    ok(r == true and res.ready == 0 and res.failed == nil, "gate: a host mod at the title gets no onReady", res.failed)
+    eq(linesMatching("CONNECT dormant") - before, 1, "gate: one dormant line for three attempts")
+    ok(linesMatching("^%[Gate%] CONNECT dormant Gate: scope host, waiting until this machine hosts$") >= 1, "gate: the dormant line's text", LINES[#LINES])
+    local p0 = pings(); runLoops(); eq(pings() - p0, 0, "gate: a dormant attempt doesn't call core")
+    shared["nucleus.net.role"] = "client"; runLoops()
+    ok(res.ready == 0 and res.failed == nil, "gate: still dormant on a client")
+    local okBefore = linesMatching("CONNECT ok")
+    shared["nucleus.net.role"] = "host"; runLoops()
+    eq(res.ready, 1, "gate: onReady once this machine hosts")
+    eq(linesMatching("CONNECT ok") - okBefore, 1, "gate: CONNECT ok after hosting")
+    shared["nucleus.net.role"] = "client"; runLoops(); shared["nucleus.net.role"] = "host"; runLoops()
+    eq(res.ready, 1, "gate: onReady exactly once (per machine, not per world)")
+
+    r, res = gated("host", "none", { dormant = false })
+    runLoops()
+    eq(res.ready, 1, "gate: dormant = false gets onReady at once")
+    for _, sc in ipairs({ "client", "host-plus", "both", "all" }) do
+        r, res = gated(sc, "none")
+        runLoops()
+        eq(res.ready, 1, "gate: scope '" .. sc .. "' gets onReady at the title")
+    end
+    r, res = gated(nil, "client")
+    runLoops()
+    eq(res.ready, 1, "gate: a missing scope gets onReady")
+    local warnBefore = linesMatching("dormant must be false or left out")
+    r, res = gated("host", "none", { dormant = "no" })
+    runLoops()
+    ok(res.ready == 0 and linesMatching("dormant must be false or left out") - warnBefore == 1, "gate: a non-boolean dormant is reported once and ignored")
+    shared["nucleus.net.role"] = "host"; runLoops()
+    eq(res.ready, 1, "gate: ... and the gate still applies")
+    NetC.findOwn, NetC.ownManifest = realFind, realMan
+    shared["nucleus.net.role"] = nil
+end
+
 print = realPrint
 print(string.format("versioning_test: %d passed, %d failed", pass, fail))
 os.exit(fail == 0 and 0 or 1)

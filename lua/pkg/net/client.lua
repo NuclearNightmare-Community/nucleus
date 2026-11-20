@@ -460,8 +460,9 @@ function M.findOwn(skip)
     return nil
 end
 
--- ownManifest(modsDir, folder) -> { id, version, netCompat, notes } | nil, why: mod.json "id" (normalized), and for
--- presence (story 23) "version" and "netCompat" of Mods/<folder>/. A version that isn't strict x.y.z is nil, and a
+-- ownManifest(modsDir, folder) -> { id, version, netCompat, scope, notes } | nil, why: mod.json "id" (normalized), for
+-- presence (story 23) "version" and "netCompat", and for connect's host gate (distribution story 14) "scope" (the
+-- string as written, nil when it isn't a short string) of Mods/<folder>/. A version that isn't strict x.y.z is nil, and a
 -- netCompat that is invalid or above the version is nil, each with a note for connect's one line.
 function M.ownManifest(modsDir, folder)
     if type(modsDir) ~= "string" or type(folder) ~= "string" then return nil, "install folder unknown" end
@@ -476,6 +477,7 @@ function M.ownManifest(modsDir, folder)
     local id, why = modid.netId(root.id)
     if not id then return nil, "mod.json id: " .. tostring(why) end
     local out = { id = id, notes = {} }
+    if type(root.scope) == "string" and #root.scope <= 32 then out.scope = root.scope end
     local okV, whyV = P.parseVersion(root.version)
     if okV then out.version = root.version
     else out.notes[#out.notes + 1] = "mod.json version: " .. tostring(whyV) .. "; this mod is not reported to the host (presence)" end

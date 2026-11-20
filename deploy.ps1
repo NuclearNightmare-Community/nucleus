@@ -10,6 +10,8 @@
   and for scenarios ui, bad-input, menu (Mod Manager story 4: a second mod's checkbox) and intercept (core story 43: a second mod's rule) the second test dependent (test/SkelPeer, as Mods/<name>SkelPeer; story 15: a button of
   another mod; Mod Manager story 5: a settings change from another Lua state, with a corrupt settings.json of its own).
   Each test dependent's mod.json (settings declarations) is installed with it.
+  scope-host (distribution story 14) installs the second test dependent too, with its installed mod.json "scope" set to
+  "host" (the source keeps "client"), so core's host gate keeps it dormant until the machine hosts.
   For scenario bad-input it also installs core's test-only C++ part (test/SkelNative, built by build.ps1 as
   build/native-out/test/main.dll, never packaged) as Mods/<name>SkelNative: the forced missing struct member case.
   -Scenario breaks one part on purpose: skeleton (all parts), no-native (no dlls/main.dll), no-pak (no LogicMods pak);
@@ -32,7 +34,7 @@
 param(
     [Parameter(Mandatory)] [string] $Instance,
     [switch] $Test,
-    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'createserver', 'gameinsert', 'nativerow', 'intercept', 'soak', 'manual', 'net-host', 'net-client',
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'createserver', 'gameinsert', 'nativerow', 'intercept', 'scope-host', 'soak', 'manual', 'net-host', 'net-client',
                  'presence-host', 'presence-client', 'presence-vanilla-host')]
     [string] $Scenario = 'skeleton',
     [switch] $Remove,
@@ -106,9 +108,17 @@ if ($Test) {
     Set-Content (Join-Path $modsDir "$testName\Scripts\scenario.txt") $Scenario -NoNewline
     $i = [Array]::FindIndex([string[]]$lines, [Predicate[string]]{ param($l) $l -match '^\s*Keybinds\s*:' })
     $lines = if ($i -ge 0) { @($lines[0..($i-1)]) + "$testName : 1" + @($lines[$i..($lines.Count-1)]) } else { @($lines) + "$testName : 1" }
-    if ($Scenario -in 'ui', 'bad-input', 'menu', 'intercept') {
+    if ($Scenario -in 'ui', 'bad-input', 'menu', 'intercept', 'scope-host') {
         Copy-Item (Join-Path $here 'test\SkelPeer') (Join-Path $modsDir $peerName) -Recurse -Force
         Set-Content (Join-Path $modsDir "$peerName\Scripts\scenario.txt") $Scenario -NoNewline
+        # Distribution story 14: the installed peer is a host-scoped mod (one "scope" line rewritten, the rest kept).
+        if ($Scenario -eq 'scope-host') {
+            $peerJson = Join-Path $modsDir "$peerName\mod.json"
+            $text = [IO.File]::ReadAllText($peerJson)
+            $rx = [regex] '"scope"\s*:\s*"client"'
+            if ($rx.Matches($text).Count -ne 1) { throw "test/SkelPeer/mod.json has no single `"scope`": `"client`" to set to host" }
+            [IO.File]::WriteAllText($peerJson, $rx.Replace($text, '"scope": "host"', 1))
+        }
         # Mod Manager story 5: bad-input starts the peer with a corrupt settings.json (core must use the defaults and log
         # exactly one WARN for it). The test dependent starts with none (its folder was just replaced).
         if ($Scenario -eq 'bad-input') { [IO.File]::WriteAllText((Join-Path $modsDir "$peerName\settings.json"), '{"peer.level": ') }
@@ -129,5 +139,5 @@ Set-Content $modsTxt $lines
 Write-Host "$name deployed (scenario $Scenario) on the shipped UE4SS.dll (sha256 $($installedHash.Substring(0,12))...):"
 Get-ChildItem (Join-Path $modsDir $name) -Recurse -File | ForEach-Object { Write-Host "  Mods/$name/$($_.FullName.Substring((Join-Path $modsDir $name).Length + 1)) ($($_.Length) bytes)" }
 Get-ChildItem $logicMods -Filter "$name.pak" | ForEach-Object { Write-Host "  LogicMods/$($_.Name) ($($_.Length) bytes)" }
-if ($Test) { Write-Host "  Mods/$testName (test dependent)$(if ($Scenario -in 'ui', 'bad-input', 'menu', 'intercept') { " and Mods/$peerName (second test dependent)" })$(if ($Scenario -eq 'bad-input') { " and Mods/$nativeTestName (core's test-only DLL)" })" }
+if ($Test) { Write-Host "  Mods/$testName (test dependent)$(if ($Scenario -in 'ui', 'bad-input', 'menu', 'intercept', 'scope-host') { " and Mods/$peerName (second test dependent)" })$(if ($Scenario -eq 'bad-input') { " and Mods/$nativeTestName (core's test-only DLL)" })" }
 Write-Host "mods.txt: $(($lines | Where-Object { $_ -match '^\s*\w+\s*:\s*1' }) -join ', ')"

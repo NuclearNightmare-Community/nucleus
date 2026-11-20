@@ -133,6 +133,7 @@ do
         { '{"type":"bool","default":true,"help":"' .. string.rep("h", 257) .. '"}', "help must be" },
         { '{"type":"bool","default":true,"changeable":"never"}', "changeable must be" },
         { '{"type":"bool","default":true,"scope":"world"}', "scope must be" },
+        { '{"type":"bool","default":true,"scope":"all"}', "scope must be client, host or both" },
         { '{"type":"bool","default":true,"source":"' .. string.rep("s", 33) .. '"}', "source must be" },
         { '[1]', "not an object" },
         { '5', "not an object" },
