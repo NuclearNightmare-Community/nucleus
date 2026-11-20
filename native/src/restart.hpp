@@ -15,6 +15,6 @@ namespace core_native::restart
     // <Core>_RestartMode() -> "steam" | "direct", or nil, "unsupported launch"
     int l_mode(const Lua& lua);
     // <Core>_RestartStart() -> true, or nil, "unsupported launch" | "helper missing" | "already started" |
-    // "command line too long" | "start failed: <win32 code>". Starts the helper at most once per session; never quits.
+    // "command line too long" | "start failed: <win32 code>". Starts the helper unless one is still waiting; never quits.
     int l_start(const Lua& lua);
 } // namespace core_native::restart

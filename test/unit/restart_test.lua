@@ -2,7 +2,7 @@
 -- for every answer of the natives (steam, direct, nil + reason, a raised error, a missing native, garbage), that they
 -- never raise, pass no argument on, and look the native up on every call (a hot reload registers a new one).
 -- The natives themselves: native/test/restart-helper.tests.ps1 (the helper) and run.ps1 -Scenario bad-input (in game).
--- Run from the repo root with any standalone Lua 5.3 or 5.4:  lua test/unit/restart_test.lua
+-- Run from the repo root with any standalone Lua 5.3 or 5.4 (MiKTeX's texlua is one):  lua test/unit/restart_test.lua
 local ROOT = (arg and arg[0] or ""):match("^(.*)[/\\]test[/\\]unit[/\\][^/\\]+$") or "."
 
 package.preload["nucleus.version"] = function() return { name = "Nucleus", version = "0.20.0", floor = "0.1.0" } end

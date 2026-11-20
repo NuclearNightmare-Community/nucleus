@@ -8,8 +8,8 @@
 --   start() -> true, or nil, reason
 --              Starts core's relaunch helper (Mods/<Core>/bin/<Core>Restart.exe), which waits for this game to exit
 --              and then starts it again. It does not quit the game: the caller quits it (the game's QuitGame) right
---              after. At most one helper per session: a second call gives nil, "already started" (one is already
---              waiting, so quitting still restarts). reason: "unsupported launch", "helper missing", "already
+--              after. At most one waiting helper at a time: a call while it waits gives nil, "already started"
+--              (quitting still restarts); after it has exited, a call starts a new one. reason: "unsupported launch", "helper missing", "already
 --              started", "command line too long", "start failed: <win32 code>", "native part missing", or
 --              "error: <message>" when the native raised.
 -- Arguments are ignored: nothing a caller passes reaches the natives (they take none).
