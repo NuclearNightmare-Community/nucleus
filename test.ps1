@@ -19,8 +19,8 @@ try {
         if (-not $Lua) { Write-Host 'FAIL: no Lua 5.3/5.4 interpreter on PATH (lua, texlua, ...); pass -Lua'; $failed += 'lua' }
         else {
             foreach ($t in Get-ChildItem -LiteralPath 'test/unit' -Filter '*_test.lua' | Sort-Object Name) {
-                # texlua prints a MiKTeX update reminder on stderr; only the test's own output matters.
-                $out = & $Lua "test/unit/$($t.Name)" 2>$null
+                # stderr is kept (a crash's message and traceback); only texlua's MiKTeX update reminder is dropped.
+                $out = & $Lua "test/unit/$($t.Name)" 2>&1 | ForEach-Object { "$_" } | Where-Object { $_ -notmatch '^texlua: .*MiKTeX' }
                 $code = $LASTEXITCODE
                 $out | ForEach-Object { Write-Host $_ }
                 if ($code -ne 0) { $failed += $t.BaseName }
