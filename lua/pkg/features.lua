@@ -52,6 +52,9 @@ M.HAND = {
     "ui.list.reorderable", "ui.row.setLocked",
     -- core story 43 (0.18.0, CAP-13): function interception (core.fn is a module, so its entry point by hand)
     "fn.intercept",
+    -- core story 44 (0.22.0, CAP-14): mod controls in the game's Controls menu (core.input is a module, so its entry
+    -- point by hand)
+    "input.control",
 }
 
 -- The UI part of the api table: path -> { module, function } (client.lua builds api.ui from this).
@@ -111,8 +114,9 @@ M.UI = {
 -- compatible, versionsCompatible).
 -- fn: core story 43 (core.fn, a module: intercept, release, runOriginal, list).
 -- restart: core story 45 (core.restart, a module: mode, start; Mod Manager story 8's RESTART NOW).
+-- input: core story 44 (core.input, a module: control, release, list, state).
 M.BASE = { call = "function", ref = "function", deref = "function", free = "function", clock = "module", settings = "module", net = "module", fn = "module",
-    restart = "module" }
+    restart = "module", input = "module" }
 
 -- buildUi(U) -> ui table, missing: U maps module names to loaded modules. A function missing from its module is left
 -- out (and named in missing), so the generated feature list never claims it.

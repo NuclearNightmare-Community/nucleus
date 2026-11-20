@@ -33,13 +33,16 @@
   put back as it was afterwards. It never builds and never touches the host's game copy or a host game, so it can run
   while someone plays on the host. The log is kept as <scenario>.vm.log and judged with check.ps1 -Target vm. soak
   (timing) is host-only.
+  controls and controls-restart (core story 44) run in that order: before controls the copy's
+  EnhancedInputUserSettings.sav is moved into _userdir\Saved\_nucleus-controls-<stamp>-before\, and after
+  controls-restart the run's .sav into _userdir\Saved\_nucleus-controls-<stamp>-after\ (nothing is deleted).
 .EXAMPLE
   ./run.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Scenario skeleton
   ./run.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Scenario bad-input -Target vm
 #>
 param(
     [Parameter(Mandatory)] [string] $Instance,
-    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'createserver', 'gameinsert', 'nativerow', 'intercept', 'scope-host', 'soak')]
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'createserver', 'gameinsert', 'nativerow', 'intercept', 'scope-host', 'controls', 'controls-restart', 'soak')]
     [string] $Scenario = 'skeleton',
     [int] $TimeoutSec = 0, # 0: 420 s, 900 s for ui (it travels four times and waits for layout), menu (about 40 requests and three map loads), createserver (about 30 clicks, a hosted session, a minute in it), gameinsert (about 35 clicks, twelve opens) and nativerow (about 30 clicks, eleven opens, a hover), 1200 s for journal (24 key presses, a revive, a map change), 1000 s for soak (10 min idle); x1.5 in the VM
     [ValidateSet('host', 'vm')] [string] $Target = 'host',
@@ -48,7 +51,7 @@ param(
 $ErrorActionPreference = 'Stop'
 # Core story 43: intercept presses Ctrl+R, which only the VM run enables (Invoke-NNBSpRun -HotReload); never on the host.
 if ($Scenario -eq 'intercept' -and $Target -ne 'vm') { Write-Host 'refused: the intercept scenario runs only in the VM (-Target vm): it needs UE4SS''s hot reload, which only the VM run turns on.'; exit 1 }
-$hostTimeout = switch ($Scenario) { 'ui' { 900 } 'menu' { 900 } 'createserver' { 900 } 'gameinsert' { 900 } 'nativerow' { 900 } 'intercept' { 900 } 'journal' { 1200 } 'soak' { 1000 } default { 420 } }
+$hostTimeout = switch ($Scenario) { 'ui' { 900 } 'menu' { 900 } 'createserver' { 900 } 'gameinsert' { 900 } 'nativerow' { 900 } 'intercept' { 900 } 'controls' { 900 } 'journal' { 1200 } 'soak' { 1000 } default { 420 } }
 if ($TimeoutSec -le 0 -and $Target -eq 'host') { $TimeoutSec = $hostTimeout }
 $here     = $PSScriptRoot
 $name     = (Get-Content (Join-Path $here 'mod.json') -Raw | ConvertFrom-Json).name
@@ -62,12 +65,28 @@ $outDir   = Join-Path $root "dumps\$(Split-Path $inst -Leaf)\$($name.ToLowerInva
 $exeName  = 'NuclearNightmare-Win64-Shipping'
 New-Item -ItemType Directory -Force $outDir | Out-Null
 
+# Core story 44: the controls scenarios use the engine's EnhancedInputUserSettings.sav of the copy (its _userdir). Before
+# controls any existing one is moved into _userdir\Saved\_nucleus-controls-<stamp>-before\ (the run starts with no saved
+# rows); after controls-restart the run's own .sav goes into _nucleus-controls-<stamp>-after\ (the next run starts
+# clean). Nothing is deleted. $userDir is the copy's _userdir (on the host, or inside the VM through Invoke-NNB).
+$controlsSav = {
+    param($userDir, $label, $stamp)
+    $sav = Join-Path $userDir 'Saved\SaveGames\EnhancedInputUserSettings.sav'
+    if (-not (Test-Path -LiteralPath $sav)) { return "controls sav ($label): none at $sav" }
+    $aside = Join-Path $userDir "Saved\_nucleus-controls-$stamp-$label"
+    New-Item -ItemType Directory -Force $aside | Out-Null
+    Move-Item -LiteralPath $sav -Destination $aside
+    "controls sav ($label): moved $sav into $aside"
+}
+
 if ($Target -eq 'vm') {
     . (Join-Path $root 'tools\vm\vm-sp.ps1')
     # Timing scenarios judge tick costs: valid only on the host, with the VM's game closed.
     Assert-NNBSpScenario -Scenario $Scenario -HostOnly 'soak'
     $kept = Join-Path $outDir "$Scenario.vm.log"
     Remove-Item $kept -ErrorAction SilentlyContinue
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $vmUserDir = (Get-NNBCopyPaths (Get-NNBSpCopyName $inst)).UserDir
     # A refusal of the guard (the VM copy's mods.txt, in the stage) ends the run before anything is installed there.
     try {
         $run = Invoke-NNBSpRun -Instance $inst -TestMod $testName -Mods $name, $testName, "${name}SkelPeer", "${name}SkelNative" -Paks "$name.pak" `
@@ -76,8 +95,11 @@ if ($Target -eq 'vm') {
                 $refusal = Get-RunGuardRefusal -Workspace $root -Instance $stage -Owner $name -Bypass:$AllowOtherDrivers -Vm
                 if ($refusal) { throw $refusal }
                 & (Join-Path $here 'deploy.ps1') -Instance $stage -Test -Scenario $Scenario -Staged
+                # core story 44: the VM is up and its game closed here; the copy's .sav goes aside before controls
+                if ($Scenario -eq 'controls') { Invoke-NNB -ScriptBlock $controlsSav -ArgumentList $vmUserDir, 'before', $stamp | Write-Host }
             }
     } catch { if ("$($_.Exception.Message)".StartsWith('refused: ')) { Write-Host $_.Exception.Message; exit 1 }; throw }
+    if ($Scenario -eq 'controls-restart') { Invoke-NNB -ScriptBlock $controlsSav -ArgumentList $vmUserDir, 'after', $stamp | Write-Host }
     if (-not $run.Log) { Write-Host 'No UE4SS.log from the VM.'; exit 1 }
     & (Join-Path $here 'check.ps1') -Log $kept -Scenario $Scenario -Target vm
     exit $LASTEXITCODE
@@ -295,6 +317,8 @@ $refusal = Get-RunGuardRefusal -Workspace $root -Instance $inst -Owner $name -By
 if ($refusal) { Write-Host $refusal; exit 1 }
 if (Get-Process -Name 'NuclearNightmare*' -ErrorAction SilentlyContinue) { throw 'Nuclear Nightmare is already running (a dev copy or the real game); not launching.' }
 & (Join-Path $here 'deploy.ps1') -Instance $inst -Test -Scenario $Scenario
+$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+if ($Scenario -eq 'controls') { & $controlsSav (Join-Path $inst '_userdir') 'before' $stamp | Write-Host }
 Remove-Item $log -ErrorAction SilentlyContinue
 $sw = [Diagnostics.Stopwatch]::StartNew()
 & (Join-Path $root 'tools\launch.ps1') -Instance $inst
@@ -327,6 +351,7 @@ try {
     Write-Host ("Run {0} after {1:N0} s." -f $result, $sw.Elapsed.TotalSeconds)
     Start-Sleep -Seconds 2
     Stop-Game
+    if ($Scenario -eq 'controls-restart') { & $controlsSav (Join-Path $inst '_userdir') 'after' $stamp | Write-Host }
 }
 
 $kept = Join-Path $outDir "$Scenario.log"

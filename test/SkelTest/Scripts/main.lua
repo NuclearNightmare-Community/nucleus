@@ -104,6 +104,18 @@ if SCENARIO == "bad-input" or SCENARIO == "createserver" then
     end
 end
 
+-- Core story 44: core.input before connect (bad-input; reported by controls.lua). In a field of PRE_CONNECT.
+if SCENARIO == "bad-input" then
+    PRE_CONNECT.input = {}
+    local okM, m = pcall(require, CORE:lower() .. ".input")
+    local good = { id = "early", action = "/Engine/Transient.IA_SkelTestEarly", label = "Early", key = "F9", gamepad = "Gamepad_FaceButton_Right" }
+    for _, c in ipairs({ { "pre-in-control", "control", good }, { "pre-in-release", "release", "early" }, { "pre-in-state", "state", "early" }, { "pre-in-list", "list" } }) do
+        local r = okM and table.pack(pcall(m.API[c[2]], c[3])) or { false, "require failed: " .. tostring(m) }
+        if c[2] == "list" and okM then r = table.pack(pcall(m.API.list)) end
+        PRE_CONNECT.input[#PRE_CONNECT.input + 1] = { id = c[1], fn = c[2], ok = r[1], err = r[2] }
+    end
+end
+
 -- 4. The objectives natives called during main.lua, before the first engine tick (bad-input): allowed, so each must
 -- get as far as the lookup and fail there cleanly ("no object at ..."). Reported as cases once the scenario runs.
 local PRE_NATIVE = {}
@@ -654,6 +666,7 @@ local function offThreadCases(phase)
                 SETS.PRES.offThread(P) -- core story 23
                 SETS.GAME.offThread(P) -- core story 31
                 SETS.FN.offThread(P) -- core story 43
+                SETS.CT.offThread(P) -- core story 44
             end)
             if not ok then check(false, "CASE %s off-thread block threw: %s", P .. "off", firstLine(err)) end
             doneOff = true
@@ -2008,6 +2021,7 @@ local function badInputCases(phase)
     SETS.INS.cases(phase) -- core story 32
     SETS.NR.cases(phase) -- core story 33
     SETS.FN.badInput(phase) -- core story 43
+    SETS.CT.badInput(phase) -- core story 44
     offThreadCases(phase)
 end
 
@@ -2090,6 +2104,7 @@ end
 local function buildBadInput()
     preConnectCases()
     SETS.GAME.preConnect() -- core story 31
+    SETS.CT.preConnect(PRE_CONNECT.input) -- core story 44
     waitWorld("menu1", "NewMainMenu", 120)
     waitHud("menu1", 60)
     step("menu1: widget to destroy", function() return createWidget("menu1") end)
@@ -5816,6 +5831,9 @@ SETS.NR = dofile(scriptDir .. "\\nativerow.lua")({ case = case, E = E, step = st
 -- Core story 43: function interception's bad-input cases and the intercept scenario (intercept.lua; gamescreen.lua's helpers).
 SETS.FN = dofile(scriptDir .. "\\intercept.lua")({ case = case, E = E, step = step, check = check, say = say, CORE = CORE,
     core = function() return core end, absR = absR, request = request, waitWorld = waitWorld, scriptDir = scriptDir }, SETS.GAME)
+-- Core story 44: core.input's bad-input cases and the controls / controls-restart scenarios (controls.lua).
+SETS.CT = dofile(scriptDir .. "\\controls.lua")({ case = case, E = E, step = step, check = check, say = say, CORE = CORE,
+    core = function() return core end, request = request, waitWorld = waitWorld, travel = travel, MATCH_MAP = MATCH_MAP, scriptDir = scriptDir })
 
 -- Distribution story 14 (scope-host): the host gate, seen from outside. deploy.ps1 installs <Core>SkelPeer with its
 -- mod.json scope set to "host"; the peer counts its onReady calls in <core>.test.scope.ready (and logs PEERSCOPE).
@@ -6053,6 +6071,8 @@ client.connect{
         elseif SCENARIO == "intercept" then
             -- Core story 43: function interception on the create-world screen's cards (two passes around a Ctrl+R)
             SETS.FN.build()
+        elseif SCENARIO == "controls" or SCENARIO == "controls-restart" then
+            SETS.CT.build(SCENARIO) -- core story 44: mod controls in the game's Controls menu
         elseif SCENARIO == "scope-host" then
             SETS.SCOPE() -- distribution story 14: the host gate on SkelPeer
         elseif SCENARIO == "journal" then

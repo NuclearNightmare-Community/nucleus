@@ -18,6 +18,8 @@ local netOk, netm = pcall(require, BASE .. ".net.client")
 local fnOk, fnm = pcall(require, BASE .. ".fn")
 -- core.restart (core story 45, Mod Manager story 8). The same: a failure here costs core.restart, not connect.
 local restartOk, restartm = pcall(require, BASE .. ".restart")
+-- core.input (core story 44, CAP-14). The same: a failure here costs core.input, not connect.
+local inputOk, inputm = pcall(require, BASE .. ".input")
 -- UI helpers (ui-helpers-contract.md). Loading them registers the HUD creation callback (ui/hud.lua) in this Lua state.
 -- A failure here must not stop connect for mods that use no UI: core.ui is then missing and onReady is told why.
 local uiOk, uiErr = pcall(function()
@@ -343,6 +345,16 @@ function C.connect(opts)
         -- Core story 45: core.restart, over core's restart natives (mode, start; never raise).
         if restartOk then api.restart = { mode = restartm.mode, start = restartm.start }
         else log.error("%s's restart module failed to load (%s); core.restart is not available.", NAME, tostring(restartm)) end
+        -- Core story 44: core.input, bound to this mod's mod.json id (nil: every call raises "own mod id unknown"); its
+        -- controls are released when its Lua stops (chained at the first control).
+        if inputOk then
+            local man, why = manifest()
+            local okB, errB = pcall(inputm.bind, { call = C.call, log = log, id = man and man.id or nil, idWhy = why })
+            if okB then api.input = inputm.API
+            else log.error("%s's input client could not start (%s); core.input is not available.", NAME, tostring(errB)) end
+        else
+            log.error("%s's input module failed to load (%s); core.input is not available.", NAME, tostring(inputm))
+        end
         -- Story 18: feature checks, generated from this api table (features.lua). Optional for dependents: the
         -- minimum version is the normal way to depend on a feature.
         api.has, api.features = featureCalls(featm.fromApi(api))

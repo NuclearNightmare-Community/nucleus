@@ -104,7 +104,10 @@ local declared = F.declared()
 local want = { "call", "clock", "deref",
     -- core story 43 (0.18.0): core.fn, a module, its entry point hand-named
     "fn", "fn.intercept",
-    "free", "map.setup",
+    "free",
+    -- core story 44 (0.22.0): core.input, a module, its entry point hand-named
+    "input", "input.control",
+    "map.setup",
     -- core story 22 (0.11.0): core.net, a module, its functions hand-named; core story 23 (0.12.0): presence, netCompat
     "net", "net.compatible", "net.presence", "net.publish", "net.read", "net.role", "net.unwatch", "net.versionsCompatible", "net.watch",
     "net.watchPresence",
@@ -139,6 +142,13 @@ local want = { "call", "clock", "deref",
     "ui.slider.setTooltip", "ui.slider.setVisible",
     "ui.text", "ui.text.setTooltip" }
 eq(table.concat(declared, ","), table.concat(want, ","), "declared(): the 0.20.0 feature list (map.setup, ui.journal.regions, ui.look, story 24's, story 4's, story 22's, story 23's, story 27's, story 31's, story 32's, story 33's, story 38's and story 43's names hand-named; settings, net, fn, restart), sorted")
+-- Core story 44: a 0.21.x core's list answers false for input and input.control; this one true.
+do
+    local old = {}
+    for _, n in ipairs(want) do if n ~= "input" and n ~= "input.control" then old[#old + 1] = n end end
+    ok(F.set(old)["input.control"] == nil and F.set(declared)["input"] == true and F.set(declared)["input.control"] == true,
+        "0.22.0: input and input.control are features, a 0.21.x core's list has neither")
+end
 -- Core story 45: a 0.19.x core's list answers false for restart; this one true.
 do
     local old = {}

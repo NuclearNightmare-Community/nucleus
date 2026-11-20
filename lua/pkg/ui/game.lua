@@ -31,14 +31,14 @@ local MAX_PATHS = 8
 -- ---- per host: the tracked screens, oldest first (path -> { h = weak handle, owner }), and the poll's state.
 local ST = {}
 local ORDER = {}                 -- host names, sorted: the order of the poll and the dispatch
-for host in pairs(C.GAME_SCREENS) do
+for host in pairs(C.WATCHED_SCREENS) do -- core story 44: and core's own (settings), never public hosts
     ORDER[#ORDER + 1] = host
     ST[host] = { paths = {}, rec = {}, seeded = false, notified = false, okNotify = nil, errNotify = nil, active = false,
         path = nil, pending = nil, cur = nil }
 end
 table.sort(ORDER)
 
-local function spec(host) return C.GAME_SCREENS[host] end
+local function spec(host) return C.WATCHED_SCREENS[host] end
 
 local function isTemplate(host, p)
     local pkg = spec(host).pkg

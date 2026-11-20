@@ -2,6 +2,16 @@
 
 All notable changes to Nucleus are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). From 0.5.0 a dependent's `need` and `dependsOn` are minimum versions (`>=0.5.0`), so a newer Nucleus never asks dependents to raise them. Up to 0.3.0, below 1.0.0 a dependent connected only to the same minor version (`need = "0.3.0"` accepted 0.3.x).
 
+## [0.22.0] - 2026-11-20
+
+Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
+
+For players: mods can now add their own controls to the game's Controls menu (Settings, Controls). You bind them there like any game control, with a key or a gamepad button, and the game saves them with your other bindings. When you uninstall such a mod its row disappears, and your binding comes back if you install the mod again.
+
+### Added
+
+- Mod controls in the game's Controls menu (core story 44, CAP-14; README "Mod controls"). `core.input.control{ id, action, label, key, gamepad, near } -> true`, `release(id) -> boolean`, `list()` and `state(id) -> boolean`; features `input` and `input.control`; errors `nucleus.input.<fn>: <problem>`. Core's own Lua state registers each control with the engine's Enhanced Input user settings (mapping name `<mod id>:<id>`, a `PlayerMappableKeySettings` on the dependent's action, one mapping context per control at priority 0, added again after every map load), so the game draws the row, captures keys and saves them in its own `EnhancedInputUserSettings.sav`. On each Controls page core moves its rows after the `near` row, lets their key selectors take gamepad buttons, and hides the rows of controls no loaded mod declares (never erasing them). Caps: 8 controls per mod, 64 in all. New channel ops `input-control`, `input-release`, `input-state` and `input-list`. The Settings overlay (`SettingsMenu_draggable_C`) is polled by core's own state as an internal host; it isn't a placement host for dependents. Tests: `test/unit/input_test.lua`, `bad-input`'s `in-*` cases, VM scenarios `controls` and `controls-restart`.
+
 ## [0.21.0] - 2026-11-20
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
