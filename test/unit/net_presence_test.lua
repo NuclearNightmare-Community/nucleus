@@ -651,13 +651,17 @@ end
 do
     local DIR = (ROOT .. "/build/unit-presence/Mods"):gsub("/", "\\")
     os.execute('rmdir /s /q "' .. DIR .. '" >nul 2>nul')
-    for _, d in ipairs({ "A", "B", "C", "D", "E" }) do os.execute('mkdir "' .. DIR .. '\\' .. d .. '" >nul 2>nul') end
+    for _, d in ipairs({ "A", "B", "C", "D", "E", "F", "G", "H" }) do os.execute('mkdir "' .. DIR .. '\\' .. d .. '" >nul 2>nul') end
     local function write(p, t) local f = assert(io.open(p, "wb")) f:write(t) f:close() end
     write(DIR .. "\\A\\mod.json", '{ "id": "skeltest", "version": "0.1.0" }')
     write(DIR .. "\\B\\mod.json", '{ "id": "github.com/NuclearNightmare-Community.skeltest-ns", "version": "0.3.0", "netCompat": "0.1.0" }')
     write(DIR .. "\\C\\mod.json", '{ "id": "x-c", "version": "1.0" }')
     write(DIR .. "\\D\\mod.json", '{ "id": "x-d", "version": "1.0.0", "netCompat": "1.1.0" }')
     write(DIR .. "\\E\\mod.json", '{ "id": "x-e", "version": "1.0.0", "netCompat": 5 }')
+    -- Distribution story 14: scope for connect's host gate (a short string as written, else nil).
+    write(DIR .. "\\F\\mod.json", '{ "id": "x-f", "version": "1.0.0", "scope": "host" }')
+    write(DIR .. "\\G\\mod.json", '{ "id": "x-g", "version": "1.0.0", "scope": 5 }')
+    write(DIR .. "\\H\\mod.json", '{ "id": "x-h", "version": "1.0.0", "scope": "' .. string.rep("h", 33) .. '" }')
     local m = CL.ownManifest(DIR, "A")
     ok(m and m.id == "skeltest" and m.version == "0.1.0" and m.netCompat == nil and #m.notes == 0, "ownManifest: id and version")
     m = CL.ownManifest(DIR, "B")
@@ -668,6 +672,14 @@ do
     ok(m and m.version == "1.0.0" and m.netCompat == nil and #m.notes == 1 and m.notes[1]:find("above version", 1, true), "ownManifest: netCompat above version left out, with a note", m and m.notes[1])
     m = CL.ownManifest(DIR, "E")
     ok(m and m.netCompat == nil and #m.notes == 1, "ownManifest: a non-string netCompat left out, with a note")
+    m = CL.ownManifest(DIR, "A")
+    ok(m and m.scope == nil, "ownManifest: no scope in mod.json gives nil")
+    m = CL.ownManifest(DIR, "F")
+    ok(m and m.scope == "host", "ownManifest: scope host", m and m.scope)
+    m = CL.ownManifest(DIR, "G")
+    ok(m and m.scope == nil, "ownManifest: a non-string scope gives nil", m and m.scope)
+    m = CL.ownManifest(DIR, "H")
+    ok(m and m.scope == nil, "ownManifest: a 33-byte scope gives nil", m and m.scope)
     eq(CL.ownId(DIR, "A"), "skeltest", "ownId still answers")
 end
 

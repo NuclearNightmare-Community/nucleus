@@ -14,7 +14,7 @@ For players: a mod made only for the host (`scope` `host`) now waits until you h
 
 ### Changed
 
-- A setting's `scope` in `mod.json` `settings` is `client | host | both`; `all` is left out with `WARN settings: ... left out: scope must be client, host or both`.
+- A setting's `scope` in `mod.json` `settings` is `client | host | both`; `all` is left out with `WARN settings: ... left out: scope must be client, host or both`. Setting scope `all` is removed without a deprecation period, an accepted exception to "core only ever adds" because no mod using it was ever released (distribution story 14); a dependent still declaring it loses that setting with one WARN.
 - Core's own `mod.json` `scope` is `client` (was `all`, which the release tools now refuse).
 
 ## [0.18.0] - 2026-11-19
