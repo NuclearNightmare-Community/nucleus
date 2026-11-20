@@ -22,7 +22,7 @@
 param(
     [string] $Instance,
     [string] $Log,
-    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'createserver', 'gameinsert', 'nativerow', 'intercept', 'scope-host', 'soak', 'manual', 'net-host', 'net-client', 'net-vanilla-host',
+    [ValidateSet('skeleton', 'no-native', 'no-pak', 'bad-input', 'ui', 'journal', 'menu', 'createserver', 'gameinsert', 'nativerow', 'intercept', 'scope-host', 'controls', 'controls-restart', 'soak', 'manual', 'net-host', 'net-client', 'net-vanilla-host',
                  'presence-host', 'presence-client', 'presence-vanilla-host')]
     [string] $Scenario = 'skeleton',
     [ValidateSet('host', 'vm')] [string] $Target = 'host'
@@ -1070,6 +1070,78 @@ foreach ($id in 'target-class', 'target-freed', 'target-unknown', 'value-dead', 
                 'other-suspend', 'other-wrelease', 'other-key', 'same-key', 'cap-mod') {
     $intercept += "\[$T\] OK CASE cs\.fn-live-$id "
 }
+# Core story 44 (CAP-14, core 0.22.0): core.input's bad-input group (controls.lua), in both worlds, off the game thread
+# and before connect: every error row of the story's matrix, each input-* channel op malformed, the caps.
+$inCaseIds = @('c-nil', 'c-str', 'c-two', 'c-unknown', 'c-id-nil', 'c-id-num', 'c-id-upper', 'c-id-33', 'c-id-colon', 'c-label-nil',
+               'c-label-empty', 'c-label-49', 'c-label-nl', 'c-label-utf8', 'c-action-num', 'c-action-noslash', 'c-action-colon',
+               'c-action-257', 'c-key-num', 'c-key-space', 'c-key-unknown', 'c-key-gamepad', 'c-gp-keyboard', 'c-gp-mouse',
+               'c-gp-unknown', 'c-near-num', 'c-near-empty', 'c-near-65', 'c-dup-first', 'c-dup-again', 'c-dup-other', 'r-dup',
+               'c-cap-1', 'c-cap-2', 'c-cap-3', 'c-cap-4', 'c-cap-5', 'c-cap-6', 'c-cap-7', 'c-cap-8', 'c-cap-9', 'r-cap',
+               'c-cap-all', 'c-cap-65', 'r-cap-all', 'chd-none', 'chd-brace', 'chd-array', 'chd-deep', 'chd-nomod', 'chd-badmod',
+               'chd-unknown', 'chd-nearnull', 'chd-keyclass', 'chd-rel-noid', 'chd-rel-all-false', 'chd-rel-unknown',
+               'chd-state-none', 'chd-state-unknown', 'chd-state-badid', 'chd-list-none', 'chd-list-extra', 'chd-garbage',
+               'chd-long', 'r-none', 'r-two', 'r-num', 'r-bad', 'r-unknown', 's-none', 's-nil', 's-table', 's-unknown', 'l-arg',
+               'l-ok', 'has')
+foreach ($p in 'menu1', 'match1') {
+    foreach ($id in $inCaseIds) { $badInput += "\[$T\] OK CASE $p\.in-$id " }
+    foreach ($id in 'control', 'release', 'state', 'list') { $badInput += "\[$T\] OK CASE $p\.off-in-$id " }
+}
+foreach ($id in 'control', 'release', 'state', 'list') { $badInput += "\[$T\] OK CASE pre-in-$id " }
+$badInput += "\[$T\] OK CASES before-connect input recorded=4 "
+# Core story 44: mod controls in the game's Controls menu, written for the VM (run.ps1 -Scenario controls, then
+# controls-restart, -Target vm). END result=PASS and no FAIL line mean every check the test made passed; these name the
+# acceptance criteria. notia (an object that isn't an InputAction) is the one ERROR the run may log.
+$controlsBase = @($started | Where-Object { $_ -ne "!\[$N\] ERROR" })
+$controls = $controlsBase + @(
+    "\[$T\] SCENARIO controls "
+    "#1|\[$N\] ERROR INPUT skeltest:notia: /Script/Engine\.Default__GameplayStatics is a GameplayStatics, not an InputAction"
+    "!\[$N\] ERROR (?!INPUT skeltest:notia: )"
+    "#1|\[$N\] WARN INPUT skeltest:far: near 'NoSuchRow' names no game row in the Controls menu; the row goes at the end of General"
+    "#1|\[$N\] WARN INPUT skeltest:later: action /Engine/Transient\.IA_SkelTestLater is not loaded \(tried 2 times\)"
+    "\[$N\] INPUT skeltest:toggle active: 'Skel Toggle' F9 / Gamepad_FaceButton_Right in Movement after Sprint"
+    "\[$N\] INPUT skeltest:later active: "
+    "\[$N\] INPUT Controls page \(opened\): \d+ rows, [1-9]\d* of core .* [1-9]\d* dead row\(s\) hidden"
+    "\[$N\] INPUT skeltest:far released"
+    # Row placement (title screen twice, then the page opened in the match as the pause menu does)
+    "\[$T\] OK CTPLACE menu1 toggle directly after Sprint in Movement"
+    "\[$T\] OK CTPLACE menu1 far at the end of General"
+    "\[$T\] OK CTKEYS menu1 toggle shows F9 and Gamepad_FaceButton_Right"
+    "\[$T\] OK CTGAMEPAD menu1 toggle's selectors allow gamepad keys \(true, true\)"
+    "\[$T\] OK CTGAMEPAD menu1 Sprint's selectors don't \(false, false\)"
+    "\[$T\] OK CTDEAD menu1 no visible row of an undeclared control and no unlabeled row"
+    "\[$T\] OK CTDEAD menu1 skeltest:gone is on the page and collapsed"
+    "\[$T\] OK CTPLACE menu1b toggle directly after Sprint in Movement"
+    "\[$T\] OK CTPLACE match1 toggle directly after Sprint in Movement"
+    "\[$T\] OK CTGAMEPAD match1 toggle's selectors allow gamepad keys \(true, true\)"
+    "\[$T\] OK CTDEAD match1 skeltest:far is on the page and collapsed"
+    # Keyboard and gamepad capture
+    "\[$T\] OK CTCAPKEY menu1 list\(\) reports key K"
+    "\[$T\] OK CTCAPKEY menu1 QueryKeysMappedToAction holds K and not F9"
+    "\[$T\] OK CTCAPPAD menu1 list\(\) reports gamepad Gamepad_FaceButton_Top"
+    "\[$T\] OK CTCAPPAD menu1 the replaced button is no longer live"
+    "\[$T\] OK CTKEYS menu1b toggle shows K and Gamepad_FaceButton_Top"
+    # Fires in a match
+    "\[$T\] OK CTMATCH match1 toggle's context added again"
+    "\[$T\] OK CTSTATE match1 K held: true"
+    "\[$T\] OK CTSTATE match1 K released: false"
+    "\[$T\] OK CTSAV match1 the \.sav holds skeltest:toggle and skeltest:gone"
+    "\[$T\] CTSURPRISE far: "
+    "\[$T\] END result=PASS"
+)
+$controlsRestart = $started + @(
+    "\[$T\] SCENARIO controls-restart "
+    "\[$N\] INPUT skeltest:toggle active: "
+    "\[$N\] INPUT Controls page \(opened\): \d+ rows, [1-9]\d* of core .* [1-9]\d* dead row\(s\) hidden"
+    "\[$T\] OK CTSAV restart the \.sav from controls holds skeltest:toggle and skeltest:gone"
+    "\[$T\] OK CTRESTART list\(\) reports K / Gamepad_FaceButton_Top"
+    "\[$T\] OK CTRESTART QueryKeysMappedToAction holds K and not F9"
+    "\[$T\] OK CTPLACE restart toggle directly after Sprint in Movement"
+    "\[$T\] OK CTKEYS restart toggle shows K and Gamepad_FaceButton_Top"
+    "\[$T\] OK CTDEAD restart no visible row of an undeclared control and no unlabeled row"
+    "\[$T\] OK CTDEAD restart skeltest:gone is on the page and collapsed"
+    "\[$T\] OK CTSAV restart the \.sav still holds skeltest:gone"
+    "\[$T\] END result=PASS"
+)
 # Core story 31: the create-server screen as a host, one launch written for the VM at 1280x720 (run.ps1 -Scenario
 # createserver -Target vm). END result=PASS already means every check the test made passed; these name the ones the
 # acceptance criteria rest on.
@@ -1336,6 +1408,8 @@ $expect = @{
     'gameinsert' = $gameInsert
     'nativerow' = $nativeRow
     'intercept' = $intercept
+    'controls' = $controls
+    'controls-restart' = $controlsRestart
     'soak'      = $soak
     'manual'    = $manual
     'bad-input' = $badInput

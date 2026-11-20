@@ -84,6 +84,17 @@ C.CREATESERVER_SHORT = "CreateServer_C"
 C.CREATESERVER_CLASS = C.CREATESERVER_PKG .. "." .. C.CREATESERVER_SHORT
 C.GAME_SCREENS = { createServer = { pkg = C.CREATESERVER_PKG, short = C.CREATESERVER_SHORT, class = C.CREATESERVER_CLASS } }
 C.GAME_SCREEN_NAMES = "createServer"        -- the game screens game.watch / game.isOpen take
+-- Core story 44 (core 0.22.0): screens game.lua watches for core itself, never public hosts (no placement, no
+-- game.watch): the Settings overlay (SettingsMenu_draggable_C, the widget the title screen's OPTIONS and the pause menu
+-- add to the viewport; its SettingsMenu_C holds the Controls page), for core's input service (input/screen.lua). Keyed
+-- like GAME_SCREENS; game.lua polls the union (WATCHED_SCREENS).
+C.SETTINGS_PKG = "/Game/Graphics/MainMenu/SettingsMenu_draggable"
+C.SETTINGS_SHORT = "SettingsMenu_draggable_C"
+C.SETTINGS_CLASS = C.SETTINGS_PKG .. "." .. C.SETTINGS_SHORT
+C.CORE_SCREENS = { settings = { pkg = C.SETTINGS_PKG, short = C.SETTINGS_SHORT, class = C.SETTINGS_CLASS } }
+C.WATCHED_SCREENS = {}
+for k, v in pairs(C.GAME_SCREENS) do C.WATCHED_SCREENS[k] = v end
+for k, v in pairs(C.CORE_SCREENS) do C.WATCHED_SCREENS[k] = v end
 C.HOST_NAMES = "createServer, hud, journal, menu, screen" -- the hosts an intent can name (place.lua)
 -- Hosts with a cursor: buttons, lists and rows go there. createServer has one too (X.checkHost refuses only hud); this
 -- text is kept as it was, since it appears in error texts that stay unchanged (story 31: add-only).

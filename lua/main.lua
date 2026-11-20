@@ -25,6 +25,10 @@ local okNet, NET = pcall(require, LOWER .. ".net.host")
 -- <Core>Presence actors on the host and the client's report; answers the channel ops net-mod and net-mod-off. Ticked
 -- on story 22's loop and reset from the same LoadMap post-hook.
 local okPl, PLAYERS = pcall(require, LOWER .. ".net.players")
+-- core.input's owner (lua/pkg/input/service.lua, core story 44): every dependent's controls in the game's Controls menu;
+-- answers the channel ops input-control, input-release, input-state and input-list. Loaded here, started in start(),
+-- ticked on its own loop and told of each map load from the LoadMap post-hook.
+local okIn, INPUT = pcall(require, LOWER .. ".input.service")
 
 local CLASS_PKG = "/Game/Mods/" .. NAME .. "/ModActor"
 local CLASS = CLASS_PKG .. ".ModActor_C"
@@ -54,6 +58,7 @@ local REV_KEY = LOWER .. ".settings.rev"
 local settingsRev = math.tointeger(ModRef:GetSharedVariable(REV_KEY)) or 0
 ModRef:SetSharedVariable(REV_KEY, settingsRev)
 local settingsReady = false
+local inputReady = false
 local netReady = false
 local playersReady = false
 -- The current world's full name (a string, never the UObject), from the LoadMap post-hook: the settings service
@@ -116,6 +121,12 @@ local function handle(request)
         if not playersReady then return "err:internal presence service not running" end
         local payload = #request > #op and request:sub(#op + 2) or nil
         return PLAYERS.op(op, payload)
+    end
+    -- Core story 44: core.input (input/service.lua re-checks every field, the caps and the key classes).
+    if op == "input-control" or op == "input-release" or op == "input-state" or op == "input-list" then
+        if not inputReady then return "err:internal input service not running" end
+        local payload = #request > #op and request:sub(#op + 2) or nil
+        return INPUT.op(op, payload)
     end
     return "err:unknown-op " .. quote(op)
 end
@@ -278,6 +289,18 @@ local function start()
         end
     end
 
+    -- core.input (story 44): the registry and the ops now; its loop and the Controls page poll from the first map load.
+    if not okIn then
+        log.error("input service did not load (%s); core.input is unavailable", tostring(INPUT):match("^[^\n]*"))
+    else
+        local okI, errI = pcall(function()
+            local refm = require(LOWER .. ".ref")
+            INPUT.init({ log = log, ref = refm.ref, deref = refm.deref, free = refm.free, micros = require(LOWER .. ".clock").micros })
+        end)
+        if okI then inputReady = true
+        else log.error("input service could not start: %s", tostring(errI):match("^[^\n]*")) end
+    end
+
     NotifyOnNewObject(CLASS, function()
         local okN, errN = pcall(hookChannel, "NotifyOnNewObject")
         if not okN then log.error("channel hook from NotifyOnNewObject failed: %s", tostring(errN)) end
@@ -317,6 +340,14 @@ local function start()
             local okS, errS = pcall(NET.start)
             if not okS then log.error("net loop could not start: %s", tostring(errS):match("^[^\n]*")) end
         end
+        -- Story 44: the input service's controls are added again in this world; its loop and the Controls page poll
+        -- start here once (game thread).
+        if inputReady then
+            for _, part in ipairs({ "start", "startScreen", "onLoadMap" }) do
+                local okI, errI = pcall(INPUT[part])
+                if not okI then log.error("input service %s failed: %s", part, tostring(errI):match("^[^\n]*")) end
+            end
+        end
         local okL, errL = pcall(ExecuteInGameThreadWithDelay, 3000, function()
             local ok, err = pcall(ensureClass)
             if not ok then log.error("class check failed: %s", tostring(err)) end
@@ -331,6 +362,7 @@ local function start()
         if jmapReady then pcall(JMAP.stop) end
         if netReady then pcall(NET.stop); pcall(NET.unload) end
         if playersReady then pcall(PLAYERS.stop); pcall(PLAYERS.unload) end
+        if inputReady then pcall(INPUT.unload) end
         local okU, errU = pcall(setState, "stopped")
         log.info("STOPPED%s", okU and "" or (" (state not published: " .. tostring(errU) .. ")"))
     end

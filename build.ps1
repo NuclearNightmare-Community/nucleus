@@ -29,7 +29,7 @@
                /Game path outside /Game/Mods/<name>/, and no cooked marker may name BasicShapes, _Preview,
                EditorResources or a component template <Name>_GEN_VARIABLE other than DefaultSceneRoot's (the one
                component that isn't editor-only): its editor-only preview slots and icon must be stripped.
-    lua        Stage lua/main.lua and lua/pkg/ (with lua/pkg/ui/, lua/pkg/map/ and lua/pkg/settings/) as Scripts/main.lua and Scripts/<lowercase name>/, plus a generated
+    lua        Stage lua/main.lua and lua/pkg/ (with lua/pkg/ui/, lua/pkg/map/, lua/pkg/settings/, lua/pkg/net/ and lua/pkg/input/) as Scripts/main.lua and Scripts/<lowercase name>/, plus a generated
                Scripts/<lowercase name>/version.lua.
     package    build/package/Mods/<name>/{mod.json,dlls/main.dll,bin/<name>Restart.exe,Scripts/} and
                build/package/LogicMods/<name>.pak.
@@ -339,7 +339,11 @@ Step 'lua' {
     # each dependent's); modid.lua (the id normalizer) comes with lua/pkg/*.lua above.
     New-Item -ItemType Directory -Force (Join-Path $pkg 'net') | Out-Null
     Copy-Item (Join-Path $here 'lua\pkg\net\*.lua') (Join-Path $pkg 'net')
-    foreach ($f in 'json.lua', 'restart.lua', 'settings\store.lua', 'settings\schema.lua', 'settings\client.lua', 'modid.lua', 'net\state.lua', 'net\host.lua', 'net\client.lua',
+    # Core story 44: Scripts/<lowercase name>/input/*.lua (service and screen run in core's state; input.lua, the
+    # dependent's API and the shared checks, comes with lua/pkg/*.lua above).
+    New-Item -ItemType Directory -Force (Join-Path $pkg 'input') | Out-Null
+    Copy-Item (Join-Path $here 'lua\pkg\input\*.lua') (Join-Path $pkg 'input')
+    foreach ($f in 'json.lua', 'restart.lua', 'input.lua', 'input\service.lua', 'input\screen.lua', 'settings\store.lua', 'settings\schema.lua', 'settings\client.lua', 'modid.lua', 'net\state.lua', 'net\host.lua', 'net\client.lua',
                 'net\presence.lua', 'net\players.lua') {
         if (-not (Test-Path (Join-Path $pkg $f))) { throw "lua step: $f was not staged" }
     }
