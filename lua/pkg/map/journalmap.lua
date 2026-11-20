@@ -19,11 +19,9 @@
 -- KismetSystemLibrary:IsValid, every hook body and loop part runs under pcall (a fault: one ERROR line per part and
 -- world). Game classes and members used: tools/diff-dumps.watch.json ("Nucleus map service story 7").
 local BASE = (...):gsub("%.map%.journalmap$", "")
-local V = require(BASE .. ".version")
 local SETUP = require(BASE .. ".map.setup")
 
 local M = {}
-local NAME = V.name
 
 -- ---------------------------------------------------------------- constants (manual checks after each game patch)
 -- The game's map projection, inline in MapUI_C's Blueprint code (decompiled V8.1.5): every icon is added to
