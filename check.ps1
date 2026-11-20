@@ -1090,12 +1090,20 @@ foreach ($id in 'control', 'release', 'state', 'list') { $badInput += "\[$T\] OK
 $badInput += "\[$T\] OK CASES before-connect input recorded=4 "
 # Core story 44: mod controls in the game's Controls menu, written for the VM (run.ps1 -Scenario controls, then
 # controls-restart, -Target vm). END result=PASS and no FAIL line mean every check the test made passed; these name the
-# acceptance criteria. notia (an object that isn't an InputAction) is the one ERROR the run may log.
+# acceptance criteria. notia (an object that isn't an InputAction) and owned (an action that belongs to another row)
+# are the two ERRORs the run may log.
 $controlsBase = @($started | Where-Object { $_ -ne "!\[$N\] ERROR" })
 $controls = $controlsBase + @(
     "\[$T\] SCENARIO controls "
     "#1|\[$N\] ERROR INPUT skeltest:notia: /Script/Engine\.Default__GameplayStatics is a GameplayStatics, not an InputAction"
-    "!\[$N\] ERROR (?!INPUT skeltest:notia: )"
+    "#1|\[$N\] ERROR INPUT skeltest:owned: /Engine/Transient\.IA_SkelTestOwned already belongs to the Controls row 'SkelTestOwner'"
+    "!\[$N\] ERROR (?!INPUT skeltest:(notia|owned): )"
+    "\[$T\] OK CTOWNED menu1 owned inactive and its action's row name unchanged"
+    # A released control's action, declared again under another id, is taken back; a control whose action appears
+    # before a travel is activated by the map load's retry.
+    "\[$N\] INPUT skeltest:far2 active: "
+    "\[$T\] OK CTRECLAIM match1 far's action now belongs to far2"
+    "\[$T\] OK CTRETRY match1 later2 active after the map load"
     "#1|\[$N\] WARN INPUT skeltest:far: near 'NoSuchRow' names no game row in the Controls menu; the row goes at the end of General"
     "#1|\[$N\] WARN INPUT skeltest:later: action /Engine/Transient\.IA_SkelTestLater is not loaded \(tried 2 times\)"
     "\[$N\] INPUT skeltest:toggle active: 'Skel Toggle' F9 / Gamepad_FaceButton_Right in Movement after Sprint"
