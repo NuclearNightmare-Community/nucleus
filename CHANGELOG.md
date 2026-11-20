@@ -2,6 +2,16 @@
 
 All notable changes to Nucleus are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). From 0.5.0 a dependent's `need` and `dependsOn` are minimum versions (`>=0.5.0`), so a newer Nucleus never asks dependents to raise them. Up to 0.3.0, below 1.0.0 a dependent connected only to the same minor version (`need = "0.3.0"` accepted 0.3.x).
 
+## [0.21.0] - 2026-11-20
+
+Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
+
+For players: Nucleus has five new icons that show where a mod runs (the host, each player, both, or unknown). The Mod Manager uses them.
+
+### Added
+
+- Five icon keys for `{ icon = <key> }` (Mod Manager story 12): `scope-host`, `scope-client`, `scope-host-plus`, `scope-both` and `scope-unknown`, white 128x128 placeholders drawn by `art/icons/draw.ps1` (our own shapes) and packed as `/Game/Mods/Nucleus/Icons/T_ScopeHost`, `T_ScopeClient`, `T_ScopeHostPlus`, `T_ScopeBoth` and `T_ScopeUnknown`. Add-only: no existing behaviour changes; the only changed text is the valid-key list of `unknown icon '<key>'`. `build.ps1` refuses a pak without them.
+
 ## [0.20.0] - 2026-11-20
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
