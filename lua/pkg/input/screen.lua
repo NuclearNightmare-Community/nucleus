@@ -87,7 +87,12 @@ function SC.pass(screen, reg)
                 if name then
                     st.rows = st.rows + 1
                     if name:find(":", 1, true) then
-                        if reg(name) then isCore = true
+                        if reg(name) then
+                            isCore = true
+                            -- collapsed by an earlier pass (pending or released then): shown again
+                            if try(function() return c:GetVisibility() end) == COLLAPSED then
+                                pcall(function() c:SetVisibility(0) end)
+                            end
                         elseif try(function() return c:GetVisibility() end) ~= COLLAPSED then
                             if pcall(function() c:SetVisibility(COLLAPSED) end) then st.hidden = st.hidden + 1 end
                         end

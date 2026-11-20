@@ -141,7 +141,7 @@ local want = { "call", "clock", "deref",
     "ui.slider", "ui.slider.create", "ui.slider.get", "ui.slider.isShown", "ui.slider.remove", "ui.slider.set", "ui.slider.setDefault", "ui.slider.setEnabled",
     "ui.slider.setTooltip", "ui.slider.setVisible",
     "ui.text", "ui.text.setTooltip" }
-eq(table.concat(declared, ","), table.concat(want, ","), "declared(): the 0.20.0 feature list (map.setup, ui.journal.regions, ui.look, story 24's, story 4's, story 22's, story 23's, story 27's, story 31's, story 32's, story 33's, story 38's and story 43's names hand-named; settings, net, fn, restart), sorted")
+eq(table.concat(declared, ","), table.concat(want, ","), "declared(): the 0.22.0 feature list (map.setup, ui.journal.regions, ui.look, story 24's, story 4's, story 22's, story 23's, story 27's, story 31's, story 32's, story 33's, story 38's, story 43's and story 44's names hand-named; settings, net, fn, restart, input), sorted")
 -- Core story 44: a 0.21.x core's list answers false for input and input.control; this one true.
 do
     local old = {}

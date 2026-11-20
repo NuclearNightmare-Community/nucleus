@@ -5,7 +5,7 @@
 --
 --   control{ id, action, label, key, gamepad, near } -> true
 --       Declares (or, with the same id, re-declares) a control. id: ^[a-z0-9][a-z0-9-]{0,31}$. action: the object path
---       of the mod's InputAction (1-256 bytes of letters, digits, _ . / -, starting with /). label: the row's name,
+--       of the mod's InputAction (2-256 bytes of letters, digits, _ . / -, starting with /). label: the row's name,
 --       1-48 characters, no control characters. key: a keyboard or mouse key (slot 0), gamepad: a gamepad key (slot 1),
 --       both key names as Unreal spells them (LeftAlt, Gamepad_FaceButton_Right). near: the mapping name of the game
 --       row this one follows (Sprint), or nil for the end of General. The mapping name is "<mod.json id>:<id>". The
@@ -52,7 +52,8 @@ function I.checkId(id)
     return nil
 end
 
-local function hasControl(s) return s:find("[%z\1-\31\127]") ~= nil end
+-- ASCII control bytes, and the C1 control code points U+0080-U+009F (UTF-8 \xC2\x80-\xC2\x9F).
+local function hasControl(s) return s:find("[%z\1-\31\127]") ~= nil or s:find("\xC2[\x80-\x9F]") ~= nil end
 
 function I.checkLabel(label)
     if type(label) ~= "string" then return "label must be a string, got " .. describe(label) end

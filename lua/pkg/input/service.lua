@@ -224,19 +224,29 @@ local function activate(e, sub, us)
         E.log.error("INPUT %s: %s is a %s, not an InputAction; the control stays inactive", e.name, e.action, try(function() return ia:GetClass():GetFName():ToString() end) or "?")
         return
     end
+    -- An action that already has key settings with a name belongs to another Controls row (a game control, say
+    -- IA_Jump): core never changes it.
+    local pm = try(function() return ia.PlayerMappableKeySettings end)
+    if valid(pm) then
+        local owner = try(function() return pm.Name:ToString() end)
+        if owner and owner ~= "" and owner ~= "None" and owner ~= e.name then
+            e.status = "failed"
+            E.log.error("INPUT %s: %s already belongs to the Controls row '%s'; the control stays inactive", e.name, e.action, quote(owner))
+            return
+        end
+    end
     local cat = categoryOf(us, e.near)
     e.nearFound = cat ~= nil
     if not cat then
         cat = "General"
-        if e.near and not e.warnedNear then
-            e.warnedNear = true
-            E.log.warn("INPUT %s: near '%s' names no game row in the Controls menu; the row goes at the end of General", e.name, quote(e.near))
+        -- once per control per session (kept across a release and a re-declaration)
+        if e.near then
+            warnOnce("near " .. e.name, "INPUT %s: near '%s' names no game row in the Controls menu; the row goes at the end of General", e.name, quote(e.near))
         end
     end
     e.category = cat
     local enc = M.encode(e.name)
     local f = flags()
-    local pm = try(function() return ia.PlayerMappableKeySettings end)
     if not valid(pm) then
         local cls = found(M.PMKS_CLASS)
         if not cls then error("PlayerMappableKeySettings class not found", 0) end
@@ -258,10 +268,10 @@ local function activate(e, sub, us)
     imc:UnmapAll()
     imc:MapKey(ia, { KeyName = FName(e.key) })
     imc:MapKey(ia, { KeyName = FName(e.gamepad) })
-    e.imc = imcPath
     us:RegisterInputMappingContext(imc)
+    e.imc, e.built = imcPath, true -- registered: a release or re-declaration unregisters it, even if the add below throws
     sub:AddMappingContext(imc, 0, OPTS)
-    e.built, e.status = true, "active"
+    e.status = "active"
     S.gen = S.gen + 1
     E.log.info("INPUT %s active: '%s' %s / %s in %s %s %s", e.name, quote(e.label), e.key, e.gamepad, cat,
         e.nearFound and "after" or "at the end", e.nearFound and quote(e.near) or "")
@@ -337,6 +347,8 @@ end
 
 function M.onLoadMap()
     if S.pcH then pcall(E.free, S.pcH); S.pcH = nil end
+    -- the subsystem too, so the re-add waits for this world's local player controller (liveSub finds it through it)
+    if S.subH then pcall(E.free, S.subH); S.subH = nil end
     S.pcNext = 0
     local any = false
     for _, name in ipairs(S.order) do
@@ -568,7 +580,22 @@ function M.init(env)
 end
 
 -- Lua stopping (core's OnUnload): every control's context released now, as far as the game thread allows.
+local PROBE = (1 << 53) - 1 -- a handle never issued: <Core>_Deref refuses it off the game thread, returns nil on it
+local function offGameThread()
+    local deref = rawget(_G, NAME .. "_Deref")
+    if type(deref) ~= "function" then return false end
+    local ok, err = pcall(deref, PROBE)
+    return not ok and tostring(err):find("off the game thread", 1, true) ~= nil
+end
+
 function M.unload()
+    if offGameThread() then
+        -- hot reload stops Lua on UE4SS's event-loop thread: no engine object may be touched there
+        local n = #S.order
+        S.reg, S.order, S.teardown, S.pcH, S.subH = {}, {}, {}, nil, nil
+        if E.log then E.log.info("INPUT stopped off the game thread: %d control(s)' contexts left in place", n) end
+        return
+    end
     for _, name in ipairs(S.order) do
         local e = S.reg[name]
         if e.built then S.teardown[#S.teardown + 1] = { imc = e.imc, name = name } end

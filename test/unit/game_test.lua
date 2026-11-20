@@ -569,6 +569,9 @@ raises(function() G.watch("CreateServer", function() end) end, GP .. "watch: unk
 raises(function() G.watch("menu", function() end) end, GP .. "watch: unknown game screen 'menu'", "watch: menu is not a game screen")
 raises(function() G.isOpen("menu") end, GP .. "isOpen: unknown game screen 'menu' (valid: createServer)", "isOpen: menu")
 raises(function() G.isOpen() end, GP .. "isOpen: unknown game screen nil", "isOpen: no host")
+-- core story 44: core's internal Settings host is no public game screen
+raises(function() G.watch("settings", function() end) end, GP .. "watch: unknown game screen 'settings' (valid: createServer)", "watch: settings is core's own host")
+raises(function() G.isOpen("settings") end, GP .. "isOpen: unknown game screen 'settings' (valid: createServer)", "isOpen: settings is core's own host")
 raises(function() G.isOpen(CSH, 1) end, GP .. "isOpen: expected 1 argument (host), got 2", "isOpen: two arguments")
 raises(function() G.watch(CSH, 5) end, GP .. "watch: fn must be a function, got 5", "watch: fn 5")
 raises(function() G.watch(CSH) end, GP .. "watch: fn must be a function, got nil", "watch: no fn")
