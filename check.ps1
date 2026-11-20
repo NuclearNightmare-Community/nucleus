@@ -1102,6 +1102,11 @@ $controls = $controlsBase + @(
     "\[$N\] INPUT skeltest:later active: "
     "\[$N\] INPUT Controls page \(opened\): \d+ rows, [1-9]\d* of core .* [1-9]\d* dead row\(s\) hidden"
     "\[$N\] INPUT skeltest:far released"
+    # A registry change while the page is open: one "controls changed" pass hides far after its release, another shows
+    # it again once it is declared again and active.
+    "\[$N\] INPUT Controls page \(controls changed\): "
+    "\[$T\] OK CTLIVE menu1 far's row collapsed by the next pass"
+    "\[$T\] OK CTLIVE menu1 far's row visible again once active"
     # Row placement (title screen twice, then the page opened in the match as the pause menu does)
     "\[$T\] OK CTPLACE menu1 toggle directly after Sprint in Movement"
     "\[$T\] OK CTPLACE menu1 far at the end of General"

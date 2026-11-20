@@ -90,6 +90,8 @@ do
     bad({ label = "a\0b" }, "label has a control character", "validate: label with NUL")
     bad({ label = "a\127" }, "label has a control character", "validate: label with DEL")
     bad({ label = "\xFF\xFE" }, "label is not valid UTF-8", "validate: label not UTF-8")
+    bad({ label = "a\xC2\x85b" }, "label has a control character", "validate: label with a C1 control (U+0085)")
+    ok(why({ label = "a\xC2\xA0b" }, I.keyCheck) ~= nil, "validate: label with U+00A0 (not a control) is fine")
     bad({ action = "<nil>" }, "action must be a string", "validate: action missing")
     bad({ action = 3 }, "action must be a string", "validate: action a number")
     bad({ action = "Game/IA.IA" }, "must be an object path", "validate: action without a leading /")
@@ -119,6 +121,7 @@ do
     bad({ near = "" }, "must be 1 to 64 characters", "validate: near empty")
     bad({ near = string.rep("n", 65) }, "must be 1 to 64 characters", "validate: near 65 characters")
     bad({ near = "a\nb" }, "must be 1 to 64 characters without control characters", "validate: near with a newline")
+    bad({ near = "a\xC2\x9Fb" }, "must be 1 to 64 characters without control characters", "validate: near with a C1 control (U+009F)")
     ok(why({ near = "Hide HUD" }, I.keyCheck) ~= nil, "validate: near with a space is fine")
     -- the class check is skipped without keyCheck (the dependent checks forms first, classes on the game thread)
     ok(why({ key = "NoSuchKey" }, nil) ~= nil, "validate: no keyCheck, no class check")
@@ -180,6 +183,10 @@ do
     eq(SV._S.teardown[1].imc, "/Engine/Transient.IMC_a_2Eb_3Atoggle", "control: the context's path")
     ok(SV.gen() > g, "control: the registry generation moved")
     eq(#SV._S.order, 1, "control: still one entry")
+    -- a declaration whose activation failed: the same one again retries it
+    SV._S.reg["a.b:toggle"].status = "failed"
+    eq(ctl("a.b", { label = "Toggle Run" }), "ok:declared", "control: the same declaration after a failure is declared again")
+    ok(SV._S.reg["a.b:toggle"].status == "pending" and SV._S.reg["a.b:toggle"].tryNow == true, "control: pending again and tried on the next tick")
     -- the action declared under another id
     ok(has(ctl("a.b", { id = "other" }), "err:conflict action '/Game/Mods/ToggleSprint/IA_Toggl'... is already declared as 'a.b:toggle'"), "control: the action under another id")
     ok(has(ctl("c.d", { id = "toggle" }), "err:conflict "), "control: the action under another mod's id")
@@ -245,13 +252,14 @@ do
     eq(errOf(A.list), "nucleus.input.list: called before connect", "api: list before connect")
     local SENT = {}
     local REPLY = { ok = true, text = "declared" }
+    local prevCalled = 0
+    ModRef.OnUnload = function() prevCalled = prevCalled + 1 end
     I.bind({ call = function(o, p) SENT[#SENT + 1] = { op = o, payload = p } return REPLY.ok, REPLY.text end, log = log, id = "a.b" })
     eq(A.control(GOOD), true, "api: control returns true")
     eq(SENT[1].op, "input-control", "api: control sends input-control")
     local t = json.decode(SENT[1].payload)
     ok(t.mod == "a.b" and t.id == "toggle" and t.near == "Sprint" and t.key == "LeftAlt", "api: control's payload carries the mod id and the fields", SENT[1].payload)
     ok(type(ModRef.OnUnload) == "function", "api: the first control chains OnUnload")
-    local prevCalled = 0
     local chained = ModRef.OnUnload
     eq(A.control(with({ near = "<nil>" })), true, "api: control without near")
     ok(ModRef.OnUnload == chained, "api: OnUnload chained once")
@@ -293,11 +301,11 @@ do
     ModRef.OnUnload()
     local last = SENT[#SENT]
     ok(#SENT == n0 + 1 and last.op == "input-release" and json.decode(last.payload).all == true and json.decode(last.payload).mod == "a.b", "api: OnUnload releases all of this mod")
+    eq(prevCalled, 1, "api: OnUnload then calls the handler set before the first control")
     -- no own id
     I._reset()
     I.bind({ call = function() return true, "x" end, log = log, id = nil, idWhy = "no Mods/X/mod.json" })
     eq(errOf(A.control, GOOD), "nucleus.input.control: own mod id unknown (no Mods/X/mod.json); add an \"id\" to this mod's mod.json", "api: no mod id")
-    eq(prevCalled, 0, "api: (no stray OnUnload call)")
 end
 
 -- ---------------------------------------------------------------- the Controls page's order (input/screen.lua)

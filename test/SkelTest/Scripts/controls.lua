@@ -491,6 +491,25 @@ return function(X)
             pageChecks("menu1b", { k0 = "K", k1 = "Gamepad_FaceButton_Top", visible = { [TOGGLE] = true, [MOD .. ":far"] = true }, hidden = { GONE } })
         end)
         waitActive("menu1", "later", 10)
+        -- a registry change while the page is open: core's "controls changed" pass hides a released row and shows it
+        -- again once the control is declared again and active
+        local FAR = MOD .. ":far"
+        local function declareFar() return core().input.control{ id = "far", action = IA.far, label = "Skel Far", key = "F7", gamepad = "Gamepad_DPad_Down", near = "NoSuchRow" } end
+        step("menu1: release far (page open)", function()
+            check(core().input.release("far") == true, "CTLIVE menu1 far released with the page open")
+            return msAfter(2), 4
+        end)
+        step("menu1: far hidden", function()
+            local r = rowOf(rows(), FAR)
+            check(r ~= nil and not r.visible, "CTLIVE menu1 far's row collapsed by the next pass (%s)", r and ("visible=" .. tostring(r.visible)) or "missing")
+            check(declareFar() == true, "CTLIVE menu1 far declared again")
+        end)
+        waitActive("menu1", "far", 10)
+        step("menu1: far pass", function() return msAfter(2), 4 end)
+        step("menu1: far shown", function()
+            local r = rowOf(rows(), FAR)
+            check(r ~= nil and r.visible, "CTLIVE menu1 far's row visible again once active (%s)", r and ("visible=" .. tostring(r.visible)) or "missing")
+        end)
         step("menu1: close", function() closePage() return msAfter(1), 2 end)
         -- Tower Island
         X.travel("match1", X.MATCH_MAP, "listen")
