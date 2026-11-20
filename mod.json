@@ -1,7 +1,7 @@
 {
   "id": "nuclearnightmare-community.nucleus",
   "name": "Nucleus",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "scope": "client",
   "game": { "version": "V8.2.3", "build": "26601774" },
   "ue4ss": "v3.0.1-1181-g83330635",

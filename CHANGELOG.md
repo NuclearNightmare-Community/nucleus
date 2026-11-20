@@ -2,6 +2,17 @@
 
 All notable changes to Nucleus are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). From 0.5.0 a dependent's `need` and `dependsOn` are minimum versions (`>=0.5.0`), so a newer Nucleus never asks dependents to raise them. Up to 0.3.0, below 1.0.0 a dependent connected only to the same minor version (`need = "0.3.0"` accepted 0.3.x).
 
+## [0.20.0] - 2026-11-20
+
+Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
+
+For players: the Mod Manager can now restart the game for you. Its RESTART NOW button closes the game and starts it again the way you launched it: through Steam on a normal install. Nucleus has a new small program for this, `Mods/Nucleus/bin/NucleusRestart.exe`; it runs only when you press the button, waits for the game to close, starts it again and exits.
+
+### Added
+
+- Restart now (core story 45, Mod Manager story 8; README "Restart"). New natives `Nucleus_RestartMode()` (`"steam"` when Steam's `appmanifest_2909110.acf` sits two folders above the game folder, else `"direct"` when `steam_appid.txt` is beside the exe, else `nil, "unsupported launch"`) and `Nucleus_RestartStart()` (`true`, or `nil, "unsupported launch" | "helper missing" | "already started" | "command line too long" | "start failed: <code>"`; at most one helper per session; it never quits the game). Both take no arguments (`<fn>: takes no arguments`) and touch no UObject. `core.restart` (`mode`, `start`; never raises; `nil, "native part missing"` without the natives) and `require("nucleus.restart")`; feature `restart`. The relaunch helper `bin/NucleusRestart.exe` (a GUI-subsystem program with no window, no shell, no network and no file writes; Windows system libraries and the static C runtime only, never UE4SS): it gets a `SYNCHRONIZE` handle to the game (its only inherited handle) and the game's own exe, working folder and command line, waits up to 120 s for the game to exit, then opens `steam://rungameid/2909110` (`steam`) or starts the same exe with the original command line byte for byte (`direct`, so a dev copy keeps its `-userdir`); a timeout or a bad argument launches nothing. Log lines `native: restart: helper started (mode=<m>, pid=<n>)` and `native: restart: not started: <reason>`.
+- The package has `Mods/Nucleus/bin/`. `build.ps1` builds the helper and its never-shipped test build `<name>RestartTest.exe`, refuses a helper importing anything but Windows system DLLs, and scans `main.dll` and the helper with Windows Defender (a detection refuses the build; results in `build/logs/defender.txt`). Tests: `native/test/restart-helper.tests.ps1`, `test/unit/restart_test.lua`, and `bad-input`'s `restart-*` cases.
+
 ## [0.19.0] - 2026-11-19
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.

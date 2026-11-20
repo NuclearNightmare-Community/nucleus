@@ -121,7 +121,11 @@ foreach ($p in 'menu1', 'match1') {
                     'ref-rand64-6', 'deref-live', 'free-1', 'free-2', 'deref-freed', 'deref-nil', 'deref-0', 'deref-2\^53',
                     'deref-rand8', 'free-nil', 'free-0', 'free-rand8', 'wrap-ref-nil', 'ch-ping', 'ch-nil', 'ch-long-client',
                     'chd-long', 'chd-cap', 'chd-cap\+1', 'chd-empty', 'chd-unknown', 'chd-space', 'chd-longop', 'chd-garbage-ascii',
-                    'chd-number', 'chd-table', 'chd-bool', 'chd-nil', 'off-nv', 'off-ref', 'off-deref', 'off-free', 'off-freed-deref') {
+                    'chd-number', 'chd-table', 'chd-bool', 'chd-nil', 'off-nv', 'off-ref', 'off-deref', 'off-free', 'off-freed-deref',
+                    # core story 45: the restart natives (no arguments; "direct" on the dev copy; start never called)
+                    'restart-mode', 'wrap-restart-mode', 'has-restart', 'off-restart-mode', 'off-restart-start-1',
+                    'restart-mode-1', 'restart-mode-nil', 'restart-mode-str', 'restart-mode-table', 'restart-mode-true', 'restart-mode-two',
+                    'restart-start-1', 'restart-start-nil', 'restart-start-str', 'restart-start-table', 'restart-start-true', 'restart-start-two') {
         $badInput += "\[$T\] OK CASE $p\.$id "
     }
 }

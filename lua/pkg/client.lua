@@ -16,6 +16,8 @@ local setOk, settingsm = pcall(require, BASE .. ".settings.client")
 local netOk, netm = pcall(require, BASE .. ".net.client")
 -- core.fn (core story 43). The same: a failure here costs core.fn, not connect.
 local fnOk, fnm = pcall(require, BASE .. ".fn")
+-- core.restart (core story 45, Mod Manager story 8). The same: a failure here costs core.restart, not connect.
+local restartOk, restartm = pcall(require, BASE .. ".restart")
 -- UI helpers (ui-helpers-contract.md). Loading them registers the HUD creation callback (ui/hud.lua) in this Lua state.
 -- A failure here must not stop connect for mods that use no UI: core.ui is then missing and onReady is told why.
 local uiOk, uiErr = pcall(function()
@@ -338,6 +340,9 @@ function C.connect(opts)
         else
             log.error("%s's fn client failed to load (%s); core.fn is not available.", NAME, tostring(fnm))
         end
+        -- Core story 45: core.restart, over core's restart natives (mode, start; never raise).
+        if restartOk then api.restart = { mode = restartm.mode, start = restartm.start }
+        else log.error("%s's restart module failed to load (%s); core.restart is not available.", NAME, tostring(restartm)) end
         -- Story 18: feature checks, generated from this api table (features.lua). Optional for dependents: the
         -- minimum version is the normal way to depend on a feature.
         api.has, api.features = featureCalls(featm.fromApi(api))

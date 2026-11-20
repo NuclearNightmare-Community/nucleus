@@ -510,6 +510,24 @@ local function nativeCases(phase)
     case(P .. "clock-two", nCM .. "(1, 2)", function() return CM(1, 2) end, E.err(nCM .. ": expected 0 arguments, got 2"))
     case(P .. "wrap-clock", "core.clock.micros()", function() return core.clock.micros() end, E.ret("one integer > 0", isMicros))
 
+    -- Core story 45: the restart natives take no arguments; on the dev copy (steam_appid.txt beside the exe, no Steam
+    -- manifest) the mode is "direct". <Core>_RestartStart is only ever called with an argument here (refused before it
+    -- does anything): a started helper would relaunch the game when the run closes it. The successful start and
+    -- "already started" are proven by the Mod Manager's restart scenario.
+    local RM, nRM, RS, nRS = native("_RestartMode"), CORE .. "_RestartMode", native("_RestartStart"), CORE .. "_RestartStart"
+    local isDirect = function(r) return r.n == 1 and r[1] == "direct" end
+    case(P .. "restart-mode", nRM .. "() [dev copy]", RM, E.ret("exactly \"direct\"", isDirect))
+    case(P .. "wrap-restart-mode", "core.restart.mode() [dev copy]", function() return core.restart.mode() end, E.ret("exactly \"direct\"", isDirect))
+    case(P .. "has-restart", "core.has(\"restart\")", function() return core.has("restart") end, E.ret("true", function(r) return r[1] == true end))
+    local badArgs = { { "1", 1 }, { "nil", nil }, { "str", "x" }, { "table", {} }, { "true", true }, { "two", 1, 2 } }
+    for _, b in ipairs(badArgs) do
+        local n = #b
+        local function args() return table.unpack(b, 2, math.max(n, 2)) end
+        if b[1] == "nil" then args = function() return nil end end
+        case(P .. "restart-mode-" .. b[1], nRM .. "(" .. b[1] .. ")", function() return RM(args()) end, E.err(nRM .. ": takes no arguments"))
+        case(P .. "restart-start-" .. b[1], nRS .. "(" .. b[1] .. ")", function() return RS(args()) end, E.err(nRS .. ": takes no arguments"))
+    end
+
     -- Ref: types, then addresses that are not live UObjects.
     typeCases(P .. "ref", nREF, REF, "address")
     local fr = intFn(REF)
@@ -621,6 +639,9 @@ local function offThreadCases(phase)
             local ok, err = pcall(function()
                 case(P .. "off-nv", CORE .. "_NativeVersion() [off thread]", NV, E.ret("two strings", function(r) return r.n == 2 end))
                 case(P .. "off-clock", CORE .. "_ClockMicros() [off thread]", CM, E.ret("one integer > 0", function(r) return r.n == 1 and math.type(r[1]) == "integer" and r[1] > 0 end))
+                -- core story 45: no UObject, so allowed off the game thread; the argument check is the same
+                case(P .. "off-restart-mode", CORE .. "_RestartMode() [off thread]", native("_RestartMode"), E.ret("exactly \"direct\"", function(r) return r.n == 1 and r[1] == "direct" end))
+                case(P .. "off-restart-start-1", CORE .. "_RestartStart(1) [off thread]", function() return native("_RestartStart")(1) end, E.err(CORE .. "_RestartStart: takes no arguments"))
                 if addr then case(P .. "off-ref", nREF .. "(<HUD address>) [off thread]", function() return REF(addr) end, E.err(nREF .. " refused: called off the game thread")) end
                 case(P .. "off-ref-bad", nREF .. "(nil) [off thread]", function() return REF(nil) end, E.err(nREF .. " refused: called off the game thread"))
                 if h then case(P .. "off-deref", nDEREF .. "(" .. h .. ") [off thread]", function() return DEREF(h) end, E.err(nDEREF .. " refused: called off the game thread")) end
