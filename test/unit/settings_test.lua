@@ -2,7 +2,7 @@
 -- (values file, atomic write, .bak recovery, windows, the channel ops) on real files in build/unit-settings/, and
 -- core.settings in two dependent states (two copies of the client module) through nucleus.client's call and a fake
 -- class default object that routes to core's handler. Every row of the story's I/O matrix; I/O failures by stubbing
--- io.open and os.rename. Difficulty's real mod.json is the fixture test/unit/fixtures/difficulty.mod.json.
+-- io.open and os.rename. CustomDifficulty's real mod.json is the fixture test/unit/fixtures/difficulty.mod.json.
 -- Run from the repo root with any standalone Lua 5.3 or 5.4:  texlua test/unit/settings_test.lua
 local ROOT = (arg and arg[0] or ""):match("^(.*)[/\\]test[/\\]unit[/\\][^/\\]+$") or "."
 local VERSION = { name = "Nucleus", version = "0.9.0", floor = "0.1.0" }
@@ -46,7 +46,7 @@ end
 local function file(folder, name) return MODS .. "\\" .. folder .. "\\" .. (name or "settings.json") end
 
 local CLOCK = [[{
-  "id": "nuclearnightmare-community.clock", "name": "Clock", "version": "0.2.0", "scope": "client",
+  "id": "nuclearnightmare-community.hud-clock", "name": "HudClock", "version": "0.2.0", "scope": "client",
   "settings": {
     "updateEvery": { "type": "int", "default": 1, "min": 1, "max": 60,
                      "label": "Update every N game minutes", "changeable": "anytime" }
@@ -71,10 +71,10 @@ local SKEL = [[{
     "test.preset": { "type": "number", "default": null, "min": 0, "max": 10, "source": "presets", "changeable": "menu" }
   }
 }]]
-modDir("Clock", CLOCK)
+modDir("HudClock", CLOCK)
 modDir("Waypoints", WAYPOINTS)
 modDir("NucleusSkelTest", SKEL)
-modDir("Difficulty", assert(read(ROOT .. "/test/unit/fixtures/difficulty.mod.json")))
+modDir("CustomDifficulty", assert(read(ROOT .. "/test/unit/fixtures/difficulty.mod.json")))
 modDir("Plain", '{ "id": "plain", "name": "Plain" }')
 modDir("Broken", '{ "id": "broken", ')
 modDir("NoManifest", nil)
@@ -83,9 +83,9 @@ modDir("Nucleus", '{ "id": "nuclearnightmare-community.nucleus", "name": "Nucleu
 -- ---------------------------------------------------------------- schema
 local schema = require("nucleus.settings.schema")
 do
-    local m = schema.parse(CLOCK, "Clock")
+    local m = schema.parse(CLOCK, "HudClock")
     ok(m and #m.settings == 1 and m.settings[1].key == "updateEvery" and m.settings[1].type == "int" and m.settings[1].default == 1
-        and m.settings[1].min == 1 and m.settings[1].max == 60 and m.settings[1].changeable == "anytime", "Clock's shape")
+        and m.settings[1].min == 1 and m.settings[1].max == 60 and m.settings[1].changeable == "anytime", "HudClock's shape")
     m = schema.parse(WAYPOINTS, "Waypoints")
     ok(m and m.settings[1].type == "enum" and m.settings[1].values[2] == "clear" and m.settings[1].default == "restore", "Waypoints' shape")
     m = schema.parse(SKEL, "NucleusSkelTest")
@@ -97,16 +97,16 @@ do
     eq(m.byKey["test.count"].label, "test.count", "label defaults to the key")
     ok(m.byKey["test.preset"].readOnly and m.byKey["test.preset"].default == nil, "source: read-only, null default allowed")
     eq(#m.problems, 0, "no problems")
-    -- Difficulty's real mod.json: 19 read-only settings in declaration order
+    -- CustomDifficulty's real mod.json: 19 read-only settings in declaration order
     local text = read(ROOT .. "/test/unit/fixtures/difficulty.mod.json")
-    m = schema.parse(text, "Difficulty")
-    eq(#m.settings, 19, "Difficulty: 19 settings")
+    m = schema.parse(text, "CustomDifficulty")
+    eq(#m.settings, 19, "CustomDifficulty: 19 settings")
     local all = true
     for _, d in ipairs(m.settings) do if not (d.readOnly and d.source == "presets" and d.type == "number") then all = false end end
-    ok(all, "Difficulty: all read-only number settings from presets")
-    eq(m.settings[1].key, "enemyDamage", "Difficulty: first in declaration order")
-    eq(m.settings[19].key, text:match('.*\n%s*"([%w%.]+)": {'), "Difficulty: last in declaration order")
-    eq(#m.problems, 0, "Difficulty: no problems")
+    ok(all, "CustomDifficulty: all read-only number settings from presets")
+    eq(m.settings[1].key, "enemyDamage", "CustomDifficulty: first in declaration order")
+    eq(m.settings[19].key, text:match('.*\n%s*"([%w%.]+)": {'), "CustomDifficulty: last in declaration order")
+    eq(#m.problems, 0, "CustomDifficulty: no problems")
 
     -- bad entries: each dropped with one problem naming folder and key; the rest kept
     local function one(entry, key)
@@ -178,16 +178,16 @@ local function desc(folder) local d = store.op("settings-get", folder) return d 
 local function decoded(reply) return reply:sub(1, 3) == "ok:" and json.decode(reply:sub(4)) or nil end
 local function entryOf(d, key) for _, e in ipairs(d.settings) do if e.key == key then return e end end end
 
-do -- Fresh install: Clock with no settings.json -> default 1, one info line (spec revision: info, not WARN)
+do -- Fresh install: HudClock with no settings.json -> default 1, one info line (spec revision: info, not WARN)
     local before = #LINES
-    local d = decoded(desc("Clock"))
-    ok(d and d.folder == "Clock" and d.id == "nuclearnightmare-community.clock" and d.name == "Clock", "describe: id, name, folder")
+    local d = decoded(desc("HudClock"))
+    ok(d and d.folder == "HudClock" and d.id == "nuclearnightmare-community.hud-clock" and d.name == "HudClock", "describe: id, name, folder")
     eq(entryOf(d, "updateEvery").value, 1, "fresh: updateEvery = 1")
-    eq(linesMatching("^%[Nucleus%] settings: Clock: no settings%.json; using the declared defaults$"), 1, "fresh: one info line")
+    eq(linesMatching("^%[Nucleus%] settings: HudClock: no settings%.json; using the declared defaults$"), 1, "fresh: one info line")
     eq(linesMatching("WARN"), 0, "fresh: no WARN")
-    desc("Clock"); desc("Clock")
+    desc("HudClock"); desc("HudClock")
     eq(#LINES - before, 1, "fresh: only one line however often it's read")
-    ok(not exists(file("Clock")), "fresh: nothing written by reading")
+    ok(not exists(file("HudClock")), "fresh: nothing written by reading")
     local e = entryOf(d, "updateEvery")
     ok(e.type == "int" and e.min == 1 and e.max == 60 and e.default == 1 and e.label == "Update every N game minutes" and e.changeable == "anytime"
         and e.readOnly == false and e.restart == false and e.pendingRestart == false, "describe: every field of the entry")
@@ -195,15 +195,15 @@ do -- Fresh install: Clock with no settings.json -> default 1, one info line (sp
 end
 
 do -- A set: file written in declaration order, rev + 1, no .tmp or .bak left; back to the default writes {}
-    local r = store.op("settings-set", '{"mod":"Clock","key":"updateEvery","value":5}')
-    ok(r:sub(1, 3) == "ok:", "set Clock updateEvery 5", r)
+    local r = store.op("settings-set", '{"mod":"HudClock","key":"updateEvery","value":5}')
+    ok(r:sub(1, 3) == "ok:", "set HudClock updateEvery 5", r)
     eq(decoded(r).value, 5, "the reply is the entry with its new value")
-    eq(read(file("Clock")), '{"updateEvery":5}', "settings.json holds the value")
-    ok(not exists(file("Clock", "settings.json.tmp")) and not exists(file("Clock", "settings.json.bak")), "no .tmp or .bak left")
+    eq(read(file("HudClock")), '{"updateEvery":5}', "settings.json holds the value")
+    ok(not exists(file("HudClock", "settings.json.tmp")) and not exists(file("HudClock", "settings.json.bak")), "no .tmp or .bak left")
     eq(store.rev(), 1, "rev rose by one"); eq(revs[#revs], 1, "rev published")
-    eq(entryOf(decoded(desc("Clock")), "updateEvery").value, 5, "describe shows 5")
-    store.op("settings-set", '{"mod":"Clock","key":"updateEvery","value":1}')
-    eq(read(file("Clock")), "{}", "back to the default: only non-defaults are written")
+    eq(entryOf(decoded(desc("HudClock")), "updateEvery").value, 5, "describe shows 5")
+    store.op("settings-set", '{"mod":"HudClock","key":"updateEvery","value":1}')
+    eq(read(file("HudClock")), "{}", "back to the default: only non-defaults are written")
     eq(store.rev(), 2, "rev 2")
 end
 
@@ -222,14 +222,14 @@ do -- Restart-only: saved; the value stays the session's; pendingRestart until a
     ok(e.value == 42 and e.pendingRestart == false and e.saved == nil, "restart: the next session uses it")
 end
 
-do -- Read-only: Difficulty describe and set
-    local d = decoded(desc("Difficulty"))
-    eq(#d.settings, 19, "Difficulty: 19 entries")
+do -- Read-only: CustomDifficulty describe and set
+    local d = decoded(desc("CustomDifficulty"))
+    eq(#d.settings, 19, "CustomDifficulty: 19 entries")
     local all = true
     for _, e in ipairs(d.settings) do if not (e.readOnly == true and e.value == nil and e.source == "presets") then all = false end end
-    ok(all, "Difficulty: all readOnly, value absent")
-    eq(store.op("settings-set", '{"mod":"Difficulty","key":"dmg.husk","value":10}'), "err:read-only dmg.husk comes from presets", "Difficulty set refused read-only")
-    ok(not exists(file("Difficulty")) and not exists(file("Difficulty", "settings.json.tmp")), "Difficulty: no file written")
+    ok(all, "CustomDifficulty: all readOnly, value absent")
+    eq(store.op("settings-set", '{"mod":"CustomDifficulty","key":"dmg.husk","value":10}'), "err:read-only dmg.husk comes from presets", "CustomDifficulty set refused read-only")
+    ok(not exists(file("CustomDifficulty")) and not exists(file("CustomDifficulty", "settings.json.tmp")), "CustomDifficulty: no file written")
 end
 
 do -- Windows: menu outside the title screen and lobby are locked; anytime works anywhere
@@ -284,37 +284,37 @@ end
 
 do -- I/O failures: write-failed, the previous file and the in-memory value unchanged
     local realOpen, realRename = io.open, os.rename
-    local prev = read(file("Clock"))
+    local prev = read(file("HudClock"))
     local before = store.rev()
     io.open = function(p, m) if p:find("%.tmp$") and m == "wb" then return nil, "Permission denied" end return realOpen(p, m) end
-    local r = store.op("settings-set", '{"mod":"Clock","key":"updateEvery","value":30}')
+    local r = store.op("settings-set", '{"mod":"HudClock","key":"updateEvery","value":30}')
     io.open = realOpen
     ok(r:find("^err:write%-failed updateEvery: open tmp: Permission denied"), "tmp can't be opened: write-failed", r)
     ok(#r <= #"err:write-failed " + 64, "the detail is at most 64 bytes")
-    eq(read(file("Clock")), prev, "tmp can't be opened: file unchanged")
-    eq(entryOf(decoded(desc("Clock")), "updateEvery").value, 1, "tmp can't be opened: value unchanged")
+    eq(read(file("HudClock")), prev, "tmp can't be opened: file unchanged")
+    eq(entryOf(decoded(desc("HudClock")), "updateEvery").value, 1, "tmp can't be opened: value unchanged")
     eq(store.rev(), before, "no rev bump on a failure")
-    eq(linesMatching("WARN settings: Clock: could not write settings%.json"), 1, "the failure is logged")
+    eq(linesMatching("WARN settings: HudClock: could not write settings%.json"), 1, "the failure is logged")
 
     os.rename = function(a, b) if a:find("%.tmp$") then return nil, "File exists" end return realRename(a, b) end
-    r = store.op("settings-set", '{"mod":"Clock","key":"updateEvery","value":30}')
+    r = store.op("settings-set", '{"mod":"HudClock","key":"updateEvery","value":30}')
     os.rename = realRename
     ok(r:find("^err:write%-failed"), "tmp -> target fails: write-failed", r)
-    eq(read(file("Clock")), prev, "tmp -> target fails: the previous file is back")
-    ok(not exists(file("Clock", "settings.json.tmp")) and not exists(file("Clock", "settings.json.bak")), "tmp -> target fails: no .tmp or .bak left")
-    eq(entryOf(decoded(desc("Clock")), "updateEvery").value, 1, "tmp -> target fails: value unchanged")
+    eq(read(file("HudClock")), prev, "tmp -> target fails: the previous file is back")
+    ok(not exists(file("HudClock", "settings.json.tmp")) and not exists(file("HudClock", "settings.json.bak")), "tmp -> target fails: no .tmp or .bak left")
+    eq(entryOf(decoded(desc("HudClock")), "updateEvery").value, 1, "tmp -> target fails: value unchanged")
 
     os.rename = function(a, b) if b:find("%.bak$") then return nil, "Access denied" end return realRename(a, b) end
-    r = store.op("settings-set", '{"mod":"Clock","key":"updateEvery","value":30}')
+    r = store.op("settings-set", '{"mod":"HudClock","key":"updateEvery","value":30}')
     os.rename = realRename
     ok(r:find("^err:write%-failed updateEvery: rename to %.bak"), "target -> .bak fails: write-failed", r)
-    eq(read(file("Clock")), prev, "target -> .bak fails: file unchanged")
+    eq(read(file("HudClock")), prev, "target -> .bak fails: file unchanged")
 
     io.open = function(p, m) if p:find("%.tmp$") and m == "rb" then return nil, "gone" end return realOpen(p, m) end
-    r = store.op("settings-set", '{"mod":"Clock","key":"updateEvery","value":30}')
+    r = store.op("settings-set", '{"mod":"HudClock","key":"updateEvery","value":30}')
     io.open = realOpen
     ok(r:find("^err:write%-failed updateEvery: tmp read back differs"), "read-back mismatch: write-failed", r)
-    eq(read(file("Clock")), prev, "read-back mismatch: file unchanged")
+    eq(read(file("HudClock")), prev, "read-back mismatch: file unchanged")
     eq(store.rev(), before, "still no rev bump")
 end
 
@@ -337,36 +337,36 @@ do -- Bad calls through the ops: clean err:<code>, nothing written
         { "settings-set", "[]", "err:bad-request payload must be a JSON object" },
         { "settings-set", "null", "err:bad-request payload must be a JSON object" },
         { "settings-set", '{"key":"a","value":1}', "err:bad-request mod must be a string" },
-        { "settings-set", '{"mod":"Clock","value":1}', "err:bad-request key must be a string" },
-        { "settings-set", '{"mod":"Clock","key":"updateEvery"}', "err:bad-request value must be" },
-        { "settings-set", '{"mod":"Clock","key":"updateEvery","value":null}', "err:bad-request value must be" },
-        { "settings-set", '{"mod":"Clock","key":"updateEvery","value":[5]}', "err:bad-request value must be" },
-        { "settings-set", '{"mod":"Clock","key":"updateEvery","value":{"a":1}}', "err:bad-request" },
+        { "settings-set", '{"mod":"HudClock","value":1}', "err:bad-request key must be a string" },
+        { "settings-set", '{"mod":"HudClock","key":"updateEvery"}', "err:bad-request value must be" },
+        { "settings-set", '{"mod":"HudClock","key":"updateEvery","value":null}', "err:bad-request value must be" },
+        { "settings-set", '{"mod":"HudClock","key":"updateEvery","value":[5]}', "err:bad-request value must be" },
+        { "settings-set", '{"mod":"HudClock","key":"updateEvery","value":{"a":1}}', "err:bad-request" },
         { "settings-set", '{"mod":"..\\\\x","key":"a","value":1}', "err:bad-request mod must match" },
         { "settings-set", '{"mod":"' .. string.rep("a", 65) .. '","key":"a","value":1}', "err:bad-request mod must match" },
         { "settings-set", '{"mod":"NoSuchMod","key":"a","value":1}', "err:unknown-mod" },
         { "settings-set", '{"mod":"Plain","key":"a","value":1}', "err:no-settings" },
-        { "settings-set", '{"mod":"Clock","key":"nope","value":1}', "err:unknown-key 'nope' in Clock" },
-        { "settings-set", '{"mod":"Clock","key":"updateEvery","value":2.5}', "err:bad-value updateEvery must be an integer" },
-        { "settings-set", '{"mod":"Clock","key":"updateEvery","value":61}', "err:bad-value updateEvery must be from 1 to 60" },
-        { "settings-set", '{"mod":"Clock","key":"updateEvery","value":"5"}', "err:bad-value updateEvery must be an integer" },
-        { "settings-set", '{"mod":"Clock","key":"updateEvery","value":1e999}', "err:bad-request payload: 1:44 number out of range" },
-        { "settings-set", '{"mod":"Clock","key":"updateEvery","value":NaN}', "err:bad-request payload" },
+        { "settings-set", '{"mod":"HudClock","key":"nope","value":1}', "err:unknown-key 'nope' in HudClock" },
+        { "settings-set", '{"mod":"HudClock","key":"updateEvery","value":2.5}', "err:bad-value updateEvery must be an integer" },
+        { "settings-set", '{"mod":"HudClock","key":"updateEvery","value":61}', "err:bad-value updateEvery must be from 1 to 60" },
+        { "settings-set", '{"mod":"HudClock","key":"updateEvery","value":"5"}', "err:bad-value updateEvery must be an integer" },
+        { "settings-set", '{"mod":"HudClock","key":"updateEvery","value":1e999}', "err:bad-request payload: 1:47 number out of range" },
+        { "settings-set", '{"mod":"HudClock","key":"updateEvery","value":NaN}', "err:bad-request payload" },
         { "settings-set", '{"mod":"Waypoints","key":"onRevive","value":"x"}', "err:bad-value onRevive must be one of restore|clear" },
         { "settings-set", '{"mod":"NucleusSkelTest","key":"test.flag","value":1}', "err:bad-value" },
-        { "settings-set", '{"mod":"Clock","key":"updateEvery","value":5,"mod":"X"}', "err:bad-request payload: 1:46 duplicate key" },
+        { "settings-set", '{"mod":"HudClock","key":"updateEvery","value":5,"mod":"X"}', "err:bad-request payload: 1:49 duplicate key" },
         { "settings-set", string.rep("[", 40), "err:bad-request payload: 1:3 nested deeper than 2" },
-        { "settings-set", '{"mod":"Clock","key":"' .. string.rep("k", 2000) .. '","value":1}', "err:bad-request payload: " },
+        { "settings-set", '{"mod":"HudClock","key":"' .. string.rep("k", 2000) .. '","value":1}', "err:bad-request payload: " },
         { "settings-nope", "x", "err:unknown-op" },
     }
-    local before = read(file("Clock"))
+    local before = read(file("HudClock"))
     local rev0 = store.rev()
     for i, c in ipairs(cases) do
         local okP, r = pcall(store.op, c[1], c[2])
         ok(okP and type(r) == "string" and r:sub(1, #c[3]) == c[3], "bad call " .. i .. " -> " .. c[3], okP and r or ("raised: " .. tostring(r)))
         ok(okP and #r <= 4 + #(r:match("^err:(%S+)") or "") + 1 + 64, "bad call " .. i .. ": detail at most 64 bytes", okP and #r)
     end
-    eq(read(file("Clock")), before, "bad calls: Clock's file unchanged")
+    eq(read(file("HudClock")), before, "bad calls: HudClock's file unchanged")
     eq(files(), 0, "bad calls: nothing written elsewhere")
     eq(store.rev(), rev0, "bad calls: no rev bump")
     eq(linesMatching("settings: Plain: no settings%.json") + linesMatching("settings: Nucleus: no settings%.json"), 0, "a mod without settings: no values-file line")
@@ -410,8 +410,8 @@ local function runLoops() for i, l in ipairs(loops) do if not cancelled[i] then 
 do -- own folder discovery from the call stack (connect runs it while the dependent's main.lua is on the stack)
     package.loaded["nucleus.settings.client"] = nil
     local S = require("nucleus.settings.client")
-    local chunk = load("local S = ... local r = S.findFolder('Nucleus') return r", "@C:\\Games\\NN\\ue4ss\\Mods\\Clock\\Scripts\\main.lua")
-    eq(chunk(S), "Clock", "findFolder: the caller's Mods/<Folder>/Scripts/")
+    local chunk = load("local S = ... local r = S.findFolder('Nucleus') return r", "@C:\\Games\\NN\\ue4ss\\Mods\\HudClock\\Scripts\\main.lua")
+    eq(chunk(S), "HudClock", "findFolder: the caller's Mods/<Folder>/Scripts/")
     chunk = load("local S = ... local r = S.findFolder('Nucleus') return r", "@C:\\Games\\NN\\ue4ss\\Mods\\Nucleus\\Scripts\\main.lua")
     eq(chunk(S), nil, "findFolder: core's own folder is skipped")
     chunk = load("local S = ... local r = S.findFolder('Nucleus') return r", "@C:\\x\\Mods\\..\\Scripts\\main.lua")
@@ -420,19 +420,19 @@ do -- own folder discovery from the call stack (connect runs it while the depend
     raises(function() S.get("a") end, "nucleus.settings.get: own mod folder unknown", "no folder: get raises")
     raises(function() S.set("a", 1) end, "nucleus.settings.set: own mod folder unknown", "no folder: set raises")
     raises(function() S.watch(function() end) end, "nucleus.settings.watch: own mod folder unknown", "no folder: watch raises")
-    ok(type(S.describe("Clock")) == "table", "no folder: describe still works")
+    ok(type(S.describe("HudClock")) == "table", "no folder: describe still works")
     package.loaded["nucleus.settings.client"] = nil
     local U = require("nucleus.settings.client")
     raises(function() U.get("a") end, "nucleus.settings.get: called before connect", "before connect: raises")
 end
 
 local W = newState("Waypoints", "Waypoints")
-local C = newState("Clock", "Clock")
+local C = newState("HudClock", "HudClock")
 local M = newState("NucleusSkelPeer", "Manager") -- the Mod Manager's state (any other mod)
 
 do -- get, getAll, the cache and the revision
     eq(W.get("onRevive"), "clear", "Waypoints get: the value the Manager wrote earlier")
-    eq(C.get("updateEvery"), 1, "Clock get: default")
+    eq(C.get("updateEvery"), 1, "HudClock get: default")
     local all = C.getAll(); all.updateEvery = 99
     eq(C.get("updateEvery"), 1, "getAll returns a copy")
     -- Manager edit from another state: Waypoints' get sees it at once (the revision moved), no loop needed
@@ -491,17 +491,17 @@ do -- watchers: called by the poll for changes by anyone; the poll runs only whi
     ok(K.set("test.count", 9) == true and ks[1] == "test.count", "anytime: the own watcher sees it")
 end
 
-do -- Read-only Difficulty through the client: describe and setFor
-    local d = M.describe("Difficulty")
-    eq(#d.settings, 19, "describe('Difficulty'): 19 entries")
+do -- Read-only CustomDifficulty through the client: describe and setFor
+    local d = M.describe("CustomDifficulty")
+    eq(#d.settings, 19, "describe('CustomDifficulty'): 19 entries")
     local all = true
     for i, e in ipairs(d.settings) do if not (e.readOnly == true and e.value == nil) then all = false end end
-    ok(all, "describe('Difficulty'): all readOnly, value absent")
+    ok(all, "describe('CustomDifficulty'): all readOnly, value absent")
     eq(d.settings[1].key, "enemyDamage", "declaration order")
     ok(getmetatable(d.settings) == nil, "plain Lua tables")
-    local okS, why = M.setFor("Difficulty", "dmg.husk", 10)
-    ok(okS == false and why:find("^read%-only "), "setFor Difficulty: false, 'read-only ...'", why)
-    ok(not exists(file("Difficulty")), "no file touched")
+    local okS, why = M.setFor("CustomDifficulty", "dmg.husk", 10)
+    ok(okS == false and why:find("^read%-only "), "setFor CustomDifficulty: false, 'read-only ...'", why)
+    ok(not exists(file("CustomDifficulty")), "no file touched")
 end
 
 do -- Refusals by state return false; caller bugs raise
@@ -554,7 +554,7 @@ do -- Refusals by state return false; caller bugs raise
         { function() return K.setFor(string.rep("a", 65), "a", 1) end, "nucleus.settings.setFor: folder" },
         { function() return K.setFor("NoSuchMod", "a", 1) end, "nucleus.settings.setFor: unknown-mod NoSuchMod has no mod.json" },
         { function() return K.setFor("Plain", "a", 1) end, "nucleus.settings.setFor: no-settings" },
-        { function() return K.setFor("Clock", "updateEvery", 61) end, "nucleus.settings.setFor: bad value: updateEvery must be from 1 to 60" },
+        { function() return K.setFor("HudClock", "updateEvery", 61) end, "nucleus.settings.setFor: bad value: updateEvery must be from 1 to 60" },
         { function() return K.setFor(5, "a", 1) end, "nucleus.settings.setFor: folder must be a string, got number" },
     }
     local fileBefore = read(file("NucleusSkelTest"))
@@ -577,14 +577,14 @@ do -- Refusals by state return false; caller bugs raise
 end
 
 do -- core not answering: get raises cleanly, set returns false, describe returns nil
-    local K = newState("Clock", "Clock")
+    local K = newState("HudClock", "HudClock")
     local realCall = cdo.Nucleus_Call
     cdo.Nucleus_Call = function() return "bp-default:x" end
     shared["nucleus.settings.rev"] = shared["nucleus.settings.rev"] + 1
     raises(function() K.get("updateEvery") end, "nucleus.settings.get: call-failed", "core silent: get raises")
     local okS, why = K.set("updateEvery", 3)
     ok(okS == false and type(why) == "string", "core silent: set false", why)
-    local d, w = K.describe("Clock")
+    local d, w = K.describe("HudClock")
     ok(d == nil and type(w) == "string", "core silent: describe nil")
     cdo.Nucleus_Call = realCall
     eq(K.get("updateEvery"), 5, "core back: get works")
@@ -605,16 +605,16 @@ do -- review fixes: init without modsDir; one state per folder whatever the case
     raises(function() store.init{ modsDir = "" } end, "init needs a non-empty modsDir string", "init with an empty modsDir raises")
     store.init{ modsDir = MODS, core = "Nucleus", log = logm.new("Nucleus"), rev = shared["nucleus.settings.rev"], world = function() return WORLD end,
                 publishRev = function(n) shared["nucleus.settings.rev"] = n end }
-    -- case: Windows paths ignore case, so "clock" and "Clock" are one state and one file
-    ok(store.op("settings-set", '{"mod":"clock","key":"updateEvery","value":33}'):sub(1, 3) == "ok:", "set through 'clock'")
-    eq(entryOf(decoded(desc("Clock")), "updateEvery").value, 33, "'Clock' sees the value set through 'clock'")
-    ok(store.op("settings-set", '{"mod":"CLOCK","key":"updateEvery","value":34}'):sub(1, 3) == "ok:", "set through 'CLOCK'")
-    eq(entryOf(decoded(desc("clock")), "updateEvery").value, 34, "one state: no stale copy overwrote it")
-    eq(read(file("Clock")), '{"updateEvery":34}', "one file")
-    local Cs = newState("Clock", "Clock")
+    -- case: Windows paths ignore case, so "hudclock" and "HudClock" are one state and one file
+    ok(store.op("settings-set", '{"mod":"hudclock","key":"updateEvery","value":33}'):sub(1, 3) == "ok:", "set through 'hudclock'")
+    eq(entryOf(decoded(desc("HudClock")), "updateEvery").value, 33, "'HudClock' sees the value set through 'hudclock'")
+    ok(store.op("settings-set", '{"mod":"HUDCLOCK","key":"updateEvery","value":34}'):sub(1, 3) == "ok:", "set through 'HUDCLOCK'")
+    eq(entryOf(decoded(desc("hudclock")), "updateEvery").value, 34, "one state: no stale copy overwrote it")
+    eq(read(file("HudClock")), '{"updateEvery":34}', "one file")
+    local Cs = newState("HudClock", "HudClock")
     local seen = {}
     Cs.watch(function(k, v) seen[#seen + 1] = v end)
-    eq(Cs.setFor("clock", "updateEvery", 35), true, "setFor on the own folder in another case")
+    eq(Cs.setFor("hudclock", "updateEvery", 35), true, "setFor on the own folder in another case")
     eq(seen[1], 35, "...refreshes the own cache at once (watcher called before setFor returns)")
     -- a watcher that unwatches during the call doesn't make the next one miss the change
     local Ws = newState("Waypoints", "Waypoints")
@@ -685,32 +685,32 @@ do -- connect binds core.settings to the folder of the main.lua that called it
     package.loaded["nucleus.client"] = nil
     local cl = require("nucleus.client")
     local got
-    local main = load("local cl, done = ... cl.connect{ mod = 'Clock', need = '>=0.9.0', onReady = done }",
-        "@C:\\Games\\NN\\ue4ss\\Mods\\Clock\\Scripts\\main.lua")
+    local main = load("local cl, done = ... cl.connect{ mod = 'HudClock', need = '>=0.9.0', onReady = done }",
+        "@C:\\Games\\NN\\ue4ss\\Mods\\HudClock\\Scripts\\main.lua")
     main(cl, function(core) got = core end)
     for _ = 1, 3 do runLoops() end
     ok(got ~= nil and type(got.settings) == "table", "connect: core.settings on the api")
     ok(got and got.has("settings") == true, "connect: core.has('settings')")
-    eq(got and got.settings.get("updateEvery"), 35, "connect: core.settings.get reads the caller's own folder (Clock)")
+    eq(got and got.settings.get("updateEvery"), 35, "connect: core.settings.get reads the caller's own folder (HudClock)")
 end
 
 do -- a value too long for the channel is a bad value (raises), not a refusal by state
-    local S = newState("Clock", "Clock")
+    local S = newState("HudClock", "HudClock")
     raises(function() S.set("updateEvery", string.rep("x", 5000)) end, "nucleus.settings.set: bad value: the request is too long", "too-long value: set raises")
     raises(function() S.setFor("Waypoints", "onRevive", string.rep("x", 5000)) end, "nucleus.settings.setFor: bad value: the request is too long", "too-long value: setFor raises")
 end
 
 do -- a poll registered with an unusable handle is retired: it never calls the watchers
-    local S = newState("Clock", "Clock")
+    local S = newState("HudClock", "HudClock")
     local realLoop, stray = LoopInGameThreadWithDelay, nil
     LoopInGameThreadWithDelay = function(ms, fn) stray = fn return "not-a-handle" end
     local seen = 0
     S.watch(function() seen = seen + 1 end)
     LoopInGameThreadWithDelay = realLoop
-    eq(linesMatching("^%[Clock%] WARN settings poll could not start: LoopInGameThreadWithDelay returned not%-a%-handle$"), 1, "bad poll handle: one WARN")
+    eq(linesMatching("^%[HudClock%] WARN settings poll could not start: LoopInGameThreadWithDelay returned not%-a%-handle$"), 1, "bad poll handle: one WARN")
     local cur = S.get("updateEvery")
     local other = newState("NucleusSkelPeer", "Manager")
-    eq(select(1, other.setFor("Clock", "updateEvery", cur == 7 and 8 or 7)), true, "bad poll handle: a change from another state")
+    eq(select(1, other.setFor("HudClock", "updateEvery", cur == 7 and 8 or 7)), true, "bad poll handle: a change from another state")
     ok(type(stray) == "function", "bad poll handle: the loop body was registered")
     stray()
     eq(seen, 0, "bad poll handle: the stray loop does nothing")

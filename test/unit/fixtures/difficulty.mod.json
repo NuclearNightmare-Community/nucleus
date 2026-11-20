@@ -1,6 +1,6 @@
 {
-  "id": "nuclearnightmare-community.difficulty",
-  "name": "Difficulty",
+  "id": "nuclearnightmare-community.custom-difficulty",
+  "name": "CustomDifficulty",
   "version": "0.1.0",
   "scope": "all",
   "game": { "version": "V8.2.3", "build": "26601774" },
