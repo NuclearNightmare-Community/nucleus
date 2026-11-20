@@ -221,8 +221,9 @@ namespace core_native::restart
                 logf("restart: not started: start failed: {}", err);
                 return nil_reason(std::format("start failed: {}", err));
             }
-            // Without a handle (duplication failed) a second call can't tell whether it waits: it starts another one,
-            // which is harmless (each relaunches only after this game exits; the second finds Steam or the new game up).
+            // Without a handle (duplication failed) a second call can't tell whether it waits: it starts another one.
+            // Each relaunches only after this game exits; in steam mode Steam sees the game up, but in direct mode both
+            // start the exe, so two games open (accepted: a SYNCHRONIZE duplicate of our own child's handle doesn't fail).
             g_helper = started;
             logf("restart: helper started (mode={}, pid={})", core_restart::mode_name(m), pid);
             Result r;

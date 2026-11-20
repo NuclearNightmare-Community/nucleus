@@ -6,7 +6,7 @@ All notable changes to Nucleus are recorded here. The format follows [Keep a Cha
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
 
-For players: the Mod Manager can now restart the game for you. Its RESTART NOW button closes the game and starts it again the way you launched it: through Steam on a normal install. Nucleus has a new small program for this, `Mods/Nucleus/bin/NucleusRestart.exe`; it runs only when you press the button, waits for the game to close, starts it again and exits.
+For players: the Mod Manager can now restart the game for you. Its RESTART NOW button closes the game and starts it again: through Steam on a normal install, with your Steam launch options (even if you started the game some other way). Nucleus has a new small program for this, `Mods/Nucleus/bin/NucleusRestart.exe`; it runs only when you press the button, waits for the game to close, starts it again and exits.
 
 ### Added
 
