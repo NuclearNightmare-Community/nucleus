@@ -225,11 +225,14 @@ local function activate(e, sub, us)
         return
     end
     -- An action that already has key settings with a name belongs to another Controls row (a game control, say
-    -- IA_Jump): core never changes it.
+    -- IA_Jump): core never changes it. A mapping name core gave it for a control no longer declared on this action
+    -- (released, or declared again under another id) is core's own claim, and is taken over.
     local pm = try(function() return ia.PlayerMappableKeySettings end)
     if valid(pm) then
         local owner = try(function() return pm.Name:ToString() end)
-        if owner and owner ~= "" and owner ~= "None" and owner ~= e.name then
+        local prev = owner and S.reg[owner]
+        local stale = owner ~= nil and owner:find(":", 1, true) ~= nil and not (prev and prev.action == e.action)
+        if owner and owner ~= "" and owner ~= "None" and owner ~= e.name and not stale then
             e.status = "failed"
             E.log.error("INPUT %s: %s already belongs to the Controls row '%s'; the control stays inactive", e.name, e.action, quote(owner))
             return

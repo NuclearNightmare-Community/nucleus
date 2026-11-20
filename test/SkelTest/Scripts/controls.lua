@@ -11,14 +11,16 @@
 --       InputAction at runtime (/Engine/Transient.IA_SkelTestControl, as the planning probe did) and writes the dead row
 --       skeltest:gone (its own context registered, J mapped with MapPlayerKey, saved, unregistered); then declares
 --       toggle (F9, Gamepad_FaceButton_Right, near Sprint), far (near a row that doesn't exist), notia (an object that
---       isn't an InputAction) and later (an action that doesn't exist yet). Opens the Controls page as the title
+--       isn't an InputAction), later (an action that doesn't exist yet) and owned (an action whose key settings already
+--       name another row: refused, the name left alone). Opens the Controls page as the title
 --       screen's OPTIONS does (SettingsMenu_draggable_C, AddToViewport): toggle directly after Sprint in Movement with
 --       F9 and the gamepad default, both selectors allowing gamepad keys while Sprint's don't, far at the end of
 --       General, skeltest:gone collapsed, no visible row of an undeclared control. A real capture on slot 0 (focus,
 --       Enter, K) and a gamepad capture on slot 1 (focus, Enter, SetSelectedKey Gamepad_FaceButton_Top). The page
---       again (later now built: active from the screen-open retry). Tower Island (SmallMap?listen): the context is
---       added again, keydown K -> state true, keyup -> false; far released; the page opened as the pause menu does:
---       toggle after Sprint, far hidden.
+--       again (later now built: active from the screen-open retry). later2 declared, its action built just before the
+--       travel. Tower Island (SmallMap?listen): the context is added again, later2 active (the map load's retry),
+--       keydown K -> state true, keyup -> false; far released and its action declared again as far2 (active); the page
+--       opened as the pause menu does: toggle after Sprint, far hidden.
 --     controls-restart (after controls; run.ps1 moves the .sav aside afterwards): toggle declared again with its
 --       defaults: the row shows K and the gamepad key bound in controls, QueryKeysMappedToAction holds K and not F9;
 --       skeltest:gone (declared by no one) is collapsed, and the .sav still holds it.
@@ -34,7 +36,9 @@ return function(X)
 
     local MOD = "skeltest" -- test/SkelTest/mod.json id
     local IA = { toggle = "/Engine/Transient.IA_SkelTestControl", far = "/Engine/Transient.IA_SkelTestFar",
-        later = "/Engine/Transient.IA_SkelTestLater", gone = "/Engine/Transient.IA_SkelTestGone" }
+        later = "/Engine/Transient.IA_SkelTestLater", gone = "/Engine/Transient.IA_SkelTestGone",
+        owned = "/Engine/Transient.IA_SkelTestOwned", later2 = "/Engine/Transient.IA_SkelTestLater2" }
+    local OWNER = "SkelTestOwner" -- the row name owned's action already carries (as a game action such as IA_Jump does)
     local NOTIA = "/Script/Engine.Default__GameplayStatics"
     local GONE = MOD .. ":gone"
     local TOGGLE = MOD .. ":toggle"
@@ -372,6 +376,19 @@ return function(X)
         us:UnregisterInputMappingContext(imc)
     end
 
+    -- owned's action: key settings already named OWNER, so core must refuse it and leave the name alone
+    local function buildOwned()
+        local ia = buildIA(IA.owned)
+        local pm = StaticConstructObject(found("/Script/EnhancedInput.PlayerMappableKeySettings"), ia, FName("PMKS_SkelTestOwned"), flags())
+        pm.Name = FName(OWNER)
+        ia.PlayerMappableKeySettings = pm
+    end
+    local function ownerOf(path)
+        local ia = found(path)
+        local pm = ia and try(function() return ia.PlayerMappableKeySettings end)
+        return valid(pm) and try(function() return pm.Name:ToString() end) or "-"
+    end
+
     local function waitActive(tag, id, sec)
         step(tag .. ": " .. id .. " active", function()
             return function() local e = listEntry(id) return e ~= nil and e.active end, sec or 15, tag .. " " .. id .. " active"
@@ -429,6 +446,9 @@ return function(X)
             check(IN.control{ id = "far", action = IA.far, label = "Skel Far", key = "F7", gamepad = "Gamepad_DPad_Down", near = "NoSuchRow" } == true, "CTDECLARE far (near a row that doesn't exist)")
             check(IN.control{ id = "notia", action = NOTIA, label = "Skel Not IA", key = "F6", gamepad = "Gamepad_DPad_Up" } == true, "CTDECLARE notia (not an InputAction; accepted, refused at runtime)")
             check(IN.control{ id = "later", action = IA.later, label = "Skel Later", key = "F5", gamepad = "Gamepad_DPad_Left", near = "Jump" } == true, "CTDECLARE later (its action doesn't exist yet)")
+            local okO, errO = pcall(buildOwned)
+            check(okO and ownerOf(IA.owned) == OWNER, "CTSETUP menu1 owned's action built with key settings named %s%s", OWNER, okO and "" or (" (" .. firstLine(errO) .. ")"))
+            check(IN.control{ id = "owned", action = IA.owned, label = "Skel Owned", key = "F3", gamepad = "Gamepad_DPad_Right" } == true, "CTDECLARE owned (its action belongs to another row; accepted, refused at runtime)")
         end)
         waitActive("menu1", "toggle")
         waitActive("menu1", "far")
@@ -439,6 +459,8 @@ return function(X)
             check(hasKey(q, "F9") and hasKey(q, "Gamepad_FaceButton_Right"), "CTQUERY menu1 QueryKeysMappedToAction(toggle) = %s", q)
             local n, l = listEntry("notia"), listEntry("later")
             check(n and not n.active and l and not l.active, "CTLIST menu1 notia and later inactive (%s, %s)", tostring(n and n.active), tostring(l and l.active))
+            local o = listEntry("owned")
+            check(o and not o.active and ownerOf(IA.owned) == OWNER, "CTOWNED menu1 owned inactive and its action's row name unchanged (%s, %s)", tostring(o and o.active), ownerOf(IA.owned))
             local okS, s = pcall(core().input.state, "toggle")
             check(okS and s == false, "CTSTATE menu1 toggle not triggered (%s)", tostring(s))
         end)
@@ -511,6 +533,18 @@ return function(X)
             check(r ~= nil and r.visible, "CTLIVE menu1 far's row visible again once active (%s)", r and ("visible=" .. tostring(r.visible)) or "missing")
         end)
         step("menu1: close", function() closePage() return msAfter(1), 2 end)
+        -- later2: declared before its action exists, the action built just before the travel with no page opened in
+        -- between, so only the map load's retry can activate it
+        step("menu1: declare later2", function()
+            check(core().input.control{ id = "later2", action = IA.later2, label = "Skel Later Two", key = "F2", gamepad = "Gamepad_DPad_Up" } == true, "CTDECLARE later2 (its action doesn't exist yet)")
+            return msAfter(1.5), 3
+        end)
+        step("menu1: build later2", function()
+            local l = listEntry("later2")
+            check(l and not l.active, "CTLIST menu1 later2 inactive before the travel (%s)", tostring(l and l.active))
+            local okB = pcall(buildIA, IA.later2)
+            check(okB and found(IA.later2) ~= nil, "CTSETUP menu1 later2's action built")
+        end)
         -- Tower Island
         X.travel("match1", X.MATCH_MAP, "listen")
         W("match1", "SmallMap", 180)
@@ -530,6 +564,8 @@ return function(X)
             check(hasKey(q, "K") and hasKey(q, "Gamepad_FaceButton_Top"), "CTMATCH match1 toggle's context added again: %s", q)
             local okS, s = pcall(core().input.state, "toggle")
             check(okS and s == false, "CTSTATE match1 idle: false (%s)", tostring(s))
+            local l, ql = listEntry("later2"), queryKeys(IA.later2)
+            check(l and l.active and hasKey(ql, "F2"), "CTRETRY match1 later2 active after the map load (%s, %s)", tostring(l and l.active), ql)
         end)
         step("match1: keydown K", function() return X.request("keydown K"), 40, "keydown K" end)
         step("match1: hold", function() return msAfter(0.8), 2 end)
@@ -543,12 +579,19 @@ return function(X)
             local okS, s = pcall(core().input.state, "toggle")
             check(okS and s == false, "CTSTATE match1 K released: false (%s)", tostring(s))
             check(core().input.release("far") == true, "CTRELEASE match1 far released")
+            -- far's action, declared again under another id: core takes back the row name it gave it for far
+            check(core().input.control{ id = "far2", action = IA.far, label = "Skel Far Two", key = "F4", gamepad = "Gamepad_DPad_Right" } == true, "CTDECLARE far2 (far's action under a new id)")
             return msAfter(1), 2
+        end)
+        waitActive("match1", "far2", 10)
+        step("match1: far2", function()
+            local q = queryKeys(IA.far)
+            check(ownerOf(IA.far) == MOD .. ":far2" and hasKey(q, "F4") and not hasKey(q, "F7"), "CTRECLAIM match1 far's action now belongs to far2 (%s, %s)", ownerOf(IA.far), q)
         end)
         step("match1: open page", function() openPage("match1") return msAfter(1.5), 3 end)
         step("match1: controls tab", function() check(showControls(), "CTPAGE match1 Controls tab shown") return waitPass("match1") end)
         step("match1: page", function()
-            pageChecks("match1", { k0 = "K", k1 = "Gamepad_FaceButton_Top", visible = { [TOGGLE] = true, [MOD .. ":later"] = true }, hidden = { GONE, MOD .. ":far" } })
+            pageChecks("match1", { k0 = "K", k1 = "Gamepad_FaceButton_Top", visible = { [TOGGLE] = true, [MOD .. ":later"] = true, [MOD .. ":later2"] = true, [MOD .. ":far2"] = true }, hidden = { GONE, MOD .. ":far" } })
             return X.request("shot ct-match1"), 40, "shot"
         end)
         step("match1: close", function() closePage() return msAfter(1), 2 end)
