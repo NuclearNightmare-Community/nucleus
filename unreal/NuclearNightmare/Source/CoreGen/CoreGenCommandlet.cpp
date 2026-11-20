@@ -1746,6 +1746,10 @@ namespace
 		const FIcon Icons[] = {
 			{TEXT("gear"), TEXT("T_Gear")}, {TEXT("checkbox-on"), TEXT("T_CheckboxOn")}, {TEXT("checkbox-off"), TEXT("T_CheckboxOff")},
 			{TEXT("lock"), TEXT("T_Lock")}, {TEXT("warning"), TEXT("T_Warning")}, {TEXT("restart"), TEXT("T_Restart")},
+			// Mod Manager story 12 (core 0.21.0): the scope icons.
+			{TEXT("scope-host"), TEXT("T_ScopeHost")}, {TEXT("scope-client"), TEXT("T_ScopeClient")},
+			{TEXT("scope-host-plus"), TEXT("T_ScopeHostPlus")}, {TEXT("scope-both"), TEXT("T_ScopeBoth")},
+			{TEXT("scope-unknown"), TEXT("T_ScopeUnknown")},
 		};
 		if (IconDir.IsEmpty())
 		{

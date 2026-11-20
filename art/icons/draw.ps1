@@ -1,11 +1,13 @@
 <#
 .SYNOPSIS
-  Draws core's six placeholder icons: white on transparent, 128x128 PNGs, next to this script.
+  Draws core's eleven placeholder icons: white on transparent, 128x128 PNGs, next to this script.
 .DESCRIPTION
-  gear, checkbox-on, checkbox-off, lock, warning, restart. They are placeholders (our own work, plain shapes drawn
+  gear, checkbox-on, checkbox-off, lock, warning, restart, and the five scope icons (Mod Manager story 12, core 0.21.0):
+  scope-host (a house), scope-client (a person), scope-host-plus (a house with a small person), scope-both (a house and a
+  person with a plus) and scope-unknown (a question mark in a ring). They are placeholders (our own work, plain shapes drawn
   with System.Drawing) until the user's art replaces them: see README.md here. build.ps1 hands this folder to CoreGen,
   which imports each PNG as /Game/Mods/<Core>/Icons/T_<Key in CamelCase> (UserInterface2D, no mips, UI group, never
-  streamed); core tints them at runtime, so they stay white. Re-running it rewrites the six files.
+  streamed); core tints them at runtime, so they stay white. Re-running it rewrites the eleven files.
 .EXAMPLE
   pwsh -File art/icons/draw.ps1
 #>
@@ -115,3 +117,48 @@ $head = [System.Drawing.PointF[]]@(
     [System.Drawing.PointF]::new([float]($ex - 4), [float]($ey + 18)))
 $g.FillPolygon($brush, $head)
 Save $bmp $g 'restart'
+
+# --- Scope icons (Mod Manager story 12, core 0.21.0): set A, pictograms. House = the host, person = a player.
+$clear = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::Transparent)
+function P([float] $x, [float] $y) { [System.Drawing.PointF]::new($x, $y) }
+# A house in a box s wide and s tall at (x, y): a filled roof and a body with a door cut out.
+function House($g, [float] $x, [float] $y, [float] $s) {
+    $roof = [System.Drawing.PointF[]]@((P ($x + $s / 2) $y), (P ($x + $s) ($y + 0.48 * $s)), (P $x ($y + 0.48 * $s)))
+    $g.FillPolygon($brush, $roof)
+    $g.FillRectangle($brush, $x + 0.14 * $s, $y + 0.44 * $s, 0.72 * $s, 0.56 * $s)
+    $old = $g.CompositingMode
+    $g.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
+    $g.FillRectangle($clear, $x + 0.40 * $s, $y + 0.66 * $s, 0.20 * $s, 0.34 * $s)
+    $g.CompositingMode = $old
+}
+# A person (head and shoulders) in a box s wide at (x, y).
+function Person($g, [float] $x, [float] $y, [float] $s) {
+    $g.FillEllipse($brush, $x + 0.30 * $s, $y, 0.40 * $s, 0.40 * $s)
+    $body = [System.Drawing.Drawing2D.GraphicsPath]::new()
+    $body.AddArc($x + 0.06 * $s, $y + 0.48 * $s, 0.88 * $s, 0.80 * $s, 180, 180)
+    $body.AddLine($x + 0.94 * $s, $y + 0.88 * $s, $x + 0.06 * $s, $y + 0.88 * $s)
+    $body.CloseFigure()
+    $g.FillPath($brush, $body)
+}
+
+# scope-host: only the host needs it.
+$bmp, $g = New-Canvas; House $g 12 10 104; Save $bmp $g 'scope-host'
+# scope-client: works on its own, whether you host or join.
+$bmp, $g = New-Canvas; Person $g 16 12 96; Save $bmp $g 'scope-client'
+# scope-host-plus: the host needs it, players who have it get more. A big house with a small person at the lower right
+# (smaller than in scope-both and without the plus, so the two stay apart at 28 px).
+$bmp, $g = New-Canvas; House $g 4 6 90; Person $g 82 80 44; Save $bmp $g 'scope-host-plus'
+# scope-both: the host and every player need it. A house and a person with a plus.
+$bmp, $g = New-Canvas
+House $g 2 8 56; Person $g 70 66 56
+$g.DrawLine((New-Pen 9), 98, 12, 98, 50); $g.DrawLine((New-Pen 9), 79, 31, 117, 31)
+Save $bmp $g 'scope-both'
+# scope-unknown: the mod doesn't say. A question mark in a ring.
+$bmp, $g = New-Canvas
+$g.DrawEllipse((New-Pen 9), 10, 10, 108, 108)
+$q = [System.Drawing.Drawing2D.GraphicsPath]::new()
+$q.AddArc(44, 30, 40, 36, 200, 250)
+$g.DrawPath((New-Pen 11), $q)
+$g.DrawLine((New-Pen 11), 64, 66, 64, 76)
+$g.FillEllipse($brush, 57, 86, 14, 14)
+Save $bmp $g 'scope-unknown'

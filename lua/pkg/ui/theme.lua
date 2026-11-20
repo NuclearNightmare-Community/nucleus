@@ -141,8 +141,12 @@ M.reorder = { edge = 32, speed = 600, lineH = 2, lift = 8, sourceOpacity = 0.4, 
 M.icons = {
     gear = "T_Gear", ["checkbox-on"] = "T_CheckboxOn", ["checkbox-off"] = "T_CheckboxOff",
     lock = "T_Lock", warning = "T_Warning", restart = "T_Restart",
+    -- Mod Manager story 12 (core 0.21.0): where a mod runs (mod.json scope), and unknown.
+    ["scope-host"] = "T_ScopeHost", ["scope-client"] = "T_ScopeClient", ["scope-host-plus"] = "T_ScopeHostPlus",
+    ["scope-both"] = "T_ScopeBoth", ["scope-unknown"] = "T_ScopeUnknown",
 }
-M.iconNames = { "checkbox-off", "checkbox-on", "gear", "lock", "restart", "warning" }
+M.iconNames = { "checkbox-off", "checkbox-on", "gear", "lock", "restart", "scope-both", "scope-client", "scope-host",
+    "scope-host-plus", "scope-unknown", "warning" }
 -- The game's textures an image may name ({ game = <path> }), loaded by path at runtime and never shipped (each one is in
 -- the workspace's tools/diff-dumps.watch.json). Path -> core's icon for the same meaning (shown when the texture can't
 -- be loaded), or false when core has none.

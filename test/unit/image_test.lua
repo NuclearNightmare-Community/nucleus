@@ -561,7 +561,7 @@ local IC = "nucleus.ui.image.create: "
 local function img(o) o.id = o.id or "bad"; o.place = o.place or { row = T.row } return function() IM.create(o) end end
 local GAMES = table.concat(theme.gameTextureNames, ", ")
 raises(img({ image = { game = "/Game/Foo.Foo" } }), IC .. "game texture '/Game/Foo.Foo' is not allow-listed (valid: " .. GAMES .. ")", "source: a path not on the list")
-raises(img({ image = { icon = "star" } }), IC .. "unknown icon 'star' (valid: checkbox-off, checkbox-on, gear, lock, restart, warning)", "source: an unknown icon")
+raises(img({ image = { icon = "star" } }), IC .. "unknown icon 'star' (valid: checkbox-off, checkbox-on, gear, lock, restart, scope-both, scope-client, scope-host, scope-host-plus, scope-unknown, warning)", "source: an unknown icon")
 raises(img({ image = { icon = "gear", game = T.GAME.ticked } }), IC .. "image must have exactly one key, icon or game (got icon and game)", "source: two keys")
 raises(img({ image = {} }), IC .. "image must have exactly one key, icon or game (got none)", "source: no key")
 raises(img({ image = "gear" }), IC .. "image must be { icon = <key> } or { game = <path> }, got 'gear'", "source: a string")
@@ -632,6 +632,12 @@ IM.set(d1, { dimmed = false, image = { icon = "lock" } })
 ok(T.calls() == n0, "set: unchanged values make no UObject call")
 IM.set(d1, { image = { icon = "restart" } })
 ok(dw.tex.__asset == "T_Restart", "set: a new source")
+-- Mod Manager story 12 (core 0.21.0): the five scope icons, each from its own texture in core's pak.
+for key, asset in pairs({ ["scope-host"] = "T_ScopeHost", ["scope-client"] = "T_ScopeClient", ["scope-host-plus"] = "T_ScopeHostPlus",
+        ["scope-both"] = "T_ScopeBoth", ["scope-unknown"] = "T_ScopeUnknown" }) do
+    IM.set(d1, { image = { icon = key } })
+    ok(dw.tex and dw.tex.__asset == asset, "scope icon: " .. key .. " is " .. asset)
+end
 IM.set(d1, { image = false })
 ok(dw.tex == nil and dw.clears == 1 and dw.tint[4] == 0, "set image = false: cleared, nothing drawn")
 local ST = "nucleus.ui.image.set: "

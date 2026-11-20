@@ -23,7 +23,7 @@
                -LayoutOnly on the copies, swapped in for the generated files and swapped back) and must equal the
                golden file too; uncooked packages aren't byte-identical across runs, so layout, not bytes.
                Icons (core story 24): CoreGen imports art/icons/*.png (-IconDir) as /Game/Mods/<name>/Icons/T_<Key>;
-               the pak must hold all six and WBP_<name>Image (and every other widget, WBP_<name>Choice and
+               the pak must hold every icon ($iconAssets) and WBP_<name>Image (and every other widget, WBP_<name>Choice and
                WBP_<name>Slider since Mod Manager story 4).
                Pack guard: the pak may hold only Content/Mods/<name>/ and must hold all 13; no staged file may name a
                /Game path outside /Game/Mods/<name>/, and no cooked marker may name BasicShapes, _Preview,
@@ -94,8 +94,10 @@ $mapAssets   = @($markerKinds | ForEach-Object { "BP_Marker_$_" }) + 'E_MarkerIt
 $golden      = Join-Path $here 'unreal\map-markers.layout'
 # Core story 24: core's icons (art/icons/<file>.png -> Icons/T_<Asset>) and the widgets the pak must hold.
 $iconDir     = Join-Path $here 'art\icons'
-$iconAssets  = 'T_Gear', 'T_CheckboxOn', 'T_CheckboxOff', 'T_Lock', 'T_Warning', 'T_Restart'
-$iconFiles   = 'gear', 'checkbox-on', 'checkbox-off', 'lock', 'warning', 'restart'
+$iconAssets  = 'T_Gear', 'T_CheckboxOn', 'T_CheckboxOff', 'T_Lock', 'T_Warning', 'T_Restart',
+               'T_ScopeHost', 'T_ScopeClient', 'T_ScopeHostPlus', 'T_ScopeBoth', 'T_ScopeUnknown'
+$iconFiles   = 'gear', 'checkbox-on', 'checkbox-off', 'lock', 'warning', 'restart',
+               'scope-host', 'scope-client', 'scope-host-plus', 'scope-both', 'scope-unknown'
 
 # The layout lines of a CoreGen -Layout= file, or of the golden file: every line but blanks and # comments.
 function Get-Layout([string] $file) { @(Get-Content $file | Where-Object { $_.Trim() -and -not $_.StartsWith('#') }) }
@@ -304,7 +306,7 @@ Step 'blueprint' {
     $foreign = @($list | Where-Object { $_ -notlike "NuclearNightmare/Content/Mods/$name/*" })
     if ($foreign) { Remove-Item $pak; throw "Refusing: $name.pak would hold files outside Content/Mods/$($name): $($foreign -join ', ')" }
     $missing = @($mapAssets | Where-Object { $list -notcontains "NuclearNightmare/Content/Mods/$name/Map/$_.uasset" })
-    # Core story 24: the six icons and every widget, the image's included. Mod Manager story 4: the choice and the slider.
+    # Core story 24: every icon ($iconAssets; the scope icons since Mod Manager story 12) and every widget, the image's included. Mod Manager story 4: the choice and the slider.
     # Core story 38: the lift (a dragged row's copy).
     $missing += @($iconAssets | Where-Object { $list -notcontains "NuclearNightmare/Content/Mods/$name/Icons/$_.uasset" } | ForEach-Object { "Icons/$_" })
     $missing += @('Text', 'Panel', 'Button', 'List', 'Row', 'Lift', 'Screen', 'Image', 'Choice', 'Slider' | ForEach-Object { "WBP_$name$_" } |
