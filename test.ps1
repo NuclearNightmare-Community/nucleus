@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
   Runs Nucleus's unit tests, no game needed: every test/unit/*_test.lua (core's pure modules and its UI, map, net,
-  settings and restart code against stubbed UE4SS and game objects) and every test/unit/*_test.ps1 (run.ps1's run
+  settings and restart code against stubbed UE4SS and game objects) and every test/unit/*_test.ps1 (build.ps1's package refusal, run.ps1's run
   guard). The C++ tests, the Blueprint cook and the in-game scenarios are not unit tests (README.md).
   Lua: the first of lua, lua5.4, lua54, lua5.3, texlua (MiKTeX's texlua.exe is Lua 5.3) found on PATH; -Lua picks one.
 .EXAMPLE
