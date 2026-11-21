@@ -1141,6 +1141,24 @@ do
     w.text = "\195\169\195\169\195\169\195\169\195\169\195\169\195\169\195\169\195\169"; T.fire(CHG, w) -- nine e-acute
     ok(TBm.get(tb) == string.rep("\195\169", 8) and T.ncalls("tb") == 4, "textbox: the cut counts characters (UTF-8), not bytes")
     ok(TBm._clean("x\127y", 5) == "xy" and select(2, TBm._clean("ok", 5)) == false and select(1, TBm._clean(nil, 5)) == "", "textbox: clean() pure cases")
+    -- review: invalid UTF-8 loses every byte from 0x80 up (the rest is ASCII); C1 controls go; the result is valid UTF-8
+    ok(TBm._clean("ab\255\195cd", 8) == "abcd", "textbox: clean() of invalid UTF-8 keeps the ASCII", TBm._clean("ab\255\195cd", 8))
+    ok(TBm._clean("a\194\133b\194\159c", 8) == "abc", "textbox: clean() removes C1 controls (U+0085, U+009F)")
+    ok(TBm._clean("\194\160x", 8) == "\194\160x", "textbox: clean() keeps U+00A0 (not a control)")
+    local logN = #T.log
+    w.text = "z\255\194\133y"; T.fire(CHG, w)
+    ok(TBm.get(tb) == "zy" and utf8.len(TBm.get(tb)) == 2 and w.text == "zy", "textbox: invalid UTF-8 and C1 typed: get() is valid text, written back")
+    ok(pcall(TBm.set, tb, TBm.get(tb)), "textbox: set() accepts what get() returned")
+    -- review: a failed read of the box is logged once, with context
+    do
+        local box = w.Box
+        w.Box = { GetText = function() error("no Box") end }
+        local n0 = countLogs("text box 'tb': reading its text failed")
+        T.fire(CHG, w); T.fire(CHG, w)
+        ok(countLogs("text box 'tb': reading its text failed") == n0 + 1 and countLogs("no Box") >= 1, "textbox: a failed GetText is logged once with context")
+        w.Box = box
+    end
+    for _ = #T.log, logN + 1, -1 do table.remove(T.log) end -- later counts as before
     -- commit: Enter, then its focus clear with the same text, is one commit
     w.text = "clock"; T.fire(CHG, w)
     T.fire(COM, w)
@@ -1227,6 +1245,9 @@ do
     T.bad(tbo({ maxChars = 2.5 }), KT .. "maxChars must be an integer from 1 to 256 or nil, got 2.5", "textbox maxChars 2.5")
     T.bad(tbo({ hint = string.rep("h", 65) }), KT .. "hint must be a string of at most 64 bytes or nil, got 65 bytes", "textbox hint 65 bytes")
     T.bad(tbo({ hint = 5 }), KT .. "hint must be a string of at most 64 bytes or nil, got 5", "textbox hint a number")
+    T.bad(tbo({ hint = "\255" }), KT .. "hint is not valid UTF-8", "textbox hint not UTF-8")
+    T.bad(tbo({ hint = "a\194\133" }), KT .. "hint must not contain control characters", "textbox hint with a C1 control")
+    T.bad(tbo({ text = "a\194\133" }), KT .. "text must not contain control characters", "textbox text with a C1 control")
     T.bad(tbo({ text = 5 }), KT .. "text must be a string or nil, got 5", "textbox text a number")
     T.bad(tbo({ text = string.rep("t", 65) }), KT .. "text is 65 characters, at most 64 (maxChars)", "textbox text over maxChars")
     T.bad(tbo({ text = "a\nb" }), KT .. "text must not contain control characters", "textbox text with a newline")

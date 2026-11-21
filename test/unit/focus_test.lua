@@ -2927,10 +2927,44 @@ do
     F.focus = w
     ok(T.key(wk, INV_DIR, A.back) == true and not SC.isOpen(W), "v2 story 4: Escape on the field (not typing) closes the window")
     -- after the window went, a scheduled hand-back does nothing
+    local hbClosed, focusClosed = FO.stats().handBacks, F.focus
     clock = clock + 300000
     fireHook(COM, w)
     runQueue()
-    ok(SC.isOpen(W) == false, "v2 story 4: a hand-back after the window closed does nothing")
+    ok(SC.isOpen(W) == false and FO.stats().handBacks == hbClosed and F.focus == focusClosed,
+        "v2 story 4: a hand-back after the window closed does nothing (no hand-back, keyboard focus unchanged)")
+    -- The focus chip on a text box in a row (keys mode): its Background is the chip, its text in the ink through the
+    -- Background's content tint; focus leaving it puts its own look back.
+    do
+        local savedNoChip = FO._noChip
+        FO._noChip = false
+        FO._input("keys")
+        local W2 = SC.open{ id = "TBC" }
+        local wk2 = T.screenOf("TBC")
+        local l2 = LS.create{ id = "tbcl", place = { screen = W2, corner = "top-left" }, size = { 600, 300 } }
+        local rr1 = RS.create{ id = "tbcr1", place = { list = l2 } }
+        TBm.create{ id = "ctb", place = { row = rr1, fill = 1 } }
+        local rr2 = RS.create{ id = "tbcr2", place = { list = l2 } }
+        B.create{ id = "cbt", label = "GO", place = { row = rr2 }, onClick = function() end }
+        tick()
+        local cw = T.tagged("ctb")
+        cw.Background = { SetContentColorAndOpacity = function(bg, col) bg.tint = col end }
+        local cf0 = FO.stats().chipFaults
+        ok(T.key(wk2, D.down, INV_ACT) and T.agree("cbt"), "v2 story 4 chip: Down to the button")
+        local own = cw.mat -- the box's own look (the chip it had on open is off)
+        ok(own ~= nil and C.els["ctb"].chipOn == nil, "v2 story 4 chip: unfocused, the box's own look")
+        ok(T.key(wk2, D.up, INV_ACT) and T.agree("ctb"), "v2 story 4 chip: Up back to the text box")
+        local el = C.els["ctb"]
+        ok(el.chipOn ~= nil and FO._lookOf(el, true) == "chip", "v2 story 4 chip: the text box in a row shows the chip", tostring(el.chipOn))
+        ok(cw.mat ~= own or cw.bg ~= nil, "v2 story 4 chip: its Background is the chip's", tostring(own) .. "|" .. tostring(cw.mat) .. "|" .. tostring(cw.bg) .. "|" .. tostring(el.chipOn))
+        ok(T.inkNumber("ctb"), "v2 story 4 chip: its text in the ink (the Background's content tint)")
+        ok(FO.stats().chipFaults == cf0, "v2 story 4 chip: no chip fault")
+        ok(T.key(wk2, D.down, INV_ACT) and T.agree("cbt"), "v2 story 4 chip: Down again")
+        ok(el.chipOn == nil and el.lookKey ~= "chip" and cw.mat == own, "v2 story 4 chip: focus gone, the box's own look is back", tostring(el.chipOn) .. "|" .. tostring(el.lookKey) .. "|" .. tostring(cw.mat))
+        ok(FO.stats().chipFaults == cf0, "v2 story 4 chip: still no chip fault")
+        SC.close(W2)
+        FO._noChip = savedNoChip
+    end
     ExecuteInGameThreadWithDelay = nil
     ok(FO.stats().faults == faults0 and C.inDispatch == 0, "v2 story 4: no fault")
 end
