@@ -2487,6 +2487,153 @@ namespace
 		return WBP;
 	}
 
+	/**
+	 * WBP_<Core>Textbox (Mod Manager v2 story 4, core.ui.textbox, core 0.25.0): SizeBox "Frame" (width override 320) ->
+	 * Border "Background" -> EditableText "Box" (single line, the slider's number box look: theme.game.text, size 18,
+	 * left-aligned). Box: RevertTextOnEscape false, ClearKeyboardFocusOnCommit true, SelectAllTextWhenFocused false.
+	 * Lua holds the text; the widget only shows it and reports. Functions:
+	 *   SetBoxText(NewText: String)          Box.SetText(NewText)
+	 *   SetHint(Hint: String)                Box.SetHintText(Hint)
+	 *   SetWidth(W: Float)                   Frame.SetWidthOverride(W)
+	 *   SetEnabledState(Enabled: Bool)       Box.SetIsEnabled(Enabled)
+	 *   SetBoxLook(Font: Object, Size: Float) Box.SetFont(FontInfo(Font, Size))
+	 *   SetBackground(R, G, B, A), SetBackgroundPadding(Padding)                as on the text widget
+	 *   SetBackgroundMaterial(Material, R, G, B, A, Padding), SetBackgroundSolid() as on the text widget (the worn strip)
+	 *   SetTag(NewTag: String)               CoreTag = NewTag
+	 *   <Core>_OnTextboxChanged(), <Core>_OnTextboxCommit()   ChangeCount / CommitCount += 1. Box.OnTextChanged and
+	 *                                        Box.OnTextCommitted call them and nothing else; each dependent's Lua
+	 *                                        post-hooks them by full path and reads Box itself
+	 *   SetFocusLook(Focused: Bool)          Background's content tint (theme text -> hover colour) on or off
+	 * The class default is focusable (the field takes keyboard focus; Accept on it gives Box the keyboard focus).
+	 */
+	UWidgetBlueprint* BuildTextbox(const FString& Dir, const FString& Core)
+	{
+		UWidgetBlueprint* WBP = CastChecked<UWidgetBlueprint>(NewBlueprint(Dir / FString::Printf(TEXT("WBP_%sTextbox"), *Core),
+			UUserWidget::StaticClass(), UWidgetBlueprint::StaticClass(), UWidgetBlueprintGeneratedClass::StaticClass()));
+		const FString ChangedFn = Core + TEXT("_OnTextboxChanged"), CommitFn = Core + TEXT("_OnTextboxCommit");
+		CheckNames({TEXT("SetBoxText"), TEXT("SetHint"), TEXT("SetWidth"), TEXT("SetEnabledState"), TEXT("SetBoxLook"),
+			TEXT("SetBackground"), TEXT("SetBackgroundPadding"), TEXT("SetBackgroundMaterial"), TEXT("SetBackgroundSolid"),
+			TEXT("SetTag"), *ChangedFn, *CommitFn, TEXT("SetFocusLook")});
+
+		UWidgetTree* T = WBP->WidgetTree;
+		USizeBox* Frame = T->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Frame"));
+		Frame->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		Frame->SetWidthOverride(320.f);
+		Frame->bIsVariable = true;
+		T->RootWidget = Frame;
+		UBorder* Background = RootBackground(T);
+		USizeBoxSlot* BgSlot = CastChecked<USizeBoxSlot>(Frame->AddChild(Background));
+		BgSlot->SetHorizontalAlignment(HAlign_Fill);
+		BgSlot->SetVerticalAlignment(VAlign_Center);
+		UEditableText* Box = T->ConstructWidget<UEditableText>(UEditableText::StaticClass(), TEXT("Box"));
+		{
+			FEditableTextStyle St = Box->WidgetStyle;
+			St.SetColorAndOpacity(FSlateColor(FLinearColor(0.82f, 0.85f, 0.84f, 1.f))); // theme.game.text
+			FSlateFontInfo Font = St.Font;
+			Font.Size = 18;
+			St.SetFont(Font);
+			Box->SetWidgetStyle(St);
+		}
+		Box->SetJustification(ETextJustify::Left);
+		Box->SetSelectAllTextWhenFocused(false);
+		Box->SetRevertTextOnEscape(false);
+		Box->SetClearKeyboardFocusOnCommit(true);
+		Box->SetVisibility(ESlateVisibility::Visible);
+		Box->bIsVariable = true;
+		UBorderSlot* TextSlot = CastChecked<UBorderSlot>(Background->AddChild(Box));
+		TextSlot->SetPadding(FMargin(8.f, 4.f));
+		TextSlot->SetHorizontalAlignment(HAlign_Fill);
+		TextSlot->SetVerticalAlignment(VAlign_Center);
+		for (const TCHAR* W : {TEXT("Frame"), TEXT("Background"), TEXT("Box")}) WBP->OnVariableAdded(W);
+		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("ChangeCount"), IntT(), TEXT("0"));
+		FBlueprintEditorUtils::AddMemberVariable(WBP, TEXT("CommitCount"), IntT(), TEXT("0"));
+
+		FFunc SetText = AddFunction(WBP, TEXT("SetBoxText"), {{TEXT("NewText"), StrT()}}, {});
+		FFunc SetHint = AddFunction(WBP, TEXT("SetHint"), {{TEXT("Hint"), StrT()}}, {});
+		FFunc SetWidth = AddFunction(WBP, TEXT("SetWidth"), {{TEXT("W"), RealT()}}, {});
+		FFunc SetEnabled = AddFunction(WBP, TEXT("SetEnabledState"), {{TEXT("Enabled"), BoolT()}}, {});
+		FFunc SetLook = AddFunction(WBP, TEXT("SetBoxLook"), {{TEXT("Font"), ObjT(UObject::StaticClass())}, {TEXT("Size"), RealT()}}, {});
+		FFunc SetBg = AddSetBackground(WBP);
+		FFunc SetPad = AddFunction(WBP, TEXT("SetBackgroundPadding"), {{TEXT("Padding"), RealT()}}, {});
+		FMaterialFns Mat = AddBackgroundMaterial(WBP);
+		FFunc SetTag = AddTag(WBP);
+		FFunc OnChanged = AddFunction(WBP, FName(ChangedFn), {}, {});
+		FFunc OnCommit = AddFunction(WBP, FName(CommitFn), {}, {});
+		FFunc Focus = AddTintFocusLook(WBP);
+		if (!Compile(WBP)) return nullptr;
+		FillTintFocusLook(WBP, Focus);
+		FillBackground(WBP, SetBg, SetPad);
+		FillBackgroundMaterial(WBP, Mat);
+		FillTag(WBP, SetTag);
+		FillCounter(WBP, OnChanged, TEXT("ChangeCount"));
+		FillCounter(WBP, OnCommit, TEXT("CommitCount"));
+		{
+			// SetBoxText(NewText): Box.SetText(Conv_StringToText(NewText)).
+			FGraph G(WBP, SetText.G);
+			UK2Node_VariableGet* GetBox = G.Get(TEXT("Box"));
+			UK2Node_CallFunction* ToText = G.Call(UKismetTextLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetTextLibrary, Conv_StringToText));
+			G.Link(SetText.Entry, TEXT("NewText"), ToText, TEXT("InString"));
+			UK2Node_CallFunction* Set = G.Call(UEditableText::StaticClass(), GET_FUNCTION_NAME_CHECKED(UEditableText, SetText));
+			G.Link(GetBox, TEXT("Box"), Set, PN_Self);
+			G.Link(ToText, PN_Ret, Set, TEXT("InText"));
+			G.Chain({SetText.Entry, Set});
+		}
+		{
+			// SetHint(Hint): Box.SetHintText(Conv_StringToText(Hint)).
+			FGraph G(WBP, SetHint.G);
+			UK2Node_VariableGet* GetBox = G.Get(TEXT("Box"));
+			UK2Node_CallFunction* ToText = G.Call(UKismetTextLibrary::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKismetTextLibrary, Conv_StringToText));
+			G.Link(SetHint.Entry, TEXT("Hint"), ToText, TEXT("InString"));
+			UK2Node_CallFunction* Set = G.Call(UEditableText::StaticClass(), GET_FUNCTION_NAME_CHECKED(UEditableText, SetHintText));
+			G.Link(GetBox, TEXT("Box"), Set, PN_Self);
+			G.Link(ToText, PN_Ret, Set, TEXT("InHintText"));
+			G.Chain({SetHint.Entry, Set});
+		}
+		{
+			FGraph G(WBP, SetWidth.G);
+			UK2Node_VariableGet* GetFrame = G.Get(TEXT("Frame"));
+			UK2Node_CallFunction* SetW = G.Call(USizeBox::StaticClass(), GET_FUNCTION_NAME_CHECKED(USizeBox, SetWidthOverride));
+			G.Link(GetFrame, TEXT("Frame"), SetW, PN_Self);
+			G.Link(SetWidth.Entry, TEXT("W"), SetW, TEXT("InWidthOverride"));
+			G.Chain({SetWidth.Entry, SetW});
+		}
+		{
+			FGraph G(WBP, SetEnabled.G);
+			UK2Node_VariableGet* GetBox = G.Get(TEXT("Box"));
+			UK2Node_CallFunction* Set = G.Call(UWidget::StaticClass(), GET_FUNCTION_NAME_CHECKED(UWidget, SetIsEnabled));
+			G.Link(GetBox, TEXT("Box"), Set, PN_Self);
+			G.Link(SetEnabled.Entry, TEXT("Enabled"), Set, TEXT("bInIsEnabled"));
+			G.Chain({SetEnabled.Entry, Set});
+		}
+		{
+			FGraph G(WBP, SetLook.G);
+			UK2Node_VariableGet* GetBox = G.Get(TEXT("Box"));
+			UEdGraphPin* Info = FontInfoOf(G, G.Pin(SetLook.Entry, TEXT("Font")), G.Pin(SetLook.Entry, TEXT("Size")));
+			UK2Node_CallFunction* SetF = G.Call(UEditableText::StaticClass(), GET_FUNCTION_NAME_CHECKED(UEditableText, SetFont));
+			G.Link(GetBox, TEXT("Box"), SetF, PN_Self);
+			G.Link(Info, G.Pin(SetF, TEXT("InFontInfo")));
+			G.Chain({SetLook.Entry, SetF});
+		}
+		{
+			// Event graph: the box's change and commit call the hookable counters (Lua reads Box itself).
+			UEdGraph* EG = FBlueprintEditorUtils::FindEventGraph(WBP);
+			ClearGraph(WBP, EG);
+			FGraph G(WBP, EG);
+			UK2Node_ComponentBoundEvent* Changed = BindEvent(WBP, EG, G, TEXT("Box"), UEditableText::StaticClass(), TEXT("OnTextChanged"));
+			G.Chain({Changed, G.CallSelf(FName(ChangedFn))});
+			UK2Node_ComponentBoundEvent* Commit = BindEvent(WBP, EG, G, TEXT("Box"), UEditableText::StaticClass(), TEXT("OnTextCommitted"));
+			G.Chain({Commit, G.CallSelf(FName(CommitFn))});
+		}
+		if (!Compile(WBP)) return nullptr;
+		// The widget itself takes keyboard focus (the window's Lua focus model moves it here; Accept hands it to Box).
+		UUserWidget* CDO = CastChecked<UUserWidget>(WBP->GeneratedClass->GetDefaultObject());
+		CDO->SetIsFocusable(true);
+		CDO->MarkPackageDirty();
+		UE_LOG(LogCoreGen, Display, TEXT("TEXTBOX %s class default focusable=%s"), *WBP->GetPathName(), CDO->IsFocusable() ? TEXT("true") : TEXT("false"));
+		if (!Save(WBP)) return nullptr;
+		return WBP;
+	}
+
 	/** <Core>_Call(Request) -> ReturnValue: "bp-default:" + Request. Core's Lua RegisterHooks it and replaces the result. */
 	void AddChannel(UBlueprint* BP, const FString& Core)
 	{
@@ -3143,6 +3290,8 @@ int32 UCoreGenCommandlet::Main(const FString& Params)
 	// Mod Manager story 4 (core 0.10.0): the choice and the slider (the checkbox is an icon-only button).
 	if (!BuildChoice(Dir, Core)) return 1;
 	if (!BuildSlider(Dir, Core)) return 1;
+	// Mod Manager v2 story 4 (core 0.25.0): the single-line text box.
+	if (!BuildTextbox(Dir, Core)) return 1;
 	if (!BuildActor(Dir, Core)) return 1;
 	// Core story 22 (core 0.11.0): the replicated host state, a class of its own (ModActor stays non-replicated).
 	if (!BuildNet(Dir, Core)) return 1;

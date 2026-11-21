@@ -68,7 +68,7 @@ return function(X, GS)
                 { "host-menu", "like on host menu", { like = "Overlay_28", place = { host = "menu", corner = "top-left" } }, "like needs a game screen host (createServer), got 'menu'" },
                 { "host-journal", "like on host journal", { like = "Overlay_28", place = { host = "journal", corner = "top-left" } }, "like needs a game screen host (createServer), got 'journal'" },
                 { "host-hud", "like with no place (hud)", { like = "Overlay_28", place = false }, "like needs a game screen host (createServer), got 'hud'" },
-                { "ctl-num", "control = 5", { like = "Overlay_28", control = 5 }, "control must be a checkbox, choice, slider or button handle, got 5" },
+                { "ctl-num", "control = 5", { like = "Overlay_28", control = 5 }, "control must be a checkbox, choice, slider, text box or button handle, got 5" },
                 { "ctl-forged", "control = {}", { like = "Overlay_28", control = {} }, "control is not an element handle of this mod" },
             }
             for _, r in ipairs(rows) do case(P .. r[1], "ui.row.create{ " .. r[2] .. " }", mk(r[3]), E.err(RC .. r[4])) end
@@ -81,8 +81,8 @@ return function(X, GS)
                 pcall(U.checkbox.remove, gone)
                 case(P .. "in-list", "ui.row.create{ like, place = { list = <list> } }", mk({ like = "Overlay_28", place = { list = lst } }), E.err(RC .. "a row with like can't go inside a panel, list or row"))
                 case(P .. "in-panel", "ui.row.create{ like, place = { panel = <panel> } }", mk({ like = "Overlay_28", place = { panel = pnl } }), E.err(RC .. "a row with like can't go inside a panel, list or row"))
-                case(P .. "ctl-text", "ui.row.create{ like, control = <text> }", mk({ like = "Overlay_28", control = tx }), E.err(RC .. "control 'gnr-text' is a text element, not a checkbox, choice, slider or button"))
-                case(P .. "ctl-list", "ui.row.create{ like, control = <list> }", mk({ like = "Overlay_28", control = lst }), E.err(RC .. "control 'gnr-list' is a list, not a checkbox, choice, slider or button"))
+                case(P .. "ctl-text", "ui.row.create{ like, control = <text> }", mk({ like = "Overlay_28", control = tx }), E.err(RC .. "control 'gnr-text' is a text element, not a checkbox, choice, slider, text box or button"))
+                case(P .. "ctl-list", "ui.row.create{ like, control = <list> }", mk({ like = "Overlay_28", control = lst }), E.err(RC .. "control 'gnr-list' is a list, not a checkbox, choice, slider, text box or button"))
                 case(P .. "ctl-removed", "ui.row.create{ like, control = <removed checkbox> }", mk({ like = "Overlay_28", control = gone }), E.err(RC .. "control handle 'gnr-cb' was removed"))
                 case(P .. "ctl-nolike", "ui.row.create{ control = <text> } [no like]", mk({ control = tx }), E.err(RC .. "control needs like = <game row name>"))
                 -- setLabel / setHelp

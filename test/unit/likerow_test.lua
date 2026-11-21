@@ -896,10 +896,10 @@ do
     bad({ id = "bx", like = "Overlay_28", place = { panel = pnl } }, "a row with like can't go inside a panel, list or row", "like inside a core panel")
     -- control
     local tx = X.create{ id = "bl.text", text = "x", place = { host = CSH, corner = "top-left" } }
-    bad({ id = "bx", like = "Overlay_28", control = 5, place = IN }, "control must be a checkbox, choice, slider or button handle, got 5", "control a number")
+    bad({ id = "bx", like = "Overlay_28", control = 5, place = IN }, "control must be a checkbox, choice, slider, text box or button handle, got 5", "control a number")
     bad({ id = "bx", like = "Overlay_28", control = {}, place = IN }, "control is not an element handle of this mod", "control a forged table")
-    bad({ id = "bx", like = "Overlay_28", control = tx, place = IN }, "control 'bl.text' is a text element, not a checkbox, choice, slider or button", "control a text")
-    bad({ id = "bx", like = "Overlay_28", control = lst, place = IN }, "control 'bl.list' is a list, not a checkbox, choice, slider or button", "control a list")
+    bad({ id = "bx", like = "Overlay_28", control = tx, place = IN }, "control 'bl.text' is a text element, not a checkbox, choice, slider, text box or button", "control a text")
+    bad({ id = "bx", like = "Overlay_28", control = lst, place = IN }, "control 'bl.list' is a list, not a checkbox, choice, slider, text box or button", "control a list")
     local gone = CK.create{ id = "bl.cb", place = { host = CSH, corner = "top-left" }, onChange = function() end }
     CK.remove(gone)
     bad({ id = "bx", like = "Overlay_28", control = gone, place = IN }, "control handle 'bl.cb' was removed", "control removed")

@@ -76,6 +76,13 @@ C.SLIDER_SHORT = "WBP_" .. C.NAME .. "Slider_C"
 C.SLIDER_CLASS = C.SLIDER_PKG .. "." .. C.SLIDER_SHORT
 C.SLIDER_END_FN = C.SLIDER_CLASS .. ":" .. C.NAME .. "_OnSliderEnd"
 C.SLIDER_COMMIT_FN = C.SLIDER_CLASS .. ":" .. C.NAME .. "_OnSliderCommit"
+-- Mod Manager v2 story 4 (core 0.25.0): WBP_<Core>Textbox (SizeBox "Frame" -> Border "Background" -> EditableText
+-- "Box"); <Core>_OnTextboxChanged on every change of the box's text, <Core>_OnTextboxCommit on Enter or focus lost.
+C.TEXTBOX_PKG = "/Game/Mods/" .. C.NAME .. "/WBP_" .. C.NAME .. "Textbox"
+C.TEXTBOX_SHORT = "WBP_" .. C.NAME .. "Textbox_C"
+C.TEXTBOX_CLASS = C.TEXTBOX_PKG .. "." .. C.TEXTBOX_SHORT
+C.TEXTBOX_CHANGED_FN = C.TEXTBOX_CLASS .. ":" .. C.NAME .. "_OnTextboxChanged"
+C.TEXTBOX_COMMIT_FN = C.TEXTBOX_CLASS .. ":" .. C.NAME .. "_OnTextboxCommit"
 -- Core story 31 (UI-13, core 0.13.0): the game's own menu screens as hosts (game.lua), keyed by host name. The first
 -- and only one is the create-server screen, built new on every open from the menu's START GAME; its elements go in its
 -- root CanvasPanel (CanvasPanel_21). A later screen is one entry here plus its checks.
@@ -300,6 +307,7 @@ function C.isContainer(el) return el.children ~= nil end
 
 local ARTICLE = { text = "a text element", panel = "a panel", button = "a button", list = "a list", row = "a row", image = "an image",
     checkbox = "a checkbox", choice = "a choice", slider = "a slider", -- Mod Manager story 4: the controls
+    textbox = "a text box", -- Mod Manager v2 story 4
     gchoice = "a choice" } -- core story 33: a choice with widget = "game" (an internal kind; public functions call it a choice)
 C.ARTICLE = ARTICLE
 -- Core story 33 (0.15.0): the kind a public function and an error name for an element's kind (internal kinds by the

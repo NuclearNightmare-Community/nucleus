@@ -55,6 +55,10 @@ M.HAND = {
     -- core story 44 (0.22.0, CAP-14): mod controls in the game's Controls menu (core.input is a module, so its entry
     -- point by hand)
     "input.control",
+    -- Mod Manager v2 story 4 (0.25.0): the single-line text box (core.ui.textbox is a module, so every function's path
+    -- by hand; the rule lists "ui.textbox" itself)
+    "ui.textbox.create", "ui.textbox.set", "ui.textbox.get", "ui.textbox.setEnabled", "ui.textbox.setVisible",
+    "ui.textbox.remove", "ui.textbox.isShown", "ui.textbox.setTooltip",
 }
 
 -- The UI part of the api table: path -> { module, function } (client.lua builds api.ui from this).
@@ -101,6 +105,10 @@ M.UI = {
     { "slider.create", "slider", "create" }, { "slider.get", "slider", "get" }, { "slider.set", "slider", "set" },
     { "slider.setDefault", "slider", "setDefault" }, { "slider.setEnabled", "slider", "setEnabled" }, { "slider.setVisible", "slider", "setVisible" },
     { "slider.remove", "slider", "remove" }, { "slider.isShown", "slider", "isShown" }, { "slider.setTooltip", "slider", "setTooltip" },
+    -- Mod Manager v2 story 4 (core 0.25.0): the single-line text box
+    { "textbox.create", "textbox", "create" }, { "textbox.set", "textbox", "set" }, { "textbox.get", "textbox", "get" },
+    { "textbox.setEnabled", "textbox", "setEnabled" }, { "textbox.setVisible", "textbox", "setVisible" },
+    { "textbox.remove", "textbox", "remove" }, { "textbox.isShown", "textbox", "isShown" }, { "textbox.setTooltip", "textbox", "setTooltip" },
     -- core story 31 (core 0.13.0, UI-13): the game screens as hosts (createServer)
     { "game.watch", "game", "watch" }, { "game.unwatch", "game", "unwatch" }, { "game.isOpen", "game", "isOpen" },
     { "place", "place", "place" },

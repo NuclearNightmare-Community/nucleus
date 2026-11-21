@@ -2833,5 +2833,107 @@ do
     ok(FO.stats().faults == faults0 and RO.stats().faults == roFaults0 and C.inDispatch == 0, "story 38: no fault", RO.stats().faults - roFaults0)
 end
 
+-- ---------------------------------------------------------------- Mod Manager v2 story 4: the text box and the focus model
+do
+    local TBm = require("nucleus.ui.textbox")
+    local TBCLASS = cls("/Game/Mods/Nucleus/WBP_NucleusTextbox.WBP_NucleusTextbox_C")
+    local function newTextboxW()
+        local w = widget("WBP_NucleusTextbox_C", "/Engine/Transient.WBP_NucleusTextbox_C_" .. (F.addr + 0x100), 40)
+        tagged(w)
+        w.Frame = T.inner(4)
+        w.text, w.hint = "", ""
+        local box = focusable({ __alive = true })
+        box.parent = w
+        function box:GetText() return { ToString = function() return w.text end } end
+        w.Box = box
+        function w:SetBoxText(t) self.text = t end
+        function w:SetHint(h) self.hint = h end
+        function w:SetWidth(v) self.width = v end
+        function w:SetEnabledState(e) self.enabled = e end
+        function w:SetBoxLook(f, size) self.look = { f, size } end
+        function w:SetRenderOpacity(o) self.opacity = o end
+        focusable(w)
+        function w:SetFocusLook(on) self.focusLook = on; self.looks = (self.looks or 0) + 1 end
+        return w
+    end
+    local WBL = F.objects["/Script/UMG.Default__WidgetBlueprintLibrary"]
+    local base = WBL.Create
+    WBL.Create = function(self, world, c, owner)
+        if c == TBCLASS then return newTextboxW() end
+        return base(self, world, c, owner)
+    end
+    local CHG, COM = "WBP_NucleusTextbox_C:Nucleus_OnTextboxChanged", "WBP_NucleusTextbox_C:Nucleus_OnTextboxCommit"
+    local faults0 = FO.stats().faults
+    local queue = {}
+    ExecuteInGameThreadWithDelay = function(_, fn) queue[#queue + 1] = fn end
+    local function runQueue() local q = queue; queue = {}; for _, f in ipairs(q) do f() end end
+    local commits = {}
+    local W = SC.open{ id = "TBW" }
+    local wk = T.screenOf("TBW")
+    local lst = LS.create{ id = "tbl", place = { screen = W, corner = "top-left" }, size = { 600, 300 } }
+    local r1 = RS.create{ id = "tbr1", place = { list = lst } }
+    local tb = TBm.create{ id = "ftb", place = { row = r1, fill = 1 }, hint = "SEARCH", onChange = T.rec("ftb"),
+        onCommit = function(_, t) commits[#commits + 1] = t end }
+    local r2 = RS.create{ id = "tbr2", place = { list = lst } }
+    local bt = B.create{ id = "fbt", label = "DETAILS", place = { row = r2 }, onClick = function() end }
+    tick()
+    local w = T.tagged("ftb")
+    ok(w ~= nil and C.els["ftb"] and FO.focusable(C.els["ftb"]), "v2 story 4: a text box is focusable")
+    ok(T.agree("ftb"), "v2 story 4: the text box (the first line) holds focus on open", SC.stats().focus)
+    -- Accept: the EditableText takes keyboard focus (typing)
+    local types0 = FO.stats().types
+    ok(T.key(wk, INV_DIR, A.accept) == true and F.focus == w.Box and FO.stats().types == types0 + 1, "v2 story 4: Accept on the field gives the box keyboard focus")
+    ok(FO._typingIn(FO.lines(C.windowHost("TBW"), "#close:TBW")) == C.els["ftb"], "v2 story 4: the model sees the box being typed in")
+    -- while typing every key but Escape is the box's
+    ok(T.key(wk, D.down, INV_ACT) == false and F.focus == w.Box, "v2 story 4 typing: Down is left to the box")
+    ok(T.key(wk, INV_DIR, A.accept) == false and F.focus == w.Box, "v2 story 4 typing: Accept (Enter, Space) is left to the box")
+    ok(T.key(wk, D.left, INV_ACT) == false and F.focus == w.Box, "v2 story 4 typing: Left is left to the box (the caret)")
+    -- typing reports through the change hook: onChange, focus stays in the box
+    w.text = "clo"; fireHook(CHG, w)
+    ok(TBm.get(tb) == "clo" and T.ncalls("ftb") == 1 and F.focus == w.Box, "v2 story 4 typing: onChange('clo'), keyboard focus stays in the box")
+    -- Escape while typing: back to the field, the text kept, the window open
+    local leaves0 = FO.stats().leaves
+    ok(T.key(wk, INV_DIR, A.back) == true and F.focus == w and SC.isOpen(W) and FO.stats().leaves == leaves0 + 1 and TBm.get(tb) == "clo",
+        "v2 story 4: Escape while typing leaves the box for the field, keeps the text, the window stays open")
+    ok(T.agree("ftb"), "v2 story 4: the model is on the field after Escape")
+    -- Down from the field: the next line (the button)
+    ok(T.key(wk, D.down, INV_ACT) and T.agree("fbt"), "v2 story 4: Down from the field reaches the next row's button")
+    -- A mouse click into the box while the model is elsewhere: typing moves the model there without stealing keyboard focus
+    F.focus = w.Box
+    w.text = "clock"; fireHook(CHG, w)
+    ok(SC.stats().focus == "ftb" and F.focus == w.Box and T.ncalls("ftb") == 2, "v2 story 4: typing after a click moves the model to the field, the box keeps focus")
+    ok(w.focusLook == true and T.tagged("fbt").focusLook == false, "v2 story 4: the field shows the focus look, the button lost it")
+    -- Enter commits; the box's focus is cleared; focus goes back to the field
+    clock = clock + 300000
+    fireHook(COM, w)
+    F.focus = nil -- ClearKeyboardFocusOnCommit
+    local hb0 = FO.stats().handBacks
+    ok(#commits == 1 and commits[1] == "clock" and #queue >= 1, "v2 story 4: Enter commits 'clock' and schedules the hand-back", #commits .. "/" .. tostring(commits[1]) .. "/" .. #queue)
+    runQueue()
+    ok(F.focus == w and T.agree("ftb") and FO.stats().handBacks == hb0 + 1, "v2 story 4: after the commit keyboard focus is back on the field")
+    -- The focus clear's own commit (same text, at once) is the same commit
+    fireHook(COM, w)
+    ok(#commits == 1, "v2 story 4: the focus clear's second commit of the same text is not another onCommit")
+    runQueue()
+    -- A commit because a click moved focus to a button: focus stays on the button
+    F.focus = w.Box
+    w.text = "hud"; fireHook(CHG, w)
+    F.focus = T.btn("fbt")
+    clock = clock + 300000
+    fireHook(COM, w)
+    runQueue()
+    ok(F.focus == T.btn("fbt") and commits[#commits] == "hud", "v2 story 4: a commit by a click elsewhere leaves keyboard focus where the click put it")
+    -- Back on the field, Escape (not typing) closes the window
+    F.focus = w
+    ok(T.key(wk, INV_DIR, A.back) == true and not SC.isOpen(W), "v2 story 4: Escape on the field (not typing) closes the window")
+    -- after the window went, a scheduled hand-back does nothing
+    clock = clock + 300000
+    fireHook(COM, w)
+    runQueue()
+    ok(SC.isOpen(W) == false, "v2 story 4: a hand-back after the window closed does nothing")
+    ExecuteInGameThreadWithDelay = nil
+    ok(FO.stats().faults == faults0 and C.inDispatch == 0, "v2 story 4: no fault")
+end
+
 print(string.format("focus_test: %d passed, %d failed", pass, failN))
 if failN > 0 then os.exit(1) end
