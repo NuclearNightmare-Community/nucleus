@@ -40,6 +40,12 @@
     - review cases: the installed version's own release listed but answering 404 refuses both the removal and the
       update (unreachable; plan.txt, staged\ and downloads\ unchanged); installed.txt naming a settings.json never
       gets it deleted (player data), and it stays on disk after the apply
+    - core self-update: the core package's own id (dlls\main.dll, bin\<Core>Restart.exe) over an older core, applied
+      with --root (a plain put: the helper's own image is outside the layout); update, dep too old: a mod update and
+      the core update it needs in one stage (owners=2, the core first), applied; revoked, newer fix: revoked 0.4.0 ->
+      0.6.0 with the delete from 0.4.0's verified release, applied
+    - unstage refusals with a plan staged: interrupted before the job; -NoPrecheck under apply.lock held and with a
+      journal without done (the job's own refusal at write time); plan.txt and staged\ byte-identical, no download left
   Prints ok:/FAIL: lines and exits 1 on any failure. Needs minisign on PATH and this workspace; under NN_CI=1 it skips.
 .EXAMPLE
   pwsh -NoProfile -File native/test/stage.tests.ps1
@@ -49,6 +55,8 @@ $ErrorActionPreference = 'Stop'
 if ($env:NN_CI -eq '1') { Write-Host 'SKIP: stage.tests.ps1 needs the native build and the workspace (NN_CI=1)'; exit 0 }
 $repo = Split-Path (Split-Path $PSScriptRoot)
 $name = (Get-Content (Join-Path $repo 'mod.json') -Raw | ConvertFrom-Json).name
+$coreSlug = $name.ToLowerInvariant()
+$CORE = "nuclearnightmare-community.$coreSlug"   # the catalog's id of the core package
 if (-not $TestExe) { $TestExe = Join-Path $repo "build\native-out\test\$($name)CatalogTest.exe" }
 if (-not $HelperExe) { $HelperExe = Join-Path $repo "build\native-out\test\$($name)RestartTest.exe" }
 foreach ($f in $TestExe, $HelperExe) { if (-not (Test-Path -LiteralPath $f)) { Write-Host "FAIL: $f not found; run build.ps1 -Steps native first"; exit 1 } }
@@ -134,10 +142,10 @@ try {
     Add-Zip 'hud-clock-0.4.0.zip' (New-ZipBytes @(
             @{ Name = "$M/HudClock/mod.json"; Text = (ModJson $HC 'HudClock' '0.4.0') },
             @{ Name = "$M/HudClock/Scripts/main.lua"; Text = 'print("clock 0.4.0")' }))
-    Add-Zip 'nucleus-0.30.0.zip' (New-ZipBytes @(
-            @{ Name = "$M/Nucleus/mod.json"; Text = (ModJson 'nuclearnightmare-community.nucleus' 'Nucleus' '0.30.0') },
-            @{ Name = "$M/Nucleus/Scripts/core.lua"; Text = 'return {}' },
-            @{ Name = "$P/LogicMods/Nucleus.pak"; Text = 'new core pak' }))
+    Add-Zip 'core-0.30.0.zip' (New-ZipBytes @(
+            @{ Name = "$M/$name/mod.json"; Text = (ModJson $CORE $name '0.30.0') },
+            @{ Name = "$M/$name/Scripts/core.lua"; Text = 'return {}' },
+            @{ Name = "$P/LogicMods/$name.pak"; Text = 'new core pak' }))
     Add-Zip 'alpha-1.0.0.zip' (New-ZipBytes @(
             @{ Name = "$M/Alpha/mod.json"; Text = (ModJson 'nuclearnightmare-community.alpha' 'Alpha' '1.0.0') },
             @{ Name = "$M/Alpha/Scripts/main.lua"; Text = ('-- alpha' * 400); Store = $true },
@@ -197,6 +205,15 @@ try {
     Add-Zip 'gone-1.0.0.zip' (New-ZipBytes @(@{ Name = "$M/Gone/mod.json"; Text = (ModJson $GONE 'Gone' '1.0.0') }, @{ Name = "$M/Gone/a.lua"; Text = 'gone 1.0.0' }))
     Add-Zip 'gone-1.1.0.zip' (New-ZipBytes @(@{ Name = "$M/Gone/mod.json"; Text = (ModJson $GONE 'Gone' '1.1.0') }, @{ Name = "$M/Gone/a.lua"; Text = 'gone 1.1.0' }))
     Add-Zip 'pd-1.0.0.zip' (New-ZipBytes @(@{ Name = "$M/Pd/mod.json"; Text = (ModJson $PD 'Pd' '1.0.0') }, @{ Name = "$M/Pd/Scripts/main.lua"; Text = 'print("pd")' }))
+    # Story 6 review: the core's own update (its DLL and relaunch helper), an update that needs it, a revoked version's
+    # newer fix (Rev 0.4.0 -> 0.6.0, above).
+    $CM = "$M/$name"
+    Add-Zip 'core-0.31.0.zip' (New-ZipBytes @(
+            @{ Name = "$CM/mod.json"; Text = (ModJson $CORE $name '0.31.0') },
+            @{ Name = "$CM/dlls/main.dll"; Bytes = [byte[]](1..300 | ForEach-Object { ($_ * 7) % 256 }) },
+            @{ Name = "$CM/bin/$($name)Restart.exe"; Bytes = [byte[]](1..200 | ForEach-Object { ($_ * 13) % 256 }) },
+            @{ Name = "$P/LogicMods/$name.pak"; Text = 'core pak 0.31.0' }))
+    Add-Zip 'upd-1.2.0.zip' (New-ZipBytes @(@{ Name = "$M/Upd/mod.json"; Text = (ModJson $UPD 'Upd' '1.2.0') }, @{ Name = "$M/Upd/a.lua"; Text = 'a 1.2.0' }))
 
     # ---------------------------------------------------------------- the signed index, the fixture server
     $keys = @{}
@@ -226,14 +243,14 @@ try {
     }
     $packages = @(
         (Pkg 'hud-clock' 'HudClock' @((Ver 'hud-clock' '0.4.0' 'hud-clock-0.4.0.zip'), (Ver 'hud-clock' '0.3.0' 'hud-clock-0.3.0.zip'), (Ver 'hud-clock' '0.1.0' 'hud-clock-0.3.0.zip'))),
-        (Pkg 'nucleus' 'Nucleus' @((Ver 'nucleus' '0.30.0' 'nucleus-0.30.0.zip'))),
+        (Pkg $coreSlug $name @((Ver $coreSlug '0.31.0' 'core-0.31.0.zip'), (Ver $coreSlug '0.30.0' 'core-0.30.0.zip'))),
         (Pkg 'alpha' 'Alpha' @((Ver 'alpha' '1.0.0' 'alpha-1.0.0.zip'))),
         (Pkg 'bad' 'Bad' @(foreach ($v in $bad.Keys) { Ver 'bad' $v "bad-$v.zip" })),
         (Pkg 'taken' 'Taken' @((Ver 'taken' '1.0.0' 'taken-1.0.0.zip'))),
         (Pkg 'downy' 'Downy' @((Ver 'downy' '1.0.0' 'downy-1.0.0.zip'))),
         (Pkg 'tamper' 'Tamper' @((Ver 'tamper' '1.0.0' 'tamper-short.zip' $tamperOk), (Ver 'tamper' '1.0.1' 'tamper-flip.zip' $tamperOk))),
         (Pkg 'rev' 'Rev' @((Ver 'rev' '0.6.0' 'rev-0.6.0.zip'), (Ver 'rev' '0.4.0' 'rev-0.4.0.zip'), (Ver 'rev' '0.3.1' 'rev-0.3.1.zip'))),
-        (Pkg 'upd' 'Upd' @((Ver 'upd' '1.1.0' 'upd-1.1.0.zip'), (Ver 'upd' '1.0.0' 'upd-1.0.0.zip'))),
+        (Pkg 'upd' 'Upd' @((Ver 'upd' '1.2.0' 'upd-1.2.0.zip'), (Ver 'upd' '1.1.0' 'upd-1.1.0.zip'), (Ver 'upd' '1.0.0' 'upd-1.0.0.zip'))),
         (Pkg 'whistle-mute' 'WhistleMute' @((Ver 'whistle-mute' '0.2.1' 'wm-0.2.1.zip'))),
         (Pkg 'gone' 'Gone' @((Ver 'gone' '1.1.0' 'gone-1.1.0.zip'), (Ver 'gone' '1.0.0' 'gone-1.0.0.zip'))),
         (Pkg 'pd' 'Pd' @((Ver 'pd' '1.0.0' 'pd-1.0.0.zip'))))
@@ -288,7 +305,7 @@ try {
         foreach ($d in $mods, $data, (Join-Path $paks 'LogicMods'), (Join-Path $mods "$name\bin"), (Join-Path $mods 'BPModLoaderMod'), (Join-Path $mods 'Keybinds')) { New-Item -ItemType Directory -Force $d | Out-Null }
         [IO.File]::WriteAllText($modsTxt, $stockTxt, $utf8)
         [IO.File]::WriteAllText((Join-Path $paks "LogicMods\$name.pak"), 'core pak')
-        [IO.File]::WriteAllText((Join-Path $mods "$name\mod.json"), (ModJson 'nuclearnightmare-community.nucleus' $name '0.25.0'), $utf8)
+        [IO.File]::WriteAllText((Join-Path $mods "$name\mod.json"), (ModJson $CORE $name '0.25.0'), $utf8)
     }
     function Stage([string[]] $pairs) { Run-Exe -Stage @pairs -Root $root @net }
     # Every file under staged\ (and downloads\): relative path -> SHA-256.
@@ -388,9 +405,9 @@ try {
 
     # ---------------------------------------------------------------- dependencies first, then apply with story 3's helper
     Reset-Layout
-    Stage 'nuclearnightmare-community.nucleus', '0.30.0', 'nuclearnightmare-community.alpha', '1.0.0', $HC, '0.3.0'
+    Stage $CORE, '0.30.0', 'nuclearnightmare-community.alpha', '1.0.0', $HC, '0.3.0'
     $pl = Payload
-    Ok ((Outcome) -eq 'outcome: ok' -and $pl.owners.Count -eq 3 -and $pl.owners[0].name -ceq 'Nucleus' -and $pl.owners[1].name -ceq 'Alpha' -and $pl.owners[2].name -ceq 'HudClock' -and
+    Ok ((Outcome) -eq 'outcome: ok' -and $pl.owners.Count -eq 3 -and $pl.owners[0].name -ceq $name -and $pl.owners[1].name -ceq 'Alpha' -and $pl.owners[2].name -ceq 'HudClock' -and
         $pl.ops -eq ((PlanLines).Count - 2)) 'missing and too-old dependencies: one stage, three owners in input order (deps first)' (Shown)
     function Apply {
         $s = Start-Process ping -ArgumentList '-n', '2', '127.0.0.1' -WindowStyle Hidden -PassThru
@@ -415,7 +432,7 @@ try {
         'NuclearNightmare\Content\Paks\LogicMods\Alpha.pak' = 'alpha-1.0.0.zip|' + "$P/LogicMods/Alpha.pak"
         'NuclearNightmare\Content\Paks\Alpha_P.pak' = 'alpha-1.0.0.zip|' + "$P/Alpha_P.pak"
         'NuclearNightmare\Binaries\Win64\ue4ss\Mods\Alpha\empty.txt' = 'alpha-1.0.0.zip|' + "$M/Alpha/empty.txt"
-        "NuclearNightmare\Content\Paks\LogicMods\$name.pak" = 'nucleus-0.30.0.zip|' + "$P/LogicMods/Nucleus.pak"
+        "NuclearNightmare\Content\Paks\LogicMods\$name.pak" = 'core-0.30.0.zip|' + "$P/LogicMods/$name.pak"
     }
     $wrong = @()
     foreach ($k in $want.Keys) {
@@ -468,7 +485,7 @@ try {
 
     # Base pack, not installed, changed, not in the catalog: refused before anything is staged.
     $before = Snap $staged
-    RefusedU 'nuclearnightmare-community.nucleus' '0.30.0' 'base-pack' 'Nucleus' 'the installer removes'
+    RefusedU $CORE '0.30.0' 'base-pack' $name 'the installer removes'
     RefusedU 'NuclearNightmare-Community.Mod-Manager' '0.7.0' 'base-pack' 'Mod Manager'
     RefusedU $WM '0.2.1' 'not-installed' 'a mod that is not installed' 'is not there'
     Install-Zip 'wm-0.2.1.zip' 'WhistleMute'
@@ -577,6 +594,85 @@ try {
         $pl.owners[0].kept -eq 0) 'uninstall: installed.txt naming settings.json lists only mod.json and main.lua (player data never listed)' "$(Shown); deletes: $($pdDels -join ' / ')"
     $applied = Apply
     Ok ((Test-Path -LiteralPath $pdSettings) -and -not (Test-Path -LiteralPath (Join-Path $mods 'Pd\mod.json')) -and -not (Test-Path -LiteralPath (Join-Path $mods 'Pd\Scripts'))) 'apply: Pd removed but its settings.json, which stays in Mods/Pd/' "helper: $applied"
+
+    # ================================================================ story 6 review: the matrix's update rows, unstage refusals
+    function TreeSha([string] $rel) { $f = Join-Path $root $rel; if (Test-Path -LiteralPath $f) { Sha ([IO.File]::ReadAllBytes($f)) } }
+    function NoDownloads { @(Get-ChildItem -LiteralPath (Join-Path $data 'downloads') -File -Force -ErrorAction SilentlyContinue).Count -eq 0 }
+    # Nucleus self-update: the core package's own id over an installed older core (0.25.0, Reset-Layout; not in the
+    # index, so no deletes), its dlls\main.dll and bin\<Core>Restart.exe staged like any mod's files. With --root the
+    # helper runs from build\native-out\test\, so the put to the layout's bin\<Core>Restart.exe is not its own image: a
+    # plain put (the rename aside of the running image is apply.tests.ps1's self-update case).
+    Reset-Layout
+    $CMW = "NuclearNightmare\Binaries\Win64\ue4ss\Mods\$name"
+    New-Item -ItemType Directory -Force (Join-Path $root "$CMW\dlls") | Out-Null
+    [IO.File]::WriteAllText((Join-Path $root "$CMW\dlls\main.dll"), 'old core dll')
+    [IO.File]::WriteAllText((Join-Path $root "$CMW\bin\$($name)Restart.exe"), 'old helper')
+    Stage $CORE, '0.31.0'
+    $pl = Payload
+    $lines = PlanLines
+    $dllB = ZipEntryBytes 'core-0.31.0.zip' "$CM/dlls/main.dll"; $exeB = ZipEntryBytes 'core-0.31.0.zip' "$CM/bin/$($name)Restart.exe"
+    $dllSha = Sha $dllB; $exeSha = Sha $exeB
+    Ok ((Outcome) -eq 'outcome: ok' -and $script:code -eq 0 -and $pl.owners.Count -eq 1 -and $pl.owners[0].id -ceq $CORE -and $pl.owners[0].name -ceq $name -and
+        $pl.owners[0].version -ceq '0.31.0' -and ($lines -ccontains "put`t$name`t$dllSha`t$($dllB.Length)`t$CMW\dlls\main.dll") -and
+        ($lines -ccontains "put`t$name`t$exeSha`t$($exeB.Length)`t$CMW\bin\$($name)Restart.exe") -and (DeleteLines).Count -eq 0) 'core self-update: the core''s own id stages ok, main.dll and the relaunch helper put' "$(Shown); plan: $($lines -join ' / ')"
+    $applied = Apply
+    $result = if (Test-Path (Join-Path $data 'apply-result.txt')) { [IO.File]::ReadAllText((Join-Path $data 'apply-result.txt')) } else { '' }
+    $inst = [IO.File]::ReadAllText((Join-Path $data 'installed.txt'))
+    $txt = [IO.File]::ReadAllText($modsTxt)
+    Ok ($result -match "(?m)^outcome`tapplied" -and (TreeSha "$CMW\dlls\main.dll") -ceq $dllSha -and (TreeSha "$CMW\bin\$($name)Restart.exe") -ceq $exeSha -and
+        (TreeSha "$CMW\mod.json") -ceq (Sha (ZipEntryBytes 'core-0.31.0.zip' "$CM/mod.json")) -and
+        @(Get-ChildItem -LiteralPath (Join-Path $root "$CMW\bin") -Filter '*.old' -File -ErrorAction SilentlyContinue).Count -eq 0 -and -not (Test-Path $planFile) -and
+        $inst.Contains("$name`t$dllSha`t$CMW\dlls\main.dll") -and $inst.Contains("$name`t$exeSha`t$CMW\bin\$($name)Restart.exe") -and
+        ([regex]::Matches($txt, "(?m)^$([regex]::Escape($name)) : 1\r$")).Count -eq 1) 'core self-update applied (--root): the new main.dll and helper in place, no .old, installed.txt records them, one mods.txt line' "helper: $applied; result: $($result -replace "`n", ' / '); installed: $($inst -replace "`n", ' / ')"
+
+    # Update, dep too old: Upd 1.0.0 (installer layout) -> 1.2.0 and the core 0.25.0 -> 0.31.0 it needs, in one stage.
+    Reset-Layout
+    Install-Zip 'upd-1.0.0.zip' 'Upd'
+    Stage $CORE, '0.31.0', $UPD, '1.2.0'
+    $pl = Payload
+    $lines = PlanLines
+    $dels = DeleteLines
+    Ok ((Outcome) -eq 'outcome: ok' -and $pl.owners.Count -eq 2 -and $pl.owners[0].name -ceq $name -and $pl.owners[1].name -ceq 'Upd' -and $pl.ops -eq ($lines.Count - 2) -and
+        @($lines | Where-Object { $_ -like "put`t$name`t*" }).Count -eq 4 -and @($lines | Where-Object { $_ -like "put`tUpd`t*" }).Count -eq 2 -and
+        $dels.Count -eq 1 -and ($dels -ccontains "delete`tUpd`t$bSha`t$UPM\b.lua")) 'update, dep too old: one stage, owners=2 (the core first), the plan holds both, delete for b.lua' "$(Shown); plan: $($lines -join ' / ')"
+    $applied = Apply
+    $result = [IO.File]::ReadAllText((Join-Path $data 'apply-result.txt'))
+    Ok ($result -match "(?m)^outcome`tapplied" -and (TreeSha "$CMW\dlls\main.dll") -ceq $dllSha -and ([IO.File]::ReadAllText((Join-Path $root "$UPM\a.lua")) -ceq 'a 1.2.0') -and
+        -not (Test-Path -LiteralPath (Join-Path $root "$UPM\b.lua"))) 'update, dep too old applied: the core 0.31.0 and Upd 1.2.0 in place, b.lua gone' "helper: $applied; $($result -replace "`n", ' / ')"
+
+    # Revoked, newer fix: an installer-installed revoked Rev 0.4.0 -> 0.6.0 (no downgrade involved); the delete for the
+    # file only 0.4.0 had comes from 0.4.0's own verified release (installed.txt has no Rev records).
+    Install-Zip 'rev-0.4.0.zip' 'Rev'
+    Stage $REV, '0.6.0'
+    $dels = DeleteLines
+    Ok ((Outcome) -eq 'outcome: ok' -and $dels.Count -eq 1 -and ($dels -ccontains "delete`tRev`t$oldSha`t$RVM\Scripts\old.lua") -and -not (Has-Line 'downgrade allowed') -and
+        (Has-Line 'files listed (release zip)') -and ((PlanLines) -ccontains "modstxt`tRev`ton") -and (NoDownloads)) 'revoked, newer fix: 0.4.0 -> 0.6.0 staged, delete for the file only 0.4.0 had (from its verified release)' "$(Shown); deletes: $($dels -join ' / ')"
+    $applied = Apply
+    $result = [IO.File]::ReadAllText((Join-Path $data 'apply-result.txt'))
+    Ok ($result -match "(?m)^outcome`tapplied" -and -not (Test-Path -LiteralPath (Join-Path $root "$RVM\Scripts\old.lua")) -and
+        ([IO.File]::ReadAllText((Join-Path $root "$RVM\Scripts\main.lua")) -ceq 'print("rev 0.6.0")')) 'revoked, newer fix applied: Rev 0.6.0 in place, old.lua gone' "helper: $applied; $($result -replace "`n", ' / ')"
+
+    # Unstage refusals with a staged plan in place: interrupted (before the job), then -NoPrecheck under apply.lock held
+    # and with a journal without done (the job's own check at write time). WhistleMute is installer-installed, so the
+    # -NoPrecheck runs download its release first; that download is removed again.
+    Install-Zip 'wm-0.2.1.zip' 'WhistleMute'
+    Stage $HC, '0.3.0'
+    Ok ((Outcome) -eq 'outcome: ok') 'a staged plan for the unstage refusals' (Shown)
+    $before = Snap $staged
+    $lock = [IO.File]::Open((Join-Path $data 'apply.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
+    try {
+        Unstage $WM '0.2.1' @('-NoPrecheck')
+        Ok ((Outcome) -eq 'outcome: applying' -and $script:code -eq 1 -and (Has-Line 'apply.lock is held') -and (Same $before (Snap $staged)) -and (NoDownloads)) 'unstage, apply.lock held at write time (-NoPrecheck): applying from the job, plan.txt and staged\ byte-identical, the download removed' (Shown)
+    } finally { $lock.Dispose(); Remove-Item -LiteralPath (Join-Path $data 'apply.lock') -ErrorAction SilentlyContinue }
+    $rb = Join-Path $data 'rollback'
+    if (Test-Path -LiteralPath $rb) { Remove-Item -LiteralPath $rb -Recurse -Force }
+    New-Item -ItemType Directory -Force $rb | Out-Null
+    [IO.File]::WriteAllText((Join-Path $rb 'journal.txt'), "nucleus-journal`t1`ntxn`t$('ab' * 16)`n", $utf8)
+    RefusedU $WM '0.2.1' 'interrupted' 'a journal without done'
+    Unstage $WM '0.2.1' @('-NoPrecheck')
+    Ok ((Outcome) -eq 'outcome: interrupted' -and $script:code -eq 1 -and (Has-Line 'cut short (found under apply.lock)') -and (Same $before (Snap $staged)) -and (NoDownloads) -and
+        -not (Test-Path (Join-Path $data 'apply.lock'))) 'unstage, a journal without done found under the lock (-NoPrecheck): interrupted from the job, plan.txt and staged\ byte-identical' (Shown)
+    Remove-Item -LiteralPath $rb -Recurse -Force
 } catch {
     $script:failed++
     Write-Host "FAIL: runner failure: $($_.Exception.Message) at line $($_.InvocationInfo.ScriptLineNumber)"

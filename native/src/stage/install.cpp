@@ -378,7 +378,13 @@ namespace core_stage::install
                 }
                 uint64_t size = 0;
                 std::string got;
-                if (!hash_file(abs, size, got) || got != sha)
+                if (!hash_file(abs, size, got))
+                {
+                    ++out.kept;
+                    a.details.push_back("kept: " + tg.rel + " (could not be read to check its hash)");
+                    continue;
+                }
+                if (got != sha)
                 {
                     ++out.kept;
                     a.details.push_back("kept: " + tg.rel + " (not the installed version's file)");
