@@ -440,6 +440,24 @@ try {
     Start-Sleep -Milliseconds 500
     Remove-Item (Join-Path $root 'Engine') -Recurse -Force
 
+    # Two helpers on the same game exit, both running from core's bin\ (a hot reload or a story-8 helper can leave a
+    # second one): neither counts the other as a game, one applies, the other finds the lock held or nothing staged.
+    Reset-Layout
+    $null = Stage @(@{ Op = 'put'; Owner = 'ModA'; Target = $A_LUA; Text = 'once' })
+    $h1 = Join-Path $bin 'TwinA.exe'; $h2 = Join-Path $bin 'TwinB.exe'
+    Copy-Item $TestExe $h1; Copy-Item $TestExe $h2
+    $s = New-Sleeper 2
+    $twinArgs = "--wait $([int64]$s.Handle) --apply --mode none --cwd `"C:\a`" --exe `"C:\a\g.exe`" --root `"$root`" --record `"$rec`" -- g.exe"
+    $t1 = Start-Helper $h1 $twinArgs; $t2 = Start-Helper $h2 $twinArgs
+    $r1 = Wait-Helper $t1; $r2 = Wait-Helper $t2
+    [void][ApplyTest.Native]::CloseHandle($s.Handle)
+    $outs = @($r1.Out, $r2.Out)
+    $won = @($outs | Where-Object { $_ -match '^apply applied ' }).Count
+    $lost = @($outs | Where-Object { $_ -match '^apply none \| (lock held|nothing staged)' }).Count
+    Ok ($won -eq 1 -and $lost -eq 1 -and $r1.Sec -lt 30 -and $r2.Sec -lt 30) 'two helpers from bin\: one applies, the other finds the lock held or nothing staged, no 60 s wait' ($outs -join ' / ')
+    Ok ((ResultOf 'outcome') -eq 'applied' -and (Text (Join-Path $root $A_LUA)) -eq 'once' -and -not (Staged)) 'two helpers from bin\: applied once, the result not overwritten' (Result)
+    Remove-Item $h1, $h2 -Force
+
     # ================================================================ self-update (the shipped helper replaces the running test copy)
     Reset-Layout
     $selfExe = Join-Path $bin "$($name)Restart.exe"
@@ -465,6 +483,17 @@ try {
     $fs = [IO.File]::Open((Join-Path $root $EXIST), 'Open', 'Read', 'Read')
     try { $r = Apply -exe $selfExe -NoRoot } finally { $fs.Dispose() }
     Ok ((ResultOf 'reason') -eq 'locked' -and (Same $before (Snapshot)) -and -not (Test-Path (Join-Path $bin "$($name)Restart.$txnS.old"))) 'self-update rolled back: the running copy back in place, no .old' (Diff $before (Snapshot))
+    # The same with the target in another case (targets compare without case): the journal still reads, the rollback
+    # is complete and a later helper finds nothing interrupted.
+    $selfRelCase = $selfRel -replace '\\bin\\', '\BIN\'
+    $txnS = Stage @(@{ Op = 'put'; Owner = $name; Target = $selfRelCase; Bytes = $newBytes }, @{ Op = 'put'; Owner = 'ModX'; Target = $EXIST; Text = 'new X' })
+    $fs = [IO.File]::Open((Join-Path $root $EXIST), 'Open', 'Read', 'Read')
+    try { $r = Apply -exe $selfExe -NoRoot } finally { $fs.Dispose() }
+    Ok ($selfRelCase -cne $selfRel -and (ResultOf 'reason') -eq 'locked' -and (Same $before (Snapshot)) -and -not (Test-Path (Join-Path $bin "$($name)Restart.$txnS.old"))) 'self-update in another case rolled back: the running copy back in place' "$(Result) $(Diff $before (Snapshot))"
+    $r = Apply -exe $selfExe -NoRoot
+    Ok ((ResultOf 'outcome') -eq 'applied' -and (Get-FileHash $selfExe).Hash -eq (Get-FileHash $ShippedExe).Hash) 'self-update in another case: applied on the next exit' (Result)
+    Copy-Item $TestExe $selfExe -Force
+    Get-ChildItem $bin -Filter '*.old' | Remove-Item -Force
     # A self-update cut short after the image was replaced: the .old survives until the next helper (the new image) has
     # put it back; that helper's own running copy goes aside and a later helper deletes it.
     Reset-Layout
