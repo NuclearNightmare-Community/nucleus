@@ -514,7 +514,9 @@ namespace core_stage
         }
 
         // ------------------------------------------------------------ other games
-        // A process (other than this one) whose image is under <root>\, except core's own bin\ (other helpers).
+        // A game exe (other than this process): an image directly in <root>\ (the launcher) or under
+        // <root>\NuclearNightmare\Binaries\, except core's own bin\ (other helpers). Not <root>\Engine\: the crash
+        // reporter a crashed game leaves open there holds none of the targets.
         bool game_running(const Layout& l)
         {
             const HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -523,6 +525,7 @@ namespace core_stage
             pe.dwSize = sizeof pe;
             bool found = false;
             const std::wstring root = l.root + L"\\";
+            const std::wstring binaries = root + L"NuclearNightmare\\Binaries\\";
             const std::wstring bin = l.core_dir + L"\\bin\\";
             const DWORD self = GetCurrentProcessId();
             for (BOOL more = Process32FirstW(snap, &pe); more && !found; more = Process32NextW(snap, &pe))
@@ -535,7 +538,8 @@ namespace core_stage
                 if (QueryFullProcessImageNameW(h, 0, buf.data(), &n))
                 {
                     const std::wstring img(buf.data(), n);
-                    if (starts_with_nocase(img, root) && !starts_with_nocase(img, bin)) found = true;
+                    const bool in_root = starts_with_nocase(img, root) && img.find(L'\\', root.size()) == std::wstring::npos;
+                    if ((in_root || starts_with_nocase(img, binaries)) && !starts_with_nocase(img, bin)) found = true;
                 }
                 CloseHandle(h);
             }
@@ -662,24 +666,29 @@ namespace core_stage
                 const std::wstring target = abs_of(m_l, rel);
                 const std::wstring tmp = target + L"." + widen(m_plan.txn) + L".tmp";
                 const bool self = !m_o.self_image.empty() && same_text_nocase(target, m_o.self_image);
+                auto copy_in = [&]() -> std::optional<Failure> {
+                    if (DWORD e = copy_file(m_p.files + L"\\" + widen(op.sha256), tmp, op.sha256, op.size))
+                    {
+                        if (e == ERROR_INVALID_DATA) return Failure{"staged-file-mismatch", rel};
+                        return io(e, rel);
+                    }
+                    return std::nullopt;
+                };
                 if (self)
                 {
-                    // Self-update: the running image can be renamed, not replaced. The renamed copy is the backup.
+                    // Self-update: the running image can be renamed, not replaced. The renamed copy is the backup. The
+                    // new copy is written first, so the image is missing only between the two renames (a helper cut
+                    // short there leaves no helper to recover it).
                     const std::string old_rel = parent_rel(rel) + "\\" + narrow(m_l.core_name) + "Restart." + m_plan.txn + ".old";
                     const std::wstring old = abs_of(m_l, old_rel);
+                    if (auto f = copy_in()) return f;
                     DeleteFileW(old.c_str());
                     if (m_j.line("moved\t" + rel + "\t" + old_rel)) return Failure{"io-error", rel};
                     if (!MoveFileExW(target.c_str(), old.c_str(), MOVEFILE_WRITE_THROUGH)) return io(GetLastError(), rel);
+                    return place(tmp, rel);
                 }
-                else if (auto f = save(rel))
-                {
-                    return f;
-                }
-                if (DWORD e = copy_file(m_p.files + L"\\" + widen(op.sha256), tmp, op.sha256, op.size))
-                {
-                    if (e == ERROR_INVALID_DATA) return Failure{"staged-file-mismatch", rel};
-                    return io(e, rel);
-                }
+                if (auto f = save(rel)) return f;
+                if (auto f = copy_in()) return f;
                 return place(tmp, rel);
             }
 
@@ -747,7 +756,14 @@ namespace core_stage
                 const std::string& rel = m_p.installed_rel;
                 std::vector<Installed> list;
                 std::string text;
-                if (read_file(m_p.installed, k_max_installed_bytes, text) && !parse_installed(text, list)) list.clear();
+                // An existing record that can't be read or parsed fails the apply: rewriting it from this plan alone
+                // would lose every other mod's entries.
+                if (file_exists(m_p.installed))
+                {
+                    DWORD err = 0;
+                    if (!read_file(m_p.installed, k_max_installed_bytes, text, &err)) return io(err ? err : ERROR_INVALID_DATA, rel);
+                    if (!parse_installed(text, list)) return Failure{"io-error", rel};
+                }
                 for (const auto& op : m_plan.ops)
                 {
                     if (op.kind == OpKind::ModsTxt) continue;

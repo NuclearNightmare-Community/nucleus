@@ -15,11 +15,13 @@
     - a staged file that doesn't match: discarded at once, nothing written; a hashed delete whose file changed: failed
     - bad plans and targets (.., absolute, ADS, a junction, a stock mod, mods.txt by put, outside the layout, device
       names, malformed lines, limits): discarded as bad-plan before any write
-    - another game exe under <root>: 60 s, then failed/game-running, no attempt counted, the plan stays
+    - another game exe under <root>: 60 s, then failed/game-running, no attempt counted, the plan stays; the crash
+      reporter under <root>\Engine\ doesn't count
+    - installed.txt held open or malformed: failed, rolled back, the record not rewritten
     - interrupted (--crash-after): the next helper rolls back first (byte-identical), then applies
     - --fail-after: rolled back at every step count
     - self-update: a put to the helper's own image renames the running copy to bin\<name>Restart.<txn>.old (put back
-      on a rollback); a later helper deletes it
+      on a rollback); a later helper deletes it; cut short after the rename, the next helper puts the original back
     - relaunch.txt: relaunched only when it names the waited game and this helper (not with --mode none); deleted
       either way
     - bad argv for apply mode (test and shipped builds)
@@ -179,6 +181,23 @@ try {
     Ok ([IO.File]::ReadAllText($modsTxt, $utf8) -ceq $stockTxt) 'delete: "modstxt remove" takes the line out again (bytes as before)'
     $inst = Text (Join-Path $data 'installed.txt')
     Ok ($inst -ceq "nucleus-installed`t1`nModA`t$((Get-FileHash -LiteralPath (Join-Path $root $A_BASE) -Algorithm SHA256).Hash.ToLowerInvariant())`t$A_BASE`n") 'delete: installed.txt keeps only the base pak' $inst
+
+    # ---- installed.txt that can't be read or parsed: the apply fails and the record keeps every earlier entry
+    $instPath = Join-Path $data 'installed.txt'
+    $instRel = "NuclearNightmare\Binaries\Win64\ue4ss\$($name)Data\installed.txt"
+    $B_LUA = 'NuclearNightmare\Binaries\Win64\ue4ss\Mods\ModB\Scripts\main.lua'
+    $before = Snapshot
+    $txnI = Stage @(@{ Op = 'put'; Owner = 'ModB'; Target = $B_LUA; Text = 'B' })
+    $fs = [IO.File]::Open($instPath, 'Open', 'Read', 'None')
+    try { $r = Apply } finally { $fs.Dispose() }
+    Ok ((ResultOf 'outcome') -eq 'failed' -and (ResultOf 'reason') -eq 'locked' -and (ResultOf 'path') -eq $instRel -and (Same $before (Snapshot)) -and (Text $instPath) -ceq $inst) 'installed.txt held open: failed (locked), rolled back, the record unchanged' (Result)
+    [IO.File]::WriteAllText($instPath, $inst + "not a line`n")
+    $r = Apply
+    Ok ((ResultOf 'outcome') -eq 'failed' -and (ResultOf 'reason') -eq 'io-error' -and (ResultOf 'path') -eq $instRel -and (Same $before (Snapshot)) -and (Text $instPath) -ceq ($inst + "not a line`n")) 'installed.txt malformed: failed (io-error), rolled back, the file not rewritten' (Result)
+    [IO.File]::WriteAllText($instPath, $inst)
+    $r = Apply
+    $instB = Text $instPath
+    Ok ((ResultOf 'outcome') -eq 'applied' -and (ResultOf 'txn') -eq $txnI -and $instB.StartsWith($inst) -and $instB.Contains("ModB`t")) 'installed.txt readable again: applied, the earlier entry kept' $instB
 
     # ---- "modstxt on", the Mod Manager's modstxt.lua rule: every line of the folder set to 1 (only the value after its
     # last ':', each line's own ending kept, nothing inserted); with no Keybinds line and no final newline, the line goes at
@@ -408,6 +427,18 @@ try {
     $r = Apply
     Ok ((ResultOf 'outcome') -eq 'applied') 'game gone: the next helper applies it'
     Remove-Item $gameExe -Force
+    # The crash reporter a crashed game leaves open (<root>\Engine\...) is not a game.
+    $reporter = Join-Path $root 'Engine\Binaries\Win64\CrashReportClient.exe'
+    New-Item -ItemType Directory -Force (Split-Path $reporter) | Out-Null
+    Copy-Item (Get-Command ping).Source $reporter
+    $crp = Start-Process $reporter -ArgumentList '-n', '100', '127.0.0.1' -WindowStyle Hidden -PassThru
+    try {
+        $null = Stage @(@{ Op = 'put'; Owner = 'ModA'; Target = $A_LUA; Text = 'after a crash' })
+        $r = Apply
+        Ok ((ResultOf 'outcome') -eq 'applied' -and $r.Sec -lt 30) "crash reporter under <root>\Engine open: applied without the 60 s wait ($([math]::Round($r.Sec)) s)" (Result)
+    } finally { Stop-Process -Id $crp.Id -Force -ErrorAction SilentlyContinue }
+    Start-Sleep -Milliseconds 500
+    Remove-Item (Join-Path $root 'Engine') -Recurse -Force
 
     # ================================================================ self-update (the shipped helper replaces the running test copy)
     Reset-Layout
@@ -434,6 +465,23 @@ try {
     $fs = [IO.File]::Open((Join-Path $root $EXIST), 'Open', 'Read', 'Read')
     try { $r = Apply -exe $selfExe -NoRoot } finally { $fs.Dispose() }
     Ok ((ResultOf 'reason') -eq 'locked' -and (Same $before (Snapshot)) -and -not (Test-Path (Join-Path $bin "$($name)Restart.$txnS.old"))) 'self-update rolled back: the running copy back in place, no .old' (Diff $before (Snapshot))
+    # A self-update cut short after the image was replaced: the .old survives until the next helper (the new image) has
+    # put it back; that helper's own running copy goes aside and a later helper deletes it.
+    Reset-Layout
+    Copy-Item $TestExe $selfExe -Force
+    $before = Snapshot
+    $txnS = Stage @(@{ Op = 'put'; Owner = $name; Target = $selfRel; Bytes = $newBytes }, @{ Op = 'put'; Owner = $name; Target = $A_LUA; Text = 'with update' })
+    $r = Apply '--crash-after 1' -exe $selfExe -NoRoot
+    $old = Join-Path $bin "$($name)Restart.$txnS.old"
+    Ok ($r.Code -eq 9 -and (Test-Path $old) -and (Get-FileHash $selfExe).Hash -eq (Get-FileHash $ShippedExe).Hash) 'self-update cut short: the new image in place, the .old kept' "exit $($r.Code)"
+    Remove-Item (Join-Path $data 'staged\plan.txt') -Force # recovery only
+    foreach ($i in 1, 2) {
+        $s = New-Sleeper 1
+        $r = Wait-Helper (Start-Helper $selfExe "--wait $([int64]$s.Handle) --apply --mode none --cwd `"C:\a`" --exe `"C:\a\g.exe`" -- g.exe")
+        [void][ApplyTest.Native]::CloseHandle($s.Handle)
+        if ($i -eq 1) { Ok ($r.Code -eq 0 -and (Get-FileHash $selfExe).Hash -eq (Get-FileHash $TestExe).Hash -and -not (Test-Path $old) -and -not (Test-Path (Join-Path $data 'rollback'))) 'self-update cut short: the next helper puts the original image back' "exit $($r.Code)" }
+    }
+    Ok (Same $before (Snapshot)) 'self-update cut short: after a later helper, the tree byte-identical (the set-aside copy deleted)' (Diff $before (Snapshot))
 
     # ================================================================ relaunch.txt
     Reset-Layout
