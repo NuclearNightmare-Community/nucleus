@@ -2,6 +2,17 @@
 
 All notable changes to Nucleus are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). From 0.5.0 a dependent's `need` and `dependsOn` are minimum versions (`>=0.5.0`), so a newer Nucleus never asks dependents to raise them. Up to 0.3.0, below 1.0.0 a dependent connected only to the same minor version (`need = "0.3.0"` accepted 0.3.x).
 
+## [0.23.0] - 2026-11-20
+
+Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
+
+For players: Nucleus can now download and check the community mod catalog itself, inside the game, so the Mod Manager can later show what is available. It only does so when a mod asks (the Mod Manager will, at startup), only over HTTPS from the catalog's own addresses on GitHub, and it trusts only files signed with the catalog's keys built into Nucleus. What it fetches is kept in `ue4ss/NucleusData/` beside your mods.
+
+### Added
+
+- The signed catalog in core's native part (Mod Manager v2 story 2; README "Catalog"). New natives `Nucleus_CatalogRefresh()` (fetch and verify keys.json, index.json and revoked.json: `job` or `nil, "busy"`), `Nucleus_CatalogDownload(id, version)` (one release file the verified index names, kept as `ue4ss/NucleusData/downloads/<sha256>.zip` only when its size and SHA-256 match: `job` or `nil, "busy" | "no verified catalog" | "not in the catalog" | "too large" | "downloads folder full"`) and `Nucleus_CatalogPoll(job)` (`"running"`, or `"done", outcome, message, payloadJson`, or `nil, "unknown job"`), running on one background worker that never touches Lua or a UObject; any thread may call them. The rules, outcome codes and messages are `tools/release/verify.ps1`'s (trust roots and endpoints compiled in, keys.json first, serial rollback guards, at most 2 endpoint restarts and 5 redirects to allowed hosts, 4 MiB and 4096-byte caps, 403/429 back-off, the last verified copy only when every base is unreachable). WinHTTP (TLS 1.2+, the system proxy, Windows' certificate checks), Windows CNG for SHA-256, and Monocypher 4.0.2 (CC0-1.0 OR BSD-2-Clause, `native/third_party/`) for minisign's Ed25519 and BLAKE2b. State and the last verified copy in `ue4ss/NucleusData/catalog/`. Core's destructor cancels a request in flight and joins the worker. `core.catalog` (`refresh`, `download`, `poll`, the payload decoded; never raises) and `require("nucleus.catalog")`; feature `catalog`. Log lines `native: catalog: refresh job <n> started` and `native: catalog: <kind> job <n> done: <outcome>: <message>`.
+- The package has `Mods/Nucleus/LICENSES/monocypher.txt`. `build.ps1` builds the never-packaged test exe `NucleusCatalogTest.exe` (verify.ps1's parameters and output; a named proxy and a pinned certificate for the workspace's local HTTPS fixture server) and checks it imports only Windows system DLLs. Tests: `native/test/catalog.tests.ps1` (verify.ps1's own fixture runners against the test exe, every fixture and fetch scenario; mod id cases; built-ins; downloads and bounds; an unpinned certificate refused), `test/unit/catalog_test.lua`, and `bad-input`'s `cat-*` cases with one refresh polled until done.
+
 ## [0.22.0] - 2026-11-20
 
 - Catalog listing: the display name "Nucleus (Mod Core)", a description and categories.

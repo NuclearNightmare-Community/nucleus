@@ -101,7 +101,11 @@ ok(S.parse("1.2.3").major == 1 and S.parse(">=1.2.3") == nil and S.parse(5) == n
 -- ---------------------------------------------------------------- features
 local F = require("nucleus.features")
 local declared = F.declared()
-local want = { "call", "clock", "deref",
+local want = {
+    "call",
+    -- Mod Manager v2 story 2 (0.23.0): core.catalog, a module (refresh, download, poll)
+    "catalog",
+    "clock", "deref",
     -- core story 43 (0.18.0): core.fn, a module, its entry point hand-named
     "fn", "fn.intercept",
     "free",
@@ -141,7 +145,13 @@ local want = { "call", "clock", "deref",
     "ui.slider", "ui.slider.create", "ui.slider.get", "ui.slider.isShown", "ui.slider.remove", "ui.slider.set", "ui.slider.setDefault", "ui.slider.setEnabled",
     "ui.slider.setTooltip", "ui.slider.setVisible",
     "ui.text", "ui.text.setTooltip" }
-eq(table.concat(declared, ","), table.concat(want, ","), "declared(): the 0.22.0 feature list (map.setup, ui.journal.regions, ui.look, story 24's, story 4's, story 22's, story 23's, story 27's, story 31's, story 32's, story 33's, story 38's, story 43's and story 44's names hand-named; settings, net, fn, restart, input), sorted")
+eq(table.concat(declared, ","), table.concat(want, ","), "declared(): the 0.23.0 feature list (map.setup, ui.journal.regions, ui.look, story 24's, story 4's, story 22's, story 23's, story 27's, story 31's, story 32's, story 33's, story 38's, story 43's and story 44's names hand-named; settings, net, fn, restart, input, catalog), sorted")
+-- Mod Manager v2 story 2: a 0.22.x core's list answers false for catalog; this one true.
+do
+    local old = {}
+    for _, n in ipairs(want) do if n ~= "catalog" then old[#old + 1] = n end end
+    ok(F.set(old)["catalog"] == nil and F.set(declared)["catalog"] == true, "0.23.0: catalog is a feature, a 0.22.x core's list has none")
+end
 -- Core story 44: a 0.21.x core's list answers false for input and input.control; this one true.
 do
     local old = {}

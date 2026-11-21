@@ -1088,6 +1088,23 @@ foreach ($p in 'menu1', 'match1') {
 }
 foreach ($id in 'control', 'release', 'state', 'list') { $badInput += "\[$T\] OK CASE pre-in-$id " }
 $badInput += "\[$T\] OK CASES before-connect input recorded=4 "
+# Mod Manager v2 story 2 (core 0.23.0): the catalog natives' bad-input group (catalog.lua), in both worlds and off the
+# game thread: every native's argument checks and the core.catalog wrappers; at menu1 one refresh polled until done (any
+# well-formed outcome: the live catalog or the network decide it, no case depends on them) with the game thread ticking.
+$catCaseIds = @('refresh-1', 'refresh-nil', 'refresh-str', 'refresh-table', 'refresh-two', 'dl-none', 'dl-one', 'dl-three', 'dl-id-int',
+                'dl-id-nil', 'dl-id-table', 'dl-ver-int', 'dl-ver-float', 'dl-ver-bool', 'dl-id-bare', 'dl-id-url', 'dl-id-empty',
+                'dl-id-201', 'dl-id-huge', 'dl-ver-semver', 'dl-ver-empty', 'dl-ver-lead0', 'dl-ver-ctrl', 'dl-ver-129', 'poll-none',
+                'poll-two', 'poll-nil', 'poll-float', 'poll-1\.0', 'poll-numstr', 'poll-0', 'poll--1', 'poll-2\^53', 'poll-minint', 'poll-max')
+foreach ($p in 'menu1', 'match1') {
+    foreach ($id in $catCaseIds) { $badInput += "\[$T\] OK CASE $p\.cat-$id "; $badInput += "\[$T\] OK CASE $p\.off-cat-$id " }
+    foreach ($id in 'has', 'wrap-poll-float', 'wrap-poll-max', 'wrap-dl-nul', 'wrap-dl-bare') { $badInput += "\[$T\] OK CASE $p\.cat-$id " }
+}
+foreach ($id in 'dl-unverified', 'refresh', 'refresh-busy', 'dl-busy', 'wrap-refresh-busy', 'poll-gap', 'poll-done', 'wrap-poll-done', 'dl-after', 'poll-again') {
+    $badInput += "\[$T\] OK CASE menu1\.cat-$id "
+}
+$badInput += "\[$N\] native: catalog: refresh job \d+ started"
+$badInput += "\[$N\] native: catalog: refresh job \d+ done: (ok|error|bad-signature|unknown-key|serial-rollback|schema-too-new|invalid-index|url-not-allowed): "
+$badInput += "\[$T\] CATALOG refresh outcome="
 # Core story 44: mod controls in the game's Controls menu, written for the VM (run.ps1 -Scenario controls, then
 # controls-restart, -Target vm). END result=PASS and no FAIL line mean every check the test made passed; these name the
 # acceptance criteria. notia (an object that isn't an InputAction) and owned (an action that belongs to another row)
