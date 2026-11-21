@@ -184,4 +184,10 @@ namespace catalog
     const json::Value* find_version(const json::Value& ix, const std::string& id, const std::string& version);
     // The first revoked entry matching (normalized id, version, sha256 in any case), or nullptr.
     const json::Value* find_revoked(const json::Value& rv, const std::string& id, const std::string& version, const std::string& sha);
+    // Mod Manager v2 story 6: is an INSTALLED (normalized id, version) revoked? The first revoked entry with the same
+    // normalized id and version for which either its sha256 equals the index's sha256 of that version (any case), or the
+    // index no longer lists that version; nullptr otherwise. An installed copy has no zip hash on disk, so the match is
+    // on the catalog's release: a different build with the same version number is only flagged, never touched. Both
+    // actions (disable, block) only flag. Mod Manager's catalog.lua applies the same rule.
+    const json::Value* find_revoked_installed(const json::Value& ix, const json::Value& rv, const std::string& id, const std::string& version);
 } // namespace catalog

@@ -8,6 +8,7 @@
 #include <optional>
 
 #include "../catalog/verify.hpp"
+#include "core_config.hpp"
 #include "apply.hpp"
 #include "zip.hpp"
 
@@ -195,52 +196,200 @@ namespace core_stage::install
             return std::nullopt;
         }
 
-        // ------------------------------------------------------------ the folder on disk (step 7)
-        std::optional<Fail> check_folder(const Layout& l, const Pair& pr)
+        // ------------------------------------------------------------ the mod.json on disk
+        // Mods/<Name>/mod.json on disk: found false when there is none. Fail when it can't be read or isn't an object;
+        // id is "" when it holds no valid id, version "" when it holds no string version.
+        struct OnDisk
         {
-            if (pr.mod_name.empty()) return std::nullopt;
-            const std::wstring path = l.mods + L"\\" + widen(pr.mod_name) + L"\\mod.json";
+            bool found = false;
+            std::string id, version;
+        };
+        std::optional<Fail> read_on_disk(const Layout& l, const std::string& name, OnDisk& out)
+        {
+            const std::wstring path = l.mods + L"\\" + widen(name) + L"\\mod.json";
             if (!file_exists(path)) return std::nullopt;
             std::string text;
             DWORD e = 0;
             if (!read_file(path, k_max_mod_json, text, &e))
             {
-                if (e == ERROR_SHARING_VIOLATION || e == ERROR_LOCK_VIOLATION) return Fail{"error", "Mods/" + pr.mod_name + "/mod.json could not be read"};
-                return Fail{"folder-in-use", "Mods/" + pr.mod_name + "/mod.json on disk is not a mod.json this can read (over 64 KiB?)"};
+                if (e == ERROR_SHARING_VIOLATION || e == ERROR_LOCK_VIOLATION) return Fail{"error", "Mods/" + name + "/mod.json could not be read"};
+                return Fail{"folder-in-use", "Mods/" + name + "/mod.json on disk is not a mod.json this can read (over 64 KiB?)"};
             }
             Value j;
             std::string err;
-            if (!cat::json::parse(text, j, err, 16) || !j.is_obj()) return Fail{"folder-in-use", "Mods/" + pr.mod_name + "/mod.json on disk is not a JSON object"};
+            if (!cat::json::parse(text, j, err, 16) || !j.is_obj()) return Fail{"folder-in-use", "Mods/" + name + "/mod.json on disk is not a JSON object"};
+            out.found = true;
             const auto n = cat::modid::normalize(j.get("id"));
-            if (!n.error.empty() || n.id != pr.item.id) return Fail{"folder-in-use", "Mods/" + pr.mod_name + "/ holds " + (n.error.empty() ? n.id : std::string{"a mod without a valid id"}) + ", not " + pr.item.id};
+            if (n.error.empty()) out.id = n.id;
             const Value* v = j.get("version");
-            if (v && v->is_str() && semver_compare(v->s, pr.item.version) == 1)
-                return Fail{"downgrade", "Mods/" + pr.mod_name + "/ holds " + shown(v->s) + ", newer than " + pr.item.version};
+            if (v && v->is_str()) out.version = v->s;
             return std::nullopt;
         }
 
-        // ------------------------------------------------------------ installed.txt (step 8)
-        std::optional<Fail> add_deletes(const Layout& l, Pair& pr)
+        // ------------------------------------------------------------ the folder on disk (step 7)
+        // installed: the version on disk when the folder holds this id with a semver version (an update), else "".
+        // A newer version on disk is a downgrade, allowed only away from a revoked installed version (story 6: the
+        // native's own verified revoked list decides, never Lua).
+        std::optional<Fail> check_folder(const Layout& l, const Value& ix, const Value* rv, const Pair& pr, std::string& installed, std::vector<std::string>& details)
         {
-            const std::wstring path = l.data + L"\\installed.txt";
-            if (!file_exists(path)) return std::nullopt;
-            std::string text;
-            std::vector<Installed> list;
-            if (!read_file(path, k_max_installed_bytes, text) || !parse_installed(text, list)) return Fail{"error", "installed.txt could not be read"};
-            for (const auto& rec : list)
+            installed.clear();
+            if (pr.mod_name.empty()) return std::nullopt;
+            OnDisk d;
+            if (auto f = read_on_disk(l, pr.mod_name, d)) return f;
+            if (!d.found) return std::nullopt;
+            if (d.id != pr.item.id) return Fail{"folder-in-use", "Mods/" + pr.mod_name + "/ holds " + (!d.id.empty() ? d.id : std::string{"a mod without a valid id"}) + ", not " + pr.item.id};
+            if (cat::is_semver(d.version)) installed = d.version;
+            if (!d.version.empty() && semver_compare(d.version, pr.item.version) == 1)
             {
-                if (!ieq(rec.owner, pr.owner)) continue;
-                bool kept = false;
-                for (const auto& f : pr.files)
-                    if (ieq(f.target.rel, rec.target)) kept = true;
-                if (kept) continue;
+                const Value* hit = (rv && cat::is_semver(d.version)) ? cat::find_revoked_installed(ix, *rv, pr.item.id, d.version) : nullptr;
+                if (!hit) return Fail{"downgrade", "Mods/" + pr.mod_name + "/ holds " + shown(d.version) + ", newer than " + pr.item.version};
+                details.push_back("downgrade allowed: the installed " + pr.item.id + " " + d.version + " is revoked");
+            }
+            return std::nullopt;
+        }
+
+        bool is_player_data(const Target& t)
+        {
+            if (t.kind != TargetKind::ModFile) return false;
+            const auto parts = split(t.rel, '\\');
+            if (parts.size() != 7) return false;
+            const std::string& leaf = parts.back();
+            if (ieq(leaf, "settings.json") || ieq(leaf, "settings.json.bak")) return true;
+            return ieq(parts[5], "ModManager") && (ieq(leaf, "state.json") || ieq(leaf, "state.json.mm-bak"));
+        }
+
+        // ------------------------------------------------------------ the verified release zip (steps 2-3)
+        // Downloads (id, version) through story 2 (reusing a still-valid downloads/<sha256>.zip), checks the bytes
+        // against the index again and reads the zip. rv nullptr: the revoked list isn't consulted (story 6's list-only
+        // download of an installed version, whose bytes are only read, never staged). fresh: zips this call downloaded
+        // (removed on a refusal); used: the file, for the cleanup after a stage.
+        std::optional<Fail> fetch_zip(const Value& ix, const Value* rv, const std::string& id, const std::string& version, const fs::path& downloads, cat::fetch::Transport& t,
+                                      const fs::path& state_file, const std::atomic<bool>& cancel, std::vector<fs::path>& fresh, std::vector<std::string>& details,
+                                      std::vector<zip::Entry>& entries, fs::path& used)
+        {
+            const std::string what = id + " " + version;
+            std::string reason;
+            const auto plan = cat::fetch::plan_download(ix, rv, id, version, downloads, reason);
+            if (!plan)
+            {
+                const std::string code = reason == "too large" ? "too-large" : reason == "downloads folder full" ? "downloads-full" : reason == "not in the catalog" ? "not-in-catalog" : "error";
+                return Fail{code, what + ": " + reason};
+            }
+            if (!plan->revoked.empty()) return Fail{"revoked", plan->revoked};
+            cat::Verifier v;
+            fs::path file;
+            {
+                std::error_code ec;
+                const fs::path expect = downloads / cat::widen(plan->sha256 + ".zip");
+                if (!fs::exists(expect, ec)) fresh.push_back(expect);
+            }
+            try
+            {
+                file = cat::fetch::download_with_state(v, t, *plan, downloads, state_file, cancel);
+            }
+            catch (const cat::Reject& r)
+            {
+                for (auto& d : v.details) details.push_back(d);
+                return Fail{r.code, r.message};
+            }
+            catch (const cat::Unreachable& u)
+            {
+                for (auto& d : v.details) details.push_back(d);
+                return Fail{"unreachable", u.message};
+            }
+            for (auto& d : v.details) details.push_back(d);
+            used = file;
+            std::vector<uint8_t> zbytes;
+            bool too_big = false;
+            if (!cat::read_file(file, plan->size, zbytes, &too_big)) return Fail{too_big ? "size-mismatch" : "error", what + ": the downloaded file could not be read back"};
+            if (zbytes.size() != plan->size) return Fail{"size-mismatch", what + ": the downloaded file is " + std::to_string(zbytes.size()) + " bytes; the index says " + std::to_string(plan->size)};
+            if (sha_of(zbytes) != plan->sha256) return Fail{"hash-mismatch", what + ": the downloaded file's SHA-256 is not the index's"};
+            zip::Error zerr;
+            if (!zip::read(zbytes.data(), zbytes.size(), entries, zerr)) return Fail{zerr.code, what + ": " + zerr.message};
+            return std::nullopt;
+        }
+
+        // ------------------------------------------------------------ the files of the installed version (story 6)
+        struct Owned
+        {
+            std::vector<Op> deletes; // one per owned file: delete <Name> <sha256> <target>
+            size_t listed = 0, kept = 0, missing = 0;
+            std::string from; // "installed.txt" | "release zip"
+        };
+        struct OwnedArgs
+        {
+            const Layout& l;
+            const Value& ix;
+            const fs::path& downloads;
+            cat::fetch::Transport& t;
+            const fs::path& state_file;
+            const std::atomic<bool>& cancel;
+            std::vector<fs::path>& fresh;
+            std::vector<fs::path>& used;
+            std::vector<std::string>& details;
+        };
+        // For owner <Name> (the index name of id): installed.txt's records when it has any (target and recorded
+        // SHA-256); otherwise the installed (id, version)'s release named by the verified index, for any game build,
+        // downloaded and verified through story 2 even when revoked (only read), mapped with the install mapping (each
+        // target with its zip entry's hash); otherwise not-in-catalog. A listed file is owned only when it is on disk
+        // with that hash; another hash is kept (counted), a missing file skipped. Player data is never listed.
+        std::optional<Fail> owned_files(const OwnedArgs& a, const std::string& id, const std::string& version, const std::string& owner, Owned& out)
+        {
+            std::vector<std::pair<Target, std::string>> listed;
+            const std::wstring ipath = a.l.data + L"\\installed.txt";
+            if (file_exists(ipath))
+            {
+                std::string text;
+                std::vector<Installed> list;
+                if (!read_file(ipath, k_max_installed_bytes, text) || !parse_installed(text, list)) return Fail{"error", "installed.txt could not be read"};
+                for (const auto& rec : list)
+                {
+                    if (!ieq(rec.owner, owner)) continue;
+                    Target tg;
+                    std::string why;
+                    if (!parse_target(rec.target, tg, why)) continue; // story 3 writes only valid targets
+                    listed.emplace_back(tg, rec.sha256);
+                }
+                if (!listed.empty()) out.from = "installed.txt";
+            }
+            if (listed.empty())
+            {
+                if (version.empty() || !cat::find_version(a.ix, id, version)) return Fail{"not-in-catalog", id + " " + (version.empty() ? std::string{"(no version)"} : version) + ": the installed version is not in installed.txt nor in the catalog"};
+                std::vector<zip::Entry> entries;
+                fs::path file;
+                if (auto f = fetch_zip(a.ix, nullptr, id, version, a.downloads, a.t, a.state_file, a.cancel, a.fresh, a.details, entries, file)) return f;
+                a.used.push_back(file);
+                Pair old;
+                old.item = {id, version};
+                old.owner = owner;
+                if (auto f = map_entries(entries, old)) return Fail{f->outcome, id + " " + version + " (the installed release): " + f->message};
+                for (const auto& f : old.files) listed.emplace_back(f.target, f.sha);
+                out.from = "release zip";
+            }
+            for (const auto& [tg, sha] : listed)
+            {
+                if (is_player_data(tg)) continue;
+                ++out.listed;
+                const std::wstring abs = a.l.root + L"\\" + widen(tg.rel);
+                if (!file_exists(abs))
+                {
+                    ++out.missing;
+                    continue;
+                }
+                uint64_t size = 0;
+                std::string got;
+                if (!hash_file(abs, size, got) || got != sha)
+                {
+                    ++out.kept;
+                    a.details.push_back("kept: " + tg.rel + " (not the installed version's file)");
+                    continue;
+                }
                 Op op;
                 op.kind = OpKind::Delete;
-                op.owner = pr.owner;
-                op.sha256 = rec.sha256;
-                std::string why;
-                if (!parse_target(rec.target, op.target, why)) continue; // story 3 writes only valid targets
-                pr.deletes.push_back(std::move(op));
+                op.owner = owner;
+                op.sha256 = sha;
+                op.target = tg;
+                out.deletes.push_back(std::move(op));
             }
             return std::nullopt;
         }
@@ -275,6 +424,140 @@ namespace core_stage::install
         }
 
         std::string ops_word(size_t n) { return std::to_string(n) + (n == 1 ? " operation" : " operations"); }
+
+        // ------------------------------------------------------------ the write (under the lock), shared by stage and unstage
+        // Takes apply.lock, re-checks the journal, merges: every operation of an owner (or modstxt name) in drop is
+        // removed from the existing plan, add is appended, the result checked by story 3's parser; writes the staged
+        // files blobs names (sha -> bytes) as <sha>.tmp then renamed (reusing a right file), then plan.txt atomically;
+        // then removes staged files no operation references and the used downloads. On failure nothing changes.
+        struct Commit
+        {
+            std::string txn;
+            size_t ops = 0;
+        };
+        std::optional<Fail> commit(const Layout& l, const std::vector<std::string>& drop, const std::vector<Op>& add,
+                                   const std::map<std::string, const std::vector<uint8_t>*>& blobs, const std::vector<fs::path>& used, const std::atomic<bool>& cancel,
+                                   std::vector<std::string>& details, Commit& done)
+        {
+            if (!make_dirs(l.data)) return Fail{"error", "the data folder could not be created"};
+            Lock lock;
+            lock.h = CreateFileW((l.data + L"\\apply.lock").c_str(), GENERIC_READ | GENERIC_WRITE | DELETE, 0, nullptr, OPEN_ALWAYS,
+                                 FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
+            if (lock.h == INVALID_HANDLE_VALUE) return Fail{"applying", "a staged change is being applied (apply.lock is held)"};
+            // Again under the lock: an apply cut short while the downloads ran is rolled back first; nothing is written.
+            if (journal_interrupted(l)) return Fail{"interrupted", "an apply was cut short (found under apply.lock); it is rolled back first"};
+            const std::wstring staged = l.data + L"\\staged";
+            const std::wstring files_dir = staged + L"\\files";
+            const std::wstring plan_path = staged + L"\\plan.txt";
+
+            // The existing plan, merged by owner.
+            Plan merged;
+            if (file_exists(plan_path))
+            {
+                std::string text, why, bad;
+                if (!read_file(plan_path, k_max_plan_bytes, text) || !parse_plan(text, merged, why, bad)) return Fail{"error", "the staged plan could not be read (" + (why.empty() ? std::string{"unreadable"} : why) + ")"};
+            }
+            auto dropped = [&](const std::string& n) {
+                for (const auto& d : drop)
+                    if (ieq(d, n)) return true;
+                return false;
+            };
+            std::vector<Op> kept;
+            for (auto& op : merged.ops)
+                if (!dropped(op.kind == OpKind::ModsTxt ? op.name : op.owner)) kept.push_back(std::move(op));
+            merged.ops = std::move(kept);
+            for (const auto& op : add) merged.ops.push_back(op);
+            merged.txn = new_txn();
+            if (merged.txn.empty()) return Fail{"error", "no random txn"};
+            const std::string plan_text = serialize_plan(merged);
+            {
+                Plan check;
+                std::string why, bad;
+                if (!parse_plan(plan_text, check, why, bad))
+                {
+                    // twice first: its message names a line number, which may contain "1024"
+                    const bool twice = why.find("two operations on one target") != std::string::npos || why.find("two modstxt") != std::string::npos;
+                    const bool caps = why.find("1 MiB") != std::string::npos || why.find("512 MiB") != std::string::npos || why.find("1024") != std::string::npos;
+                    return Fail{twice ? "folder-in-use" : caps ? "too-large" : "error", "the merged plan is refused: " + why + (bad.empty() ? "" : " (" + bad + ")")};
+                }
+            }
+
+            // Staged files: <sha256>.tmp, renamed; a file already there with the right size and hash is reused.
+            std::vector<std::wstring> created;
+            auto undo = [&] {
+                for (const auto& c : created) DeleteFileW(c.c_str());
+                DeleteFileW((plan_path + L".tmp").c_str());
+            };
+            if (!make_dirs(files_dir)) return Fail{"error", "the staged folder could not be created"};
+            for (const auto& [sha, data] : blobs)
+            {
+                const std::wstring final_path = files_dir + L"\\" + widen(sha);
+                const bool existed = file_exists(final_path);
+                if (existed)
+                {
+                    uint64_t size = 0;
+                    std::string got;
+                    if (hash_file(final_path, size, got) && size == data->size() && got == sha) continue;
+                }
+                const std::wstring tmp = final_path + L".tmp";
+                if (DWORD e = write_bytes(tmp, *data))
+                {
+                    undo();
+                    return Fail{"error", "a staged file could not be written (error " + std::to_string(e) + ")"};
+                }
+                if (!MoveFileExW(tmp.c_str(), final_path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+                {
+                    const DWORD e = GetLastError();
+                    DeleteFileW(tmp.c_str());
+                    undo();
+                    return Fail{"error", "a staged file could not be renamed into place (error " + std::to_string(e) + ")"};
+                }
+                if (!existed) created.push_back(final_path);
+            }
+            if (cancel.load())
+            {
+                undo();
+                return Fail{"error", "cancelled"};
+            }
+            if (DWORD e = write_atomic(plan_path, plan_text))
+            {
+                undo();
+                return Fail{"error", "plan.txt could not be written (error " + std::to_string(e) + ")"};
+            }
+
+            // Cleanup: staged files no operation references, then the used downloads.
+            {
+                std::vector<std::wstring> referenced;
+                for (const auto& op : merged.ops)
+                    if (op.kind == OpKind::Put) referenced.push_back(widen(op.sha256));
+                WIN32_FIND_DATAW fd{};
+                const HANDLE h = FindFirstFileW((files_dir + L"\\*").c_str(), &fd);
+                if (h != INVALID_HANDLE_VALUE)
+                {
+                    std::vector<std::wstring> gone;
+                    do
+                    {
+                        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+                        const std::wstring n = fd.cFileName;
+                        if (std::find(referenced.begin(), referenced.end(), n) == referenced.end()) gone.push_back(n);
+                    } while (FindNextFileW(h, &fd));
+                    FindClose(h);
+                    for (const auto& n : gone)
+                    {
+                        DeleteFileW((files_dir + L"\\" + n).c_str());
+                        details.push_back("removed: staged file " + narrow(n));
+                    }
+                }
+                for (const auto& z : used)
+                {
+                    std::error_code ec;
+                    fs::remove(z, ec);
+                }
+            }
+            done.txn = merged.txn;
+            done.ops = merged.ops.size();
+            return std::nullopt;
+        }
     } // namespace
 
     int semver_compare(const std::string& a, const std::string& b)
@@ -343,6 +626,7 @@ namespace core_stage::install
             if (const std::string b = precheck ? blocked(l) : std::string{}; !b.empty()) return refuse(b, b == "applying" ? "a staged change is being applied" : "an apply was cut short; it is rolled back first");
             const fs::path downloads = fs::path{l.data} / L"downloads";
             std::vector<Pair> pairs;
+            std::vector<fs::path> used; // every download read: removed after a stage
             uint64_t total = 0;
             for (const auto& item : items)
             {
@@ -361,54 +645,20 @@ namespace core_stage::install
                 pr.owner = name->s;
                 for (const auto& other : pairs)
                     if (ieq(other.owner, pr.owner)) return refuse("bad-layout", what + ": two pairs have the name " + pr.owner);
-                // 2. the download (story 2), then the verified bytes in memory
-                std::string reason;
-                const auto plan = cat::fetch::plan_download(ix, rv, item.id, item.version, downloads, reason);
-                if (!plan)
-                {
-                    const std::string code = reason == "too large" ? "too-large" : reason == "downloads folder full" ? "downloads-full" : reason == "not in the catalog" ? "not-in-catalog" : "error";
-                    return refuse(code, what + ": " + reason);
-                }
-                if (!plan->revoked.empty()) return refuse("revoked", plan->revoked);
-                cat::Verifier v;
-                fs::path file;
-                {
-                    std::error_code ec;
-                    const fs::path expect = downloads / cat::widen(plan->sha256 + ".zip");
-                    if (!fs::exists(expect, ec)) fresh.push_back(expect);
-                }
-                try
-                {
-                    file = cat::fetch::download_with_state(v, t, *plan, downloads, state_file, cancel);
-                }
-                catch (const cat::Reject& r)
-                {
-                    for (auto& d : v.details) out.details.push_back(d);
-                    return refuse(r.code, r.message);
-                }
-                catch (const cat::Unreachable& u)
-                {
-                    for (auto& d : v.details) out.details.push_back(d);
-                    return refuse("unreachable", u.message);
-                }
-                for (auto& d : v.details) out.details.push_back(d);
-                pr.zip_file = file;
-                std::vector<uint8_t> zbytes;
-                bool too_big = false;
-                if (!cat::read_file(file, plan->size, zbytes, &too_big)) return refuse(too_big ? "size-mismatch" : "error", what + ": the downloaded file could not be read back");
-                if (zbytes.size() != plan->size) return refuse("size-mismatch", what + ": the downloaded file is " + std::to_string(zbytes.size()) + " bytes; the index says " + std::to_string(plan->size));
-                if (sha_of(zbytes) != plan->sha256) return refuse("hash-mismatch", what + ": the downloaded file's SHA-256 is not the index's");
-                // 3. the zip
+                // 2.-3. the download (story 2), the verified bytes, the zip
                 std::vector<zip::Entry> entries;
-                zip::Error zerr;
-                if (!zip::read(zbytes.data(), zbytes.size(), entries, zerr)) return refuse(zerr.code, what + ": " + zerr.message);
-                zbytes = {};
+                fs::path file;
+                if (auto f = fetch_zip(ix, rv, item.id, item.version, downloads, t, state_file, cancel, fresh, out.details, entries, file)) return refuse(f->outcome, f->message);
+                pr.zip_file = file;
+                used.push_back(file);
                 // 4.-6. the mapping, the zip's mod.json
                 if (auto f = map_entries(entries, pr)) return refuse(f->outcome, what + ": " + f->message);
+                entries.clear();
                 total += pr.bytes;
                 if (total > k_max_put_total) return refuse("too-large", what + ": the files are over 512 MiB in all");
-                // 7. the folder on disk
-                if (auto f = check_folder(l, pr)) return refuse(f->outcome, what + ": " + f->message);
+                // 7. the folder on disk (story 6: a downgrade only away from a revoked installed version)
+                std::string installed;
+                if (auto f = check_folder(l, ix, rv, pr, installed, out.details)) return refuse(f->outcome, what + ": " + f->message);
                 for (const auto& other : pairs)
                 {
                     if (!pr.mod_name.empty() && ieq(other.mod_name, pr.mod_name)) return refuse("bad-layout", what + ": two pairs install the mod folder " + pr.mod_name);
@@ -416,8 +666,27 @@ namespace core_stage::install
                         for (const auto& g : other.files)
                             if (ieq(f.target.rel, g.target.rel)) return refuse("bad-layout", what + ": two pairs install " + f.target.rel);
                 }
-                // 8. installed.txt
-                if (auto f = add_deletes(l, pr)) return refuse(f->outcome, what + ": " + f->message);
+                // 8. (story 6) the files of the installed version that the new zip doesn't put get delete lines: from
+                // installed.txt, else the installed version's verified release. An installed version the catalog no
+                // longer lists (and installed.txt doesn't know) gets no deletes: the update still goes ahead.
+                Owned owned;
+                const OwnedArgs oa{l, ix, downloads, t, state_file, cancel, fresh, used, out.details};
+                if (auto f = owned_files(oa, item.id, installed, pr.owner, owned))
+                {
+                    if (f->outcome != "not-in-catalog") return refuse(f->outcome, what + ": " + f->message);
+                    if (!installed.empty()) out.details.push_back("update: the installed " + item.id + " " + installed + " is not in installed.txt nor in the catalog; no files of it are deleted");
+                }
+                for (auto& d : owned.deletes)
+                {
+                    bool put = false;
+                    for (const auto& f : pr.files)
+                        if (ieq(f.target.rel, d.target.rel)) put = true;
+                    if (!put) pr.deletes.push_back(std::move(d));
+                }
+                if (!installed.empty() || !owned.from.empty())
+                    out.details.push_back("update: " + item.id + " " + (installed.empty() ? std::string{"?"} : installed) + " -> " + item.version + ": " + std::to_string(owned.listed) +
+                                          " files listed (" + (owned.from.empty() ? std::string{"none"} : owned.from) + "), " + std::to_string(owned.kept) + " kept, " +
+                                          std::to_string(owned.missing) + " missing");
                 out.details.push_back("pair: " + what + " (" + pr.owner + "): " + std::to_string(pr.files.size()) + " files, " + std::to_string(pr.bytes) + " bytes, " +
                                       std::to_string(pr.deletes.size()) + " deletes");
                 pairs.push_back(std::move(pr));
@@ -425,35 +694,13 @@ namespace core_stage::install
             failed_id.clear();
 
             // ---- the write, under the lock
-            if (!make_dirs(l.data)) return refuse("error", "the data folder could not be created");
-            Lock lock;
-            lock.h = CreateFileW((l.data + L"\\apply.lock").c_str(), GENERIC_READ | GENERIC_WRITE | DELETE, 0, nullptr, OPEN_ALWAYS,
-                                 FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
-            if (lock.h == INVALID_HANDLE_VALUE) return refuse("applying", "a staged change is being applied (apply.lock is held)");
-            // Again under the lock: an apply cut short while the downloads ran is rolled back first; nothing is written.
-            if (journal_interrupted(l)) return refuse("interrupted", "an apply was cut short (found under apply.lock); it is rolled back first");
-            const std::wstring staged = l.data + L"\\staged";
-            const std::wstring files_dir = staged + L"\\files";
-            const std::wstring plan_path = staged + L"\\plan.txt";
-
-            // The existing plan, merged by owner.
-            Plan merged;
-            if (file_exists(plan_path))
-            {
-                std::string text, why, bad;
-                if (!read_file(plan_path, k_max_plan_bytes, text) || !parse_plan(text, merged, why, bad)) return refuse("error", "the staged plan could not be read (" + (why.empty() ? std::string{"unreadable"} : why) + ")");
-            }
-            auto in_new = [&](const std::string& n) {
-                for (const auto& pr : pairs)
-                    if (ieq(pr.owner, n) || (!pr.mod_name.empty() && ieq(pr.mod_name, n))) return true;
-                return false;
-            };
-            std::vector<Op> kept;
-            for (auto& op : merged.ops)
-                if (!in_new(op.kind == OpKind::ModsTxt ? op.name : op.owner)) kept.push_back(std::move(op));
-            merged.ops = std::move(kept);
+            std::vector<std::string> drop;
+            std::vector<Op> add;
+            std::map<std::string, const std::vector<uint8_t>*> blobs;
             for (const auto& pr : pairs)
             {
+                drop.push_back(pr.owner);
+                if (!pr.mod_name.empty()) drop.push_back(pr.mod_name);
                 for (const auto& f : pr.files)
                 {
                     Op op;
@@ -462,109 +709,21 @@ namespace core_stage::install
                     op.sha256 = f.sha;
                     op.size = pr.blobs[f.data].size();
                     op.target = f.target;
-                    merged.ops.push_back(std::move(op));
+                    add.push_back(std::move(op));
+                    blobs.emplace(f.sha, &pr.blobs[f.data]);
                 }
-                for (const auto& d : pr.deletes) merged.ops.push_back(d);
+                for (const auto& d : pr.deletes) add.push_back(d);
                 if (!pr.mod_name.empty())
                 {
                     Op op;
                     op.kind = OpKind::ModsTxt;
                     op.name = pr.mod_name;
                     op.on = true;
-                    merged.ops.push_back(std::move(op));
+                    add.push_back(std::move(op));
                 }
             }
-            merged.txn = new_txn();
-            if (merged.txn.empty()) return refuse("error", "no random txn");
-            const std::string plan_text = serialize_plan(merged);
-            {
-                Plan check;
-                std::string why, bad;
-                if (!parse_plan(plan_text, check, why, bad))
-                {
-                    // twice first: its message names a line number, which may contain "1024"
-                    const bool twice = why.find("two operations on one target") != std::string::npos || why.find("two modstxt") != std::string::npos;
-                    const bool caps = why.find("1 MiB") != std::string::npos || why.find("512 MiB") != std::string::npos || why.find("1024") != std::string::npos;
-                    return refuse(twice ? "folder-in-use" : caps ? "too-large" : "error", "the merged plan is refused: " + why + (bad.empty() ? "" : " (" + bad + ")"));
-                }
-            }
-
-            // Staged files: <sha256>.tmp, renamed; a file already there with the right size and hash is reused.
-            std::vector<std::wstring> created;
-            auto undo = [&] {
-                for (const auto& c : created) DeleteFileW(c.c_str());
-                DeleteFileW((plan_path + L".tmp").c_str());
-            };
-            if (!make_dirs(files_dir)) return refuse("error", "the staged folder could not be created");
-            std::map<std::string, std::pair<const Pair*, size_t>> unique;
-            for (const auto& pr : pairs)
-                for (const auto& f : pr.files) unique.emplace(f.sha, std::make_pair(&pr, f.data));
-            for (const auto& [sha, src] : unique)
-            {
-                const auto& data = src.first->blobs[src.second];
-                const std::wstring final_path = files_dir + L"\\" + widen(sha);
-                const bool existed = file_exists(final_path);
-                if (existed)
-                {
-                    uint64_t size = 0;
-                    std::string got;
-                    if (hash_file(final_path, size, got) && size == data.size() && got == sha) continue;
-                }
-                const std::wstring tmp = final_path + L".tmp";
-                if (DWORD e = write_bytes(tmp, data))
-                {
-                    undo();
-                    return refuse("error", "a staged file could not be written (error " + std::to_string(e) + ")");
-                }
-                if (!MoveFileExW(tmp.c_str(), final_path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
-                {
-                    const DWORD e = GetLastError();
-                    DeleteFileW(tmp.c_str());
-                    undo();
-                    return refuse("error", "a staged file could not be renamed into place (error " + std::to_string(e) + ")");
-                }
-                if (!existed) created.push_back(final_path);
-            }
-            if (cancel.load())
-            {
-                undo();
-                return refuse("error", "cancelled");
-            }
-            if (DWORD e = write_atomic(plan_path, plan_text))
-            {
-                undo();
-                return refuse("error", "plan.txt could not be written (error " + std::to_string(e) + ")");
-            }
-
-            // Cleanup: staged files no operation references, then the used downloads.
-            {
-                std::vector<std::wstring> referenced;
-                for (const auto& op : merged.ops)
-                    if (op.kind == OpKind::Put) referenced.push_back(widen(op.sha256));
-                WIN32_FIND_DATAW fd{};
-                const HANDLE h = FindFirstFileW((files_dir + L"\\*").c_str(), &fd);
-                if (h != INVALID_HANDLE_VALUE)
-                {
-                    std::vector<std::wstring> gone;
-                    do
-                    {
-                        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
-                        const std::wstring n = fd.cFileName;
-                        if (std::find(referenced.begin(), referenced.end(), n) == referenced.end()) gone.push_back(n);
-                    } while (FindNextFileW(h, &fd));
-                    FindClose(h);
-                    for (const auto& n : gone)
-                    {
-                        DeleteFileW((files_dir + L"\\" + n).c_str());
-                        out.details.push_back("removed: staged file " + narrow(n));
-                    }
-                }
-                for (const auto& pr : pairs)
-                {
-                    std::error_code ec;
-                    fs::remove(pr.zip_file, ec);
-                }
-            }
+            Commit done;
+            if (auto f = commit(l, drop, add, blobs, used, cancel, out.details, done)) return refuse(f->outcome, f->message);
 
             out.outcome = "ok";
             Value owners = Value::array();
@@ -579,12 +738,97 @@ namespace core_stage::install
                 owners.items.push_back(std::move(o));
             }
             Value p = Value::object();
-            p.set("txn", Value::string(merged.txn));
+            p.set("txn", Value::string(done.txn));
             p.set("owners", std::move(owners));
-            p.set("ops", Value::integer(static_cast<int64_t>(merged.ops.size())));
+            p.set("ops", Value::integer(static_cast<int64_t>(done.ops)));
             out.payload = cat::json::write(p);
-            out.message = std::to_string(pairs.size()) + (pairs.size() == 1 ? " mod" : " mods") + " staged; the plan has " + ops_word(merged.ops.size()) + ", txn " + merged.txn;
-            out.details.push_back("txn: " + merged.txn);
+            out.message = std::to_string(pairs.size()) + (pairs.size() == 1 ? " mod" : " mods") + " staged; the plan has " + ops_word(done.ops) + ", txn " + done.txn;
+            out.details.push_back("txn: " + done.txn);
+            return out;
+        }
+        catch (const std::bad_alloc&)
+        {
+            return refuse("too-large", "not enough memory");
+        }
+        catch (const std::exception& e)
+        {
+            return refuse("error", std::string{"unexpected failure: "} + e.what());
+        }
+        catch (...)
+        {
+            return refuse("error", "unexpected failure");
+        }
+    }
+
+    bool is_base_pack(const std::string& id)
+    {
+        std::string core = CORE_NAME;
+        for (auto& c : core) c = (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
+        return id == std::string{k_base_namespace} + "." + core || id == std::string{k_base_namespace} + ".mod-manager";
+    }
+
+    Outcome run_unstage(const Layout& l, const Value& ix, const Item& item, cat::fetch::Transport& t, const fs::path& state_file, const std::atomic<bool>& cancel,
+                        bool precheck)
+    {
+        Outcome out;
+        std::vector<fs::path> fresh;
+        auto refuse = [&](const std::string& code, const std::string& message) {
+            for (const auto& z : fresh)
+            {
+                std::error_code ec;
+                fs::remove(z, ec);
+            }
+            out.outcome = code;
+            out.message = message;
+            out.payload = "{\"failed\":" + cat::json::quote(item.id) + "}";
+            return out;
+        };
+        try
+        {
+            const std::string what = item.id + " " + item.version;
+            if (is_base_pack(item.id)) return refuse("base-pack", what + ": the installer removes the base pack's mods");
+            if (const std::string b = precheck ? blocked(l) : std::string{}; !b.empty()) return refuse(b, b == "applying" ? "a staged change is being applied" : "an apply was cut short; it is rolled back first");
+            const Value* pkg = find_package(ix, item.id);
+            if (!pkg) return refuse("not-in-catalog", what + ": the id is not in the catalog");
+            const Value* name = pkg->get("name");
+            if (!name || !name->is_str() || !is_name(name->s) || is_stock_mod(name->s)) return refuse("not-in-catalog", what + ": the index name is not a mod folder name");
+            const std::string owner = name->s;
+            OnDisk d;
+            if (auto f = read_on_disk(l, owner, d)) return refuse(f->outcome == "folder-in-use" ? "not-installed" : f->outcome, what + ": " + f->message);
+            if (!d.found || d.id != item.id) return refuse("not-installed", what + ": Mods/" + owner + "/mod.json " + (d.found ? "holds another id" : "is not there"));
+            if (d.version != item.version) return refuse("changed", what + ": Mods/" + owner + "/ holds " + shown(d.version.empty() ? std::string{"no version"} : d.version));
+            const fs::path downloads = fs::path{l.data} / L"downloads";
+            std::vector<fs::path> used;
+            Owned owned;
+            const OwnedArgs oa{l, ix, downloads, t, state_file, cancel, fresh, used, out.details};
+            if (auto f = owned_files(oa, item.id, item.version, owner, owned)) return refuse(f->outcome, f->message);
+            out.details.push_back("unstage: " + what + " (" + owner + "): " + std::to_string(owned.listed) + " files listed (" + owned.from + "), " +
+                                  std::to_string(owned.deletes.size()) + " deletes, " + std::to_string(owned.kept) + " kept, " + std::to_string(owned.missing) + " missing");
+            std::vector<Op> add = owned.deletes;
+            Op mt;
+            mt.kind = OpKind::ModsTxt;
+            mt.name = owner;
+            mt.on = false;
+            add.push_back(std::move(mt));
+            Commit done;
+            if (auto f = commit(l, {owner}, add, {}, used, cancel, out.details, done)) return refuse(f->outcome, f->message);
+            out.outcome = "ok";
+            Value o = Value::object();
+            o.set("id", Value::string(item.id));
+            o.set("version", Value::string(item.version));
+            o.set("name", Value::string(owner));
+            o.set("files", Value::integer(static_cast<int64_t>(owned.deletes.size())));
+            o.set("kept", Value::integer(static_cast<int64_t>(owned.kept)));
+            Value owners = Value::array();
+            owners.items.push_back(std::move(o));
+            Value p = Value::object();
+            p.set("txn", Value::string(done.txn));
+            p.set("owners", std::move(owners));
+            p.set("ops", Value::integer(static_cast<int64_t>(done.ops)));
+            out.payload = cat::json::write(p);
+            out.message = owner + " removal staged (" + std::to_string(owned.deletes.size()) + " files, " + std::to_string(owned.kept) + " kept); the plan has " + ops_word(done.ops) +
+                          ", txn " + done.txn;
+            out.details.push_back("txn: " + done.txn);
             return out;
         }
         catch (const std::bad_alloc&)

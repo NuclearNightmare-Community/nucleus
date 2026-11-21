@@ -13,3 +13,5 @@ unreal/NuclearNightmare/DerivedDataCache/
 unreal/NuclearNightmare/Content/
 unreal/NuclearNightmare/.vs/
 unreal/NuclearNightmare/*.sln
+# build.ps1 -TestCatalog: the test flavour of main.dll (CORE_CATALOG_TEST), never committed or packaged
+native/build-test/

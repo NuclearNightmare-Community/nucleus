@@ -28,13 +28,21 @@
 --       folder-in-use, downgrade, applying, interrupted, error. reason: "busy", "no verified index", "applying",
 --       "interrupted", "data folder unknown", "bad arguments: <why>", "native part missing", "error: <message>" (for
 --       example an id the normalizer refuses, or an id listed twice).
+--       Story 6: an installed owner makes a pair an update (the installed version's files the new release lacks are
+--       deleted; a downgrade only away from an installed version the verified revoked list names).
+--   unstage(id, version)     -> job, or nil, reason                                   (Mod Manager v2 story 6)
+--       Stages the removal of the installed (id, version) into the same change: a delete for each file the installed
+--       version owns (a file changed on disk is kept and counted) and its mods.txt line removed. Only the id and version
+--       reach the native part. Outcomes (poll): ok, not-installed, changed, not-in-catalog, base-pack (core or Mod
+--       Manager: the installer removes those), story 2's download outcomes, applying, interrupted, error. Payload of ok:
+--       { txn, owners = { { id, version, name, files, kept } }, ops }. reason: as stage's.
 local BASE = (...):gsub("%.catalog$", "")
 local V = require(BASE .. ".version")
 local json = require(BASE .. ".json")
 
 local M = {}
 local KEY_REFRESH, KEY_DOWNLOAD, KEY_POLL = V.name .. "_CatalogRefresh", V.name .. "_CatalogDownload", V.name .. "_CatalogPoll"
-local KEY_STAGE = V.name .. "_CatalogStage"
+local KEY_STAGE, KEY_UNSTAGE = V.name .. "_CatalogStage", V.name .. "_CatalogUnstage"
 
 -- What a payload may hold: two 4 MiB catalog files and the detail lines, nested at most 64 deep inside one wrapper.
 M.CAPS = { maxBytes = 9 * 1024 * 1024, maxDepth = 66, maxValues = 2000000, maxString = 4 * 1024 * 1024 }
@@ -99,6 +107,17 @@ function M.stage(list)
         args[#args + 1] = e.version
     end
     local ok, job, why = call(KEY_STAGE, table.unpack(args, 1, #args))
+    if not ok then return nil, job end
+    if math.type(job) == "integer" then return job end
+    return nil, type(why) == "string" and why or "error: no job"
+end
+
+function M.unstage(id, version)
+    local okId, whyId = textArg(id, "id", M.MAX_ID)
+    if not okId then return nil, "bad arguments: " .. whyId end
+    local okV, whyV = textArg(version, "version", M.MAX_VERSION)
+    if not okV then return nil, "bad arguments: " .. whyV end
+    local ok, job, why = call(KEY_UNSTAGE, id, version)
     if not ok then return nil, job end
     if math.type(job) == "integer" then return job end
     return nil, type(why) == "string" and why or "error: no job"

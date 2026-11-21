@@ -15,7 +15,10 @@
 //                         story 5; stage/install.hpp), against the install layout under <dir> (story 3's --root: a temp
 //                         folder holding NuclearNightmare\...); prints the outcome, the message, the detail lines and
 //                         "payload: <json>"; downloads go to <dir>'s <Core>Data\downloads
-//   -NoPrecheck           with -Stage: skip the applying/interrupted checks made before the downloads (here and in
+//   -Unstage <id> <version>
+//                         with -Root <dir> -Index [-Revoked] [-StateFile]: the removal <Core>_CatalogUnstage stages (Mod
+//                         Manager v2 story 6), printed like -Stage
+//   -NoPrecheck           with -Stage or -Unstage: skip the applying/interrupted checks made before the downloads (here and in
 //                         run_stage), so the ones made once apply.lock is held answer (stage.tests.ps1)
 // -Minisign is accepted and ignored (signatures are checked in process).
 #include <cstdio>
@@ -75,7 +78,8 @@ namespace
     {
         std::map<std::string, std::string> values; // lower-case name -> value
         std::vector<std::string> switches;
-        std::vector<std::string> stage; // -Stage's id, version pairs
+        std::vector<std::string> stage;   // -Stage's id, version pairs
+        std::vector<std::string> unstage; // -Unstage's id and version
         std::string bad;
         std::string get(const char* n) const
         {
@@ -112,6 +116,12 @@ namespace
             {
                 a.switches.push_back(name);
                 while (i + 1 < argc && !(argv[i + 1][0] == L'-' && argv[i + 1][1] != L'\0' && !(argv[i + 1][1] >= L'0' && argv[i + 1][1] <= L'9'))) a.stage.push_back(narrow(argv[++i]));
+                continue;
+            }
+            if (name == "unstage")
+            {
+                a.switches.push_back(name);
+                for (int k = 0; k < 2 && i + 1 < argc; ++k) a.unstage.push_back(narrow(argv[++i]));
                 continue;
             }
             for (const char* f : flags)
@@ -243,6 +253,48 @@ namespace
             return finish("error", std::string{"unexpected failure: "} + e.what(), v.details);
         }
     }
+    // -Unstage: verify the index (and revoked list) files, then the same removal as <Core>_CatalogUnstage, under -Root.
+    int run_unstage_mode(const Args& a)
+    {
+        Verifier v;
+        try
+        {
+            const std::string index = a.get("index"), revoked = a.get("revoked"), root = a.get("root");
+            if (index.empty() || root.empty()) fail("error", "-Unstage needs -Root and -Index");
+            if (a.unstage.size() != 2) fail("error", "-Unstage takes <id> <version>");
+            const auto nid = modid::normalize(a.unstage[0]);
+            if (!nid.error.empty()) fail("error", "-Unstage id " + a.unstage[0] + ": " + nid.error);
+            if (!is_semver(a.unstage[1])) fail("error", "-Unstage version " + a.unstage[1] + ": not semver");
+            core_stage::Layout l;
+            if (!core_stage::layout_from_root(full_path(root).wstring(), widen(CORE_NAME), l)) fail("error", "-Root is not an absolute folder");
+            const fs::path state_file = a.get("statefile").empty() ? fs::path{} : full_path(a.get("statefile"));
+            trust(v, a, a.get("trustedkeys"));
+            const fs::path ixf = full_path(index);
+            const json::Value ix = v.check_index_file(ixf, fs::path{ixf} += L".minisig");
+            if (!revoked.empty())
+            {
+                const fs::path rvf = full_path(revoked);
+                (void)v.check_revoked_file(rvf, fs::path{rvf} += L".minisig");
+            }
+            const bool precheck = !a.sw("noprecheck");
+            if (const std::string b = precheck ? core_stage::install::blocked(l) : std::string{}; !b.empty()) return finish(b, "refused before the job: " + b, v.details);
+            auto t = fetch::make_transport(transport_options(a));
+            std::atomic<bool> cancel{false};
+            const auto o = core_stage::install::run_unstage(l, ix, {nid.id, a.unstage[1]}, *t, state_file, cancel, precheck);
+            for (const auto& d : o.details) v.note(d);
+            v.note("payload: " + o.payload);
+            return finish(o.outcome, o.message, v.details);
+        }
+        catch (const Reject& r)
+        {
+            return finish(r.code, r.message, v.details);
+        }
+        catch (const std::exception& e)
+        {
+            return finish("error", std::string{"unexpected failure: "} + e.what(), v.details);
+        }
+    }
+
     // -Stage: verify the index (and revoked list) files, then the same stage as <Core>_CatalogStage, under -Root.
     int run_stage_mode(const Args& a)
     {
@@ -309,6 +361,7 @@ int wmain(int argc, wchar_t** argv)
     if (a.sw("printbuiltins")) return print_builtins();
     if (a.sw("download")) return run_download_mode(a);
     if (a.sw("stage")) return run_stage_mode(a);
+    if (a.sw("unstage")) return run_unstage_mode(a);
 
     Verifier v;
     std::string code, message;

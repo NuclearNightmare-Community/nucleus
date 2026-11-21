@@ -31,6 +31,20 @@
 //     held), "interrupted" (a journal without "done"), "data folder unknown". The job downloads, verifies, reads and maps
 //     each pair's zip and merges it into story 3's staged plan (stage/install.hpp has the rules and outcomes). Payload
 //     of ok: {"txn","owners":[{"id","version","name","files","bytes"}],"ops"}; otherwise {"failed":<id>|null}.
+//     Story 6: an installed owner makes it an update (delete lines for the installed version's files the new zip
+//     lacks; a downgrade only away from an installed version this catalog's revoked list names).
+//   <Core>_CatalogUnstage(id, version) -> job, or nil, reason before anything is fetched (Mod Manager v2 story 6):
+//     the same argument checks as one Stage pair (exactly 2 arguments) and the same reasons. The job stages the
+//     removal of the installed (id, version): delete lines for its owned files and modstxt <Name> remove, merged by
+//     owner (stage/install.hpp). Outcomes: ok, not-installed, changed, not-in-catalog, base-pack, story 2's download
+//     outcomes, applying, interrupted, error. Payload of ok: {"txn","owners":[{"id","version","name","files","kept"}],
+//     "ops"}; otherwise {"failed":<id>}.
+// Test build (CORE_CATALOG_TEST, build.ps1 -TestCatalog: native/build-test/main.dll, never packaged; build.ps1's package
+// step refuses a main.dll carrying k_test_marker): only it reads ue4ss/<Core>Data/catalog-test.json, at most 64 KiB:
+// {"keys": [{"role","name","key"}, ...] (story 2's -TrustedKeys list, trusted instead of the built-in keys),
+//  "proxy": "<host>:<port>" (a named proxy instead of the system's), "pinCert": "<64 hex>" (the server certificate's
+// SHA-256 instead of Windows' chain checks)}. Every field is optional; a file that is there but malformed fails every
+// job with "error". Without the file the test build behaves like the shipped one.
 // One job at a time: a start while one is queued or running answers nil, "busy". Arguments: Refresh takes none; Download
 // two strings (id through the mod id normalizer, at most 200 bytes; version semver, at most 128 bytes); Poll one
 // integer 1..2^53-1. Anything else raises "<fn>: <problem>". The worker never touches Lua or a UObject; it catches
@@ -66,6 +80,7 @@ namespace core_native::catalog_natives
     const std::string g_fn_download = std::string{CORE_NAME} + "_CatalogDownload";
     const std::string g_fn_poll = std::string{CORE_NAME} + "_CatalogPoll";
     const std::string g_fn_stage = std::string{CORE_NAME} + "_CatalogStage";
+    const std::string g_fn_unstage = std::string{CORE_NAME} + "_CatalogUnstage";
 
     namespace
     {
@@ -90,7 +105,8 @@ namespace core_native::catalog_natives
             {
                 Refresh,
                 Download,
-                Stage
+                Stage,
+                Unstage
             } kind = Kind::Refresh;
             int64_t id = 0;
             cat::fetch::Plan plan;
@@ -181,10 +197,72 @@ namespace core_native::catalog_natives
             return cat::json::write(arr);
         }
 
+#ifdef CORE_CATALOG_TEST
+        // build.ps1's package step refuses any main.dll holding these bytes (Mod Manager v2 story 6).
+        const char k_test_marker[] = "NN-CORE-CATALOG-TEST-BUILD-NEVER-PACKAGE";
+        // catalog-test.json, read by the worker before each job (worker thread only).
+        struct TestConfig
+        {
+            bool present = false;
+            std::optional<Value> keys;
+            std::string proxy, pin;
+        };
+        TestConfig g_test;
+
+        // "" when the file is absent or good (g_test set), else why it is refused.
+        std::string read_test_config(const fs::path& data)
+        {
+            g_test = TestConfig{};
+            const fs::path f = data / L"catalog-test.json";
+            if (!cat::is_file(f)) return {};
+            std::vector<uint8_t> bytes;
+            bool too_big = false;
+            if (!cat::read_file(f, 64 * 1024, bytes, &too_big)) return too_big ? "catalog-test.json is over 64 KiB" : "catalog-test.json could not be read";
+            Value j;
+            std::string err;
+            if (!cat::json::parse(std::string_view{reinterpret_cast<const char*>(bytes.data()), bytes.size()}, j, err, 8) || !j.is_obj()) return "catalog-test.json is not a JSON object";
+            TestConfig c;
+            c.present = true;
+            for (size_t m = 0; m < j.keys.size(); ++m)
+            {
+                const std::string& k = j.keys[m];
+                const Value& v = j.vals[m];
+                if (k == "keys")
+                {
+                    if (!v.is_arr() || v.items.empty() || v.items.size() > 8) return "catalog-test.json: keys must be an array of 1 to 8 keys";
+                    c.keys = v;
+                }
+                else if (k == "proxy")
+                {
+                    if (!v.is_str() || v.s.empty() || v.s.size() > 64 || v.s.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-:") != std::string::npos)
+                        return "catalog-test.json: proxy must be <host>:<port> (at most 64 bytes)";
+                    c.proxy = v.s;
+                }
+                else if (k == "pinCert")
+                {
+                    if (!v.is_str() || !cat::is_sha256(v.s)) return "catalog-test.json: pinCert must be 64 hex digits";
+                    c.pin = v.s;
+                }
+                else
+                {
+                    return "catalog-test.json: unknown field " + echo(k);
+                }
+            }
+            g_test = std::move(c);
+            logf("catalog: {}: catalog-test.json read (keys {}, proxy {}, pinned certificate {})", k_test_marker, g_test.keys ? std::to_string(g_test.keys->items.size()) : std::string{"built-in"},
+                 g_test.proxy.empty() ? std::string{"system"} : g_test.proxy, g_test.pin.empty() ? "no" : "yes");
+            return {};
+        }
+#endif
+
         cat::fetch::Options transport_options()
         {
             cat::fetch::Options o;
             o.user_agent = std::string{CORE_NAME} + "/" + CORE_VERSION;
+#ifdef CORE_CATALOG_TEST
+            o.proxy = g_test.proxy;
+            o.pin_sha256 = g_test.pin;
+#endif
             return o;
         }
 
@@ -215,8 +293,18 @@ namespace core_native::catalog_natives
             try
             {
                 v.state_file = data / L"catalog" / L"state.json";
-                v.note("trust: built-in (3 keys)");
-                v.trust_builtin();
+#ifdef CORE_CATALOG_TEST
+                if (g_test.keys)
+                {
+                    v.note("trust: catalog-test.json (test build, " + std::to_string(g_test.keys->items.size()) + " keys)");
+                    v.trust_list(*g_test.keys);
+                }
+                else
+#endif
+                {
+                    v.note("trust: built-in (3 keys)");
+                    v.trust_builtin();
+                }
                 v.trust_saved_next();
                 const fs::path copy = data / L"catalog" / L"copy";
                 std::error_code ec;
@@ -335,6 +423,27 @@ namespace core_native::catalog_natives
             job.payload = o.payload;
         }
 
+        // Story 6: the removal of one installed (id, version).
+        void run_unstage(Job& job, const fs::path& data)
+        {
+            core_stage::Layout l;
+            if (!own_layout(l) || !job.verified || job.items.size() != 1)
+            {
+                job.outcome = "error";
+                job.message = "data folder unknown";
+                job.payload = "{\"failed\":null}";
+                return;
+            }
+            core_stage::install::Outcome o;
+            with_transport([&](cat::fetch::Transport& t) {
+                o = core_stage::install::run_unstage(l, job.verified->ix, job.items[0], t, data / L"catalog" / L"state.json", g_cancel);
+            });
+            for (const auto& d : o.details) logf("catalog: unstage job {}: {}", job.id, d);
+            job.outcome = o.outcome;
+            job.message = o.message;
+            job.payload = o.payload;
+        }
+
         void worker()
         {
             while (true)
@@ -348,14 +457,25 @@ namespace core_native::catalog_natives
                     g_pending.reset();
                     g_running = job.id;
                 }
-                const char* what = job.kind == Job::Kind::Refresh ? "refresh" : job.kind == Job::Kind::Download ? "download" : "stage";
+                const char* what = job.kind == Job::Kind::Refresh ? "refresh" : job.kind == Job::Kind::Download ? "download" : job.kind == Job::Kind::Stage ? "stage" : "unstage";
                 try
                 {
                     const fs::path data = data_dir();
+#ifdef CORE_CATALOG_TEST
+                    const std::string bad_test = data.empty() ? std::string{} : read_test_config(data);
+#else
+                    const std::string bad_test;
+#endif
                     if (data.empty())
                     {
                         job.outcome = "error";
                         job.message = "data folder unknown";
+                        job.payload = "{}";
+                    }
+                    else if (!bad_test.empty())
+                    {
+                        job.outcome = "error";
+                        job.message = bad_test;
                         job.payload = "{}";
                     }
                     else if (job.kind == Job::Kind::Refresh)
@@ -365,6 +485,10 @@ namespace core_native::catalog_natives
                     else if (job.kind == Job::Kind::Stage)
                     {
                         run_stage(job, data);
+                    }
+                    else if (job.kind == Job::Kind::Unstage)
+                    {
+                        run_unstage(job, data);
                     }
                     else
                     {
@@ -518,6 +642,42 @@ namespace core_native::catalog_natives
             for (const auto& it : job.items) list += (list.empty() ? "" : ", ") + it.id + " " + it.version;
             const int64_t id = queue(std::move(job));
             logf("catalog: stage job {} started ({})", id, list);
+            return integer(id);
+        });
+    }
+
+    int l_unstage(const Lua& lua)
+    {
+        return guarded(lua, g_fn_unstage, [&] {
+            const std::string& fn = g_fn_unstage;
+            require_args(lua, fn, 2, " (id, version)");
+            // Arguments are taken from the bottom of the stack: each read removes argument 1.
+            if (!lua.is_string(1)) throw ArgError(std::format("{}: argument 1 (id) must be a string, got {}", fn, describe_first_arg(lua)));
+            const std::string id_in{lua.get_string(1)};
+            if (!lua.is_string(1)) throw ArgError(std::format("{}: argument 2 (version) must be a string, got {}", fn, describe_first_arg(lua)));
+            const std::string version{lua.get_string(1)};
+            const auto nid = cat::modid::normalize(id_in);
+            if (!nid.error.empty()) throw ArgError(std::format("{}: argument 1 (id): {}", fn, nid.error));
+            if (version.size() > k_max_version) throw ArgError(std::format("{}: argument 2 (version) must be at most {} bytes, got {}", fn, k_max_version, version.size()));
+            if (!cat::is_semver(version)) throw ArgError(std::format("{}: argument 2 (version) is not semver: '{}'", fn, echo(version)));
+            core_stage::Layout l;
+            if (data_dir().empty() || !own_layout(l)) return nil_reason("data folder unknown");
+            std::shared_ptr<const Verified> verified;
+            {
+                std::lock_guard g{g_mu};
+                if (g_stop || busy()) return nil_reason("busy");
+                verified = g_verified;
+            }
+            if (!verified) return nil_reason("no verified index");
+            if (const std::string b = core_stage::install::blocked(l); !b.empty()) return nil_reason(b);
+            std::lock_guard g{g_mu};
+            if (g_stop || busy()) return nil_reason("busy");
+            Job job;
+            job.kind = Job::Kind::Unstage;
+            job.items = {{nid.id, version}};
+            job.verified = std::move(verified);
+            const int64_t id = queue(std::move(job));
+            logf("catalog: unstage job {} started ({} {})", id, nid.id, version);
             return integer(id);
         });
     }

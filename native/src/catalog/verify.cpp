@@ -1257,6 +1257,21 @@ namespace catalog
         return nullptr;
     }
 
+    const Value* find_revoked_installed(const Value& ix, const Value& rv, const std::string& id, const std::string& version)
+    {
+        const Value* list = rv.get("revoked");
+        if (!list || !list->is_arr() || id.empty()) return nullptr;
+        const Value* entry = find_version(ix, id, version);
+        const Value* esha = entry ? entry->get_ci("sha256") : nullptr;
+        for (const auto& r : list->items)
+        {
+            if (modid::normalize(r.get("id")).id != id || !is_str(r.get("version")) || r.get("version")->s != version) continue;
+            if (!entry) return &r;
+            if (is_str(r.get("sha256")) && is_str(esha) && text::iequal(r.get("sha256")->s, esha->s)) return &r;
+        }
+        return nullptr;
+    }
+
     // ---------------------------------------------------------------- 6. package against the index entry
     std::string Verifier::check_package_file(const Value& ix, const fs::path& package, const std::string& id, const std::string& version)
     {
