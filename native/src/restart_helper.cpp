@@ -307,7 +307,9 @@ namespace
             CloseHandle(h);
             return k_no_layout;
         }
-        core_stage::delete_old_helpers(layout.core_dir + L"\\bin");
+        // An interrupted apply's journal may still need a bin\*.old copy (a self-update's "moved" step): kept until the
+        // recovery after the wait has put it back.
+        if (core_stage::staged_state(layout) != core_stage::StagedState::Interrupted) core_stage::delete_old_helpers(layout.core_dir + L"\\bin");
         const DWORD game_pid = GetProcessId(h); // 0 without PROCESS_QUERY_LIMITED_INFORMATION: never relaunched
         const DWORD w = WaitForSingleObject(h, INFINITE);
         CloseHandle(h);

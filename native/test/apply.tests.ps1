@@ -180,6 +180,24 @@ try {
     $inst = Text (Join-Path $data 'installed.txt')
     Ok ($inst -ceq "nucleus-installed`t1`nModA`t$((Get-FileHash -LiteralPath (Join-Path $root $A_BASE) -Algorithm SHA256).Hash.ToLowerInvariant())`t$A_BASE`n") 'delete: installed.txt keeps only the base pak' $inst
 
+    # ---- "modstxt on", the Mod Manager's modstxt.lua rule: every line of the folder set to 1 (only the value after its
+    # last ':', each line's own ending kept, nothing inserted); with no Keybinds line and no final newline, the line goes at
+    # the end, the old last line takes the file's newline and the new one keeps "no final newline".
+    foreach ($c in @(
+            @{ L = 'two lines of ModA (mixed spacing) set to 1, nothing inserted'
+               In = "`u{FEFF}$name : 1`r`nModA : 0`r`nBPModLoaderMod : 1`r`n  ModA:0`nKeybinds : 1`r`n"
+               Want = "`u{FEFF}$name : 1`r`nModA : 1`r`nBPModLoaderMod : 1`r`n  ModA: 1`nKeybinds : 1`r`n" },
+            @{ L = 'no Keybinds line, no final newline: appended at the end'
+               In = "$name : 1`r`nBPModLoaderMod : 1"
+               Want = "$name : 1`r`nBPModLoaderMod : 1`r`nModA : 1" })) {
+        Reset-Layout
+        [IO.File]::WriteAllText($modsTxt, $c.In, $utf8)
+        $null = Stage @(@{ Op = 'modstxt'; Name = 'ModA'; Value = 'on' })
+        $r = Apply
+        $got = [IO.File]::ReadAllText($modsTxt, $utf8)
+        Ok ((ResultOf 'outcome') -eq 'applied' -and $got -ceq $c.Want) "modstxt on: $($c.L), byte for byte" "[$($got -replace "`r", '\r' -replace "`n", '\n')]"
+    }
+
     # ================================================================ locked target
     Reset-Layout
     New-Item -ItemType Directory -Force (Split-Path (Join-Path $root $EXIST)) | Out-Null
@@ -259,6 +277,7 @@ try {
         'stock mod (case)'    = 'NuclearNightmare\Binaries\Win64\ue4ss\Mods\keybinds\x.lua'
         'mods.txt by put'     = 'NuclearNightmare\Binaries\Win64\ue4ss\Mods\mods.txt'
         'data folder'         = "NuclearNightmare\Binaries\Win64\ue4ss\$($name)Data\installed.txt"
+        'Mod Manager state'   = 'NuclearNightmare\Binaries\Win64\ue4ss\Mods\modmanager\STATE.json'
         'outside the layout'  = 'NuclearNightmare\Binaries\Win64\evil.dll'
         'UE4SS.dll'           = 'NuclearNightmare\Binaries\Win64\ue4ss\UE4SS.dll'
         'device name'         = 'NuclearNightmare\Binaries\Win64\ue4ss\Mods\ModA\CON.lua'
@@ -325,7 +344,7 @@ try {
     $modsBefore = [IO.File]::ReadAllBytes($modsTxt)
     $steps = @($planA) + @(@{ Op = 'put'; Owner = 'ModX'; Target = $EXIST; Text = 'new X' }, @{ Op = 'delete'; Owner = 'ModY'; Target = $Y_BASE })
     $allOk = $true; $detail = ''
-    foreach ($n in 0..6) {
+    foreach ($n in 0..7) {
         $t = Stage $steps
         Remove-Item (Join-Path $data 'staged\attempts.txt') -ErrorAction SilentlyContinue
         $r = Apply "--fail-after $n"
@@ -334,10 +353,10 @@ try {
             $allOk = $false; $detail += "[n=$n $(ResultOf 'outcome')/$(ResultOf 'reason') $(Diff $before (Snapshot))] "
         }
     }
-    Ok $allOk '--fail-after 0..6: every step rolled back byte-identically (files, folders, mods.txt), plan still staged' $detail
+    Ok $allOk '--fail-after 0..7 (7: after mods.txt was rewritten): every step rolled back byte-identically (files, folders, mods.txt), plan still staged' $detail
 
     # ================================================================ interrupted (--crash-after), then recovery
-    foreach ($n in 1, 3, 5) {
+    foreach ($n in 1, 3, 5, 7) {
         Reset-Layout
         New-Item -ItemType Directory -Force (Split-Path (Join-Path $root $EXIST)) | Out-Null
         [IO.File]::WriteAllText((Join-Path $root $EXIST), 'old X')
@@ -347,9 +366,10 @@ try {
         $r = Apply "--crash-after $n"
         $journal = Text (Join-Path $data 'rollback\journal.txt')
         Ok ($r.Code -eq 9 -and $journal -and -not $journal.TrimEnd().EndsWith('done') -and -not (Same $before (Snapshot))) "crash after $n writes: the process ended mid-apply, the journal has no done" "exit $($r.Code)"
+        if ($n -eq 7) { Ok ([IO.File]::ReadAllText($modsTxt, $utf8) -cne $stockTxt) 'crash after 7 writes: mods.txt had been rewritten (so its rollback is what is tested)' }
         Move-Item (Join-Path $data 'staged\plan.txt') (Join-Path $tmp 'plan.saved') -Force
         $r = Apply
-        Ok ((Same $before (Snapshot)) -and -not (Test-Path (Join-Path $data 'rollback'))) "crash after $n writes: the next helper rolls everything back first (byte-identical)" (Diff $before (Snapshot))
+        Ok ((Same $before (Snapshot)) -and [IO.File]::ReadAllText($modsTxt, $utf8) -ceq $stockTxt -and -not (Test-Path (Join-Path $data 'rollback'))) "crash after $n writes: the next helper rolls everything back first (byte-identical; mods.txt with its BOM and CRLF)" (Diff $before (Snapshot))
         Move-Item (Join-Path $tmp 'plan.saved') (Join-Path $data 'staged\plan.txt') -Force
         $null = Apply "--crash-after $n"
         $r = Apply

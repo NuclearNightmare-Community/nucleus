@@ -242,6 +242,8 @@ namespace core_stage
             const auto name = parts[5];
             if (!is_name(name)) return why = "not a mod folder name", false;
             if (is_stock_mod(name)) return why = "a stock UE4SS mod", false;
+            // The Mod Manager's own state (its writer is the Mod Manager alone; Mod Manager v2 story 3's Never list).
+            if (parts.size() == 7 && eq_nocase(name, "ModManager") && eq_nocase(parts[6], "state.json")) return why = "the Mod Manager's state.json", false;
             out.kind = TargetKind::ModFile;
             out.name = std::string{name};
             out.keep = 5;
