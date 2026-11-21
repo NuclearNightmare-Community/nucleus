@@ -61,6 +61,9 @@ namespace core_stage
         Interrupted
     };
     StagedState staged_state(const Layout& l);
+    // A journal without "done" (an interrupted apply), whether or not apply.lock is held (stage writers check it under
+    // the lock, where staged_state answers Applying).
+    bool journal_interrupted(const Layout& l);
     bool plan_exists(const Layout& l);
     // The staged plan's txn and operation count (from the parsed plan); false when there is none or it doesn't parse.
     bool staged_summary(const Layout& l, std::string& txn, size_t& ops);
