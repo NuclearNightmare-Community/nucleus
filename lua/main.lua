@@ -201,6 +201,15 @@ local function start()
     if #missingRestart > 0 then
         log.error("restart natives missing from the native part (%s); core.restart is unavailable. Reinstall %s.", table.concat(missingRestart, ", "), NAME)
     end
+    -- The catalog natives (native/src/catalog.cpp, Mod Manager v2 story 2). Checked once; without them core.catalog
+    -- answers nil, "native part missing" (lua/pkg/catalog.lua).
+    local missingCatalog = {}
+    for _, suffix in ipairs({ "_CatalogRefresh", "_CatalogDownload", "_CatalogPoll" }) do
+        if type(_G[NAME .. suffix]) ~= "function" then missingCatalog[#missingCatalog + 1] = NAME .. suffix end
+    end
+    if #missingCatalog > 0 then
+        log.error("catalog natives missing from the native part (%s); core.catalog is unavailable. Reinstall %s.", table.concat(missingCatalog, ", "), NAME)
+    end
 
     -- The map service: the Start marker's and the game state's BeginPlay hooks (InitGameState post-hook); the setup's
     -- LoadMap part runs from core's one LoadMap post-hook below.

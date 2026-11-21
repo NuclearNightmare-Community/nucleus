@@ -6,9 +6,11 @@
     native     VS 2026 + CMake + Ninja against the pinned UE4SS source (-Ue4ssSrc), Game__Shipping__Win64, targets
                CoreNative (main.dll) and CoreNativeTest (core's test-only DLL, test/SkelNative; build/native-out/test/,
                never packaged), <name>Restart (the relaunch helper, core story 45: build/native-out/bin/) and
-               <name>RestartTest (its test build, build/native-out/test/, never packaged). Then mods/cpp-spike/abi-check.ps1
-               must report no missing imports for both DLLs, the helper may import only Windows system DLLs (dumpbin
-               /dependents), and Windows Defender scans main.dll and the helper (MpCmdRun -Scan -ScanType 3 -File
+               <name>RestartTest (its test build, build/native-out/test/, never packaged) and <name>CatalogTest (the
+               catalog code's console test build, Mod Manager v2 story 2: build/native-out/test/, never packaged). Then
+               mods/cpp-spike/abi-check.ps1 must report no missing imports for both DLLs, the helper and the catalog test
+               exe may import only Windows system DLLs (dumpbin /dependents), and Windows Defender scans main.dll and the
+               helper (MpCmdRun -Scan -ScanType 3 -File
                -DisableRemediation; exit 2, a threat, refuses the build; build/logs/defender.txt records each result).
     blueprint  UE 5.6 (-Engine): compile the editor-only generator, run -run=CoreGen -CoreName=<name>, cook,
                repak pack --version V11 (uncompressed) /Game/Mods/<name>/ as <name>.pak.
@@ -31,8 +33,9 @@
                component that isn't editor-only): its editor-only preview slots and icon must be stripped.
     lua        Stage lua/main.lua and lua/pkg/ (with lua/pkg/ui/, lua/pkg/map/, lua/pkg/settings/, lua/pkg/net/ and lua/pkg/input/) as Scripts/main.lua and Scripts/<lowercase name>/, plus a generated
                Scripts/<lowercase name>/version.lua.
-    package    build/package/Mods/<name>/{mod.json,dlls/main.dll,bin/<name>Restart.exe,Scripts/} and
-               build/package/LogicMods/<name>.pak.
+    package    build/package/Mods/<name>/{mod.json,dlls/main.dll,bin/<name>Restart.exe,Scripts/,LICENSES/monocypher.txt}
+               and build/package/LogicMods/<name>.pak. LICENSES/monocypher.txt is Monocypher's LICENCE.md (main.dll
+               contains Monocypher, CC0-1.0 OR BSD-2-Clause; native/third_party/monocypher-4.0.2/README.md).
   Never builds anything into or copies UE4SS.dll. Only our own generated assets go into the pak.
   -Ue4ssSrc defaults to ue4ss-src/ here, then ue4ss-src/ in this repo's main checkout. It must be the pinned
   commit with submodules (tools/README.md, "UE4SS C++ mods"); clone it as mods/cpp-spike/build.ps1 does.
@@ -162,7 +165,7 @@ Step 'native' {
     $src = Join-Path $here 'native'
     Run 'native-configure.log' cmake @('-S', $src, '-B', $nativeB, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Game__Shipping__Win64',
         "-DUE4SS_SRC=$($Ue4ssSrc -replace '\\', '/')", "-DCORE_NAME=$name", "-DCORE_VERSION=$version")
-    Run 'native-build.log' cmake @('--build', $nativeB, '--target', 'CoreNative', 'CoreNativeTest', "$($name)Restart", "$($name)RestartTest")
+    Run 'native-build.log' cmake @('--build', $nativeB, '--target', 'CoreNative', 'CoreNativeTest', "$($name)Restart", "$($name)RestartTest", "$($name)CatalogTest")
     $staged = Join-Path $out 'native-out'
     # Core's DLL (shipped) and core's test-only DLL (test/SkelNative; deploy.ps1 -Test installs it, never packaged).
     foreach ($t in @(@{ Name = 'CoreNative'; Out = 'main.dll' }, @{ Name = 'CoreNativeTest'; Out = 'test\main.dll' })) {
@@ -175,8 +178,10 @@ Step 'native' {
         & $abiCheck -Dll $dest
         if ($LASTEXITCODE) { throw "abi-check.ps1 reports imports the shipped UE4SS.dll lacks ($($t.Name))" }
     }
-    # Core story 45: the relaunch helper (shipped as bin/<name>Restart.exe) and its test build (never packaged).
-    foreach ($t in @(@{ Name = "$($name)Restart"; Out = "bin\$($name)Restart.exe" }, @{ Name = "$($name)RestartTest"; Out = "test\$($name)RestartTest.exe" })) {
+    # Core story 45: the relaunch helper (shipped as bin/<name>Restart.exe) and its test build (never packaged); Mod Manager
+    # v2 story 2: the catalog test exe (never packaged; it may also import WinHTTP and CNG, as main.dll's catalog code does).
+    foreach ($t in @(@{ Name = "$($name)Restart"; Out = "bin\$($name)Restart.exe" }, @{ Name = "$($name)RestartTest"; Out = "test\$($name)RestartTest.exe" },
+                     @{ Name = "$($name)CatalogTest"; Out = "test\$($name)CatalogTest.exe"; Net = $true })) {
         $exe = Get-ChildItem $nativeB -Recurse -Filter "$($t.Name).exe" | Where-Object { $_.FullName -notlike '*\_deps\*' } | Select-Object -First 1
         if (-not $exe) { throw "$($t.Name).exe was not produced" }
         $dest = Join-Path $staged $t.Out
@@ -185,7 +190,8 @@ Step 'native' {
         Write-Host ("   {0} {1:N0} bytes ({2})" -f $t.Out, $exe.Length, $t.Name)
         # Windows system libraries only (the C runtime is linked in statically): never UE4SS, never anything of ours.
         $deps = @(& dumpbin /nologo /dependents $dest | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '\.dll$' })
-        $foreign = @($deps | Where-Object { $_ -notmatch '^(?i:kernel32|user32|shell32|ole32|advapi32|api-ms-win-[a-z0-9-]+)\.dll$' })
+        $allowed = if ($t.Net) { '^(?i:kernel32|user32|shell32|ole32|advapi32|winhttp|bcrypt|crypt32|api-ms-win-[a-z0-9-]+)\.dll$' } else { '^(?i:kernel32|user32|shell32|ole32|advapi32|api-ms-win-[a-z0-9-]+)\.dll$' }
+        $foreign = @($deps | Where-Object { $_ -notmatch $allowed })
         if (-not $deps -or $foreign) { throw "$($t.Name).exe imports $(if ($foreign) { $foreign -join ', ' } else { 'nothing readable' }); only Windows system DLLs are allowed" }
         Write-Host "   $($t.Out) imports: $($deps -join ', ')"
     }
@@ -343,7 +349,7 @@ Step 'lua' {
     # dependent's API and the shared checks, comes with lua/pkg/*.lua above).
     New-Item -ItemType Directory -Force (Join-Path $pkg 'input') | Out-Null
     Copy-Item (Join-Path $here 'lua\pkg\input\*.lua') (Join-Path $pkg 'input')
-    foreach ($f in 'json.lua', 'restart.lua', 'input.lua', 'input\service.lua', 'input\screen.lua', 'settings\store.lua', 'settings\schema.lua', 'settings\client.lua', 'modid.lua', 'net\state.lua', 'net\host.lua', 'net\client.lua',
+    foreach ($f in 'json.lua', 'restart.lua', 'catalog.lua', 'input.lua', 'input\service.lua', 'input\screen.lua', 'settings\store.lua', 'settings\schema.lua', 'settings\client.lua', 'modid.lua', 'net\state.lua', 'net\host.lua', 'net\client.lua',
                 'net\presence.lua', 'net\players.lua') {
         if (-not (Test-Path (Join-Path $pkg $f))) { throw "lua step: $f was not staged" }
     }
@@ -354,17 +360,20 @@ Step 'package' {
     $pkgRoot = Join-Path $out 'package'
     Remove-Item $pkgRoot -Recurse -Force -ErrorAction SilentlyContinue
     $modDir = Join-Path $pkgRoot "Mods\$name"
-    New-Item -ItemType Directory -Force (Join-Path $modDir 'dlls'), (Join-Path $modDir 'bin'), (Join-Path $pkgRoot 'LogicMods') | Out-Null
+    New-Item -ItemType Directory -Force (Join-Path $modDir 'dlls'), (Join-Path $modDir 'bin'), (Join-Path $modDir 'LICENSES'), (Join-Path $pkgRoot 'LogicMods') | Out-Null
     $parts = @{
         'main.dll'    = Join-Path $out 'native-out\main.dll'
         'helper'      = Join-Path $out "native-out\bin\$($name)Restart.exe"
         'Scripts'     = Join-Path $out 'lua-out\Scripts'
         "$name.pak"   = Join-Path $out "$name.pak"
+        'monocypher'  = Join-Path $here 'native\third_party\monocypher-4.0.2\LICENCE.md'
     }
     foreach ($p in $parts.GetEnumerator()) { if (-not (Test-Path $p.Value)) { throw "Missing $($p.Key) ($($p.Value)); run its build step" } }
     Copy-Item (Join-Path $here 'mod.json') $modDir
     Copy-Item $parts['main.dll'] (Join-Path $modDir 'dlls\main.dll')
     Copy-Item $parts['helper'] (Join-Path $modDir "bin\$($name)Restart.exe")
+    # Mod Manager v2 story 2: main.dll contains Monocypher; its licence notice ships with it.
+    Copy-Item $parts['monocypher'] (Join-Path $modDir 'LICENSES\monocypher.txt')
     Copy-Item $parts['Scripts'] $modDir -Recurse
     Copy-Item $parts["$name.pak"] (Join-Path $pkgRoot 'LogicMods')
     Get-ChildItem $pkgRoot -Recurse -File | ForEach-Object {

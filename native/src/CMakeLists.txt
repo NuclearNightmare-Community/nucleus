@@ -1,9 +1,27 @@
 set(TARGET CoreNative)
 
 configure_file(core_config.hpp.in ${CMAKE_CURRENT_BINARY_DIR}/core_config.hpp @ONLY)
-add_library(${TARGET} SHARED dllmain.cpp core_shared.cpp objectives.cpp intercept.cpp restart.cpp)
+
+# Mod Manager v2 story 2: Monocypher 4.0.2 (CC0-1.0 OR BSD-2-Clause; third_party/monocypher-4.0.2/README.md) for
+# Ed25519 and BLAKE2b, which Windows CNG lacks. Two static builds of the two unmodified C files: one with the shared C
+# runtime for core's DLL, one with the static C runtime for the catalog test exe.
+set(MONOCYPHER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/monocypher-4.0.2/src)
+set(MONOCYPHER_SRC ${MONOCYPHER_DIR}/monocypher.c ${MONOCYPHER_DIR}/optional/monocypher-ed25519.c)
+add_library(CoreMonocypher STATIC ${MONOCYPHER_SRC})
+target_include_directories(CoreMonocypher PUBLIC ${MONOCYPHER_DIR})
+target_compile_options(CoreMonocypher PRIVATE /O2 /W3)
+set_target_properties(CoreMonocypher PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
+add_library(CoreMonocypherMT STATIC ${MONOCYPHER_SRC})
+target_include_directories(CoreMonocypherMT PUBLIC ${MONOCYPHER_DIR})
+target_compile_options(CoreMonocypherMT PRIVATE /O2 /W3)
+set_target_properties(CoreMonocypherMT PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded")
+# The catalog's code (JSON, minisign, the verify.ps1 port, fetching), shared by core's DLL and the test exe.
+set(CATALOG_SRC catalog/json.cpp catalog/minisig.cpp catalog/verify.cpp catalog/fetch.cpp)
+
+add_library(${TARGET} SHARED dllmain.cpp core_shared.cpp objectives.cpp intercept.cpp restart.cpp catalog.cpp ${CATALOG_SRC})
 target_include_directories(${TARGET} PRIVATE . ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries(${TARGET} PUBLIC UE4SS)
+target_link_libraries(${TARGET} PRIVATE CoreMonocypher winhttp bcrypt crypt32)
 # Record only the PDB's file name in the DLL, not the absolute build path (which contains the Windows user name).
 target_link_options(${TARGET} PRIVATE "/PDBALTPATH:%_PDB%")
 
@@ -33,3 +51,15 @@ target_compile_definitions(${RESTART_TEST_TARGET} PRIVATE UNICODE _UNICODE CORE_
 set_target_properties(${RESTART_TEST_TARGET} PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded" CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
 target_link_libraries(${RESTART_TEST_TARGET} PRIVATE shell32 ole32)
 target_link_options(${RESTART_TEST_TARGET} PRIVATE "/PDBALTPATH:%_PDB%")
+
+# Mod Manager v2 story 2: <name>CatalogTest.exe (native/test/catalog.tests.ps1, never packaged), a console program with
+# CORE_CATALOG_TEST: verify.ps1's parameters and output over core's catalog code, plus a named proxy and a pinned server
+# certificate for the local HTTPS fixture server. Windows system libraries and the static C runtime only, never UE4SS.
+set(CATALOG_TEST_TARGET ${CORE_NAME}CatalogTest)
+add_executable(${CATALOG_TEST_TARGET} catalog_cli.cpp ${CATALOG_SRC})
+target_include_directories(${CATALOG_TEST_TARGET} PRIVATE . ${CMAKE_CURRENT_BINARY_DIR})
+target_compile_definitions(${CATALOG_TEST_TARGET} PRIVATE UNICODE _UNICODE CORE_CATALOG_TEST=1)
+target_compile_options(${CATALOG_TEST_TARGET} PRIVATE /O2 /utf-8)
+set_target_properties(${CATALOG_TEST_TARGET} PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded" CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(${CATALOG_TEST_TARGET} PRIVATE CoreMonocypherMT winhttp bcrypt crypt32)
+target_link_options(${CATALOG_TEST_TARGET} PRIVATE "/PDBALTPATH:%_PDB%")

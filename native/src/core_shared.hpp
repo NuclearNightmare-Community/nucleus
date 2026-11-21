@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <DynamicOutput/DynamicOutput.hpp>
 #include <Helpers/String.hpp>
@@ -102,13 +103,14 @@ namespace core_native
     // What a body hands back; guarded() pushes it onto the Lua stack after leaving the try block.
     struct Result
     {
-        enum class Kind { None, Integer, Object, Nil, Strings, String, Bool, NilText } kind = Kind::None;
+        enum class Kind { None, Integer, Object, Nil, Strings, String, Bool, NilText, Texts } kind = Kind::None;
         int64_t integer{};
         bool boolean{}; // Kind::Bool
         RC::Unreal::UObject* object{};
         const char* s1{};
         const char* s2{};
         std::string text; // Kind::String; Kind::NilText: nil, then this text (a "nil, reason" answer)
+        std::vector<std::string> texts; // Kind::Texts: several strings, in order
     };
 
     // Runs body. An ArgError becomes the Lua error "<its text>"; any other C++ exception becomes "<fn>: internal
@@ -168,6 +170,9 @@ namespace core_native
             lua.set_nil();
             lua.set_string(std::string_view{r.text});
             return 2;
+        case Result::Kind::Texts:
+            for (const auto& t : r.texts) lua.set_string(std::string_view{t});
+            return static_cast<int>(r.texts.size());
         default:
             return 0;
         }
