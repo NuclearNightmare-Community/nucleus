@@ -765,7 +765,8 @@ namespace catalog::fetch
         for (fs::directory_iterator it{downloads, ec}, end; !ec && it != end; it.increment(ec))
         {
             std::error_code e2;
-            if (!it->is_regular_file(e2) || it->path() == final_file) continue;
+            // A .part-* file is an interrupted download's leftover, which run_download removes: it doesn't count.
+            if (!it->is_regular_file(e2) || it->path() == final_file || it->path().filename().wstring().rfind(L".part-", 0) == 0) continue;
             used += it->file_size(e2);
         }
         if (used + p.size > k_max_download_folder)
@@ -778,18 +779,30 @@ namespace catalog::fetch
 
     namespace
     {
-        // Size and SHA-256 of a file on disk, streamed; false when it can't be read or cancel is set.
-        bool hash_file(const fs::path& f, uint64_t& size, std::string& sha_lower, const std::atomic<bool>& cancel)
+        enum class Hashed
+        {
+            Ok,
+            Unreadable,
+            Cancelled,
+            NoSha
+        };
+        // Size and SHA-256 of a file on disk, streamed. Only Ok means the whole file was read and hashed.
+        Hashed hash_file(const fs::path& f, uint64_t& size, std::string& sha_lower, const std::atomic<bool>& cancel)
         {
             HANDLE h = CreateFileW(f.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-            if (h == INVALID_HANDLE_VALUE) return false;
+            if (h == INVALID_HANDLE_VALUE) return Hashed::Unreadable;
+            bool cancelled = false;
             sig::Sha256 sha;
             std::vector<uint8_t> buf(1u << 16);
             size = 0;
             bool ok = true;
             while (ok)
             {
-                if (cancel.load()) ok = false;
+                if (cancel.load())
+                {
+                    cancelled = true;
+                    ok = false;
+                }
                 DWORD got = 0;
                 if (!ok || !ReadFile(h, buf.data(), static_cast<DWORD>(buf.size()), &got, nullptr))
                 {
@@ -802,9 +815,11 @@ namespace catalog::fetch
             }
             CloseHandle(h);
             const auto d = sha.finish();
-            if (!ok || !sha.ok()) return false;
+            if (cancelled) return Hashed::Cancelled;
+            if (!ok) return Hashed::Unreadable;
+            if (!sha.ok()) return Hashed::NoSha;
             sha_lower = sig::hex_lower(d.data(), d.size());
-            return true;
+            return Hashed::Ok;
         }
     } // namespace
 
@@ -827,7 +842,12 @@ namespace catalog::fetch
         {
             uint64_t size = 0;
             std::string sha;
-            if (hash_file(final_file, size, sha, cancel) && size == plan.size && sha == plan.sha256)
+            const Hashed h = hash_file(final_file, size, sha, cancel);
+            // Deleted only when it was read whole and differs; a cancel or a missing hash keeps it.
+            if (h == Hashed::Cancelled) unreach("network error: cancelled");
+            if (h == Hashed::NoSha) fail("error", "unexpected failure: SHA-256 is unavailable");
+            if (h == Hashed::Unreadable) fail("error", "the downloaded file could not be read: " + shown(final_file));
+            if (size == plan.size && sha == plan.sha256)
             {
                 v.note("download: " + plan.id + " " + plan.version + " already downloaded");
                 return final_file;
@@ -929,5 +949,38 @@ namespace catalog::fetch
         remove.keep = true;
         v.note("package: " + plan.id + " " + plan.version + " matches size " + std::to_string(total) + " and SHA-256");
         return final_file;
+    }
+
+    fs::path download_with_state(Verifier& v, Transport& t, const Plan& plan, const fs::path& downloads, const fs::path& state_file, const std::atomic<bool>& cancel)
+    {
+        // The state file only for back-off; a state that can't be read is left alone (not used, never written).
+        v.state_file = state_file;
+        if (!v.state_file.empty())
+        {
+            try
+            {
+                (void)v.read_state();
+            }
+            catch (const Reject&)
+            {
+                v.state_file.clear();
+            }
+        }
+        try
+        {
+            return run_download(v, t, plan, downloads, cancel);
+        }
+        catch (...)
+        {
+            if (v.backoff_changed && v.has_state_file()) v.flush_state();
+            throw;
+        }
+    }
+
+    std::string download_payload(const Plan& plan, const fs::path* file)
+    {
+        std::string p = "{\"id\":" + json::quote(plan.id) + ",\"version\":" + json::quote(plan.version);
+        if (file) p += ",\"sha256\":" + json::quote(plan.sha256) + ",\"size\":" + std::to_string(plan.size) + ",\"file\":" + json::quote(shown(*file));
+        return p + "}";
     }
 } // namespace catalog::fetch

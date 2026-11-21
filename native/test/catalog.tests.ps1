@@ -118,7 +118,7 @@ try {
     function Ver([string] $v, [long] $size = $bytes.Length, [string] $sha256 = $sha) {
         [ordered]@{ version = $v; scope = 'client'; url = "https://github.com/$repo2/releases/download/v$v/markers-$v.zip"; sha256 = $sha256; size = $size; published = '2026-11-20T10:00:00Z' }
     }
-    $versions = @((Ver '0.1.0'), (Ver '0.1.1'), (Ver '0.1.2'), (Ver '0.1.3'), (Ver '0.1.4'), (Ver '0.1.5'), (Ver '0.1.6'), (Ver '0.1.7'), (Ver '0.2.0' -size 300MB), (Ver '0.3.0'), (Ver '0.3.1'))
+    $versions = @((Ver '0.1.0'), (Ver '0.1.1'), (Ver '0.1.2'), (Ver '0.1.3'), (Ver '0.1.4'), (Ver '0.1.5'), (Ver '0.1.6'), (Ver '0.1.7'), (Ver '0.1.8'), (Ver '0.1.9'), (Ver '0.2.0' -size 300MB), (Ver '0.3.0'), (Ver '0.3.1'))
     $ix = [ordered]@{ schema = 2; serial = 5; issued = '2026-11-20T10:00:00Z'; packages = @([ordered]@{
                 id = 'nuclearnightmare-community.markers'; name = 'Markers'; description = 'Shared map markers.'; categories = @('qol'); kind = 'mod'
                 publisher = 'NuclearNightmare-Community'; repo = $repo2; versions = $versions }) }
@@ -146,8 +146,14 @@ try {
         "$gh/v0.1.6/markers-0.1.6.zip" = @{ status = 302; location = "$obj/r1" }
         "$gh/v0.1.7/markers-0.1.7.zip" = @{ status = 503 }
     }
-    for ($i = 1; $i -le 6; $i++) { $map["$obj/r$i"] = @{ status = 302; location = "$obj/r$($i + 1)" } }
-    $map["$obj/r7"] = @{ status = 200; file = 'site/ok.zip' }
+    # 0.1.6: exactly 6 redirects (gh, r1..r5); 0.1.8: exactly 5 (gh, s1..s4), the most that is followed.
+    for ($i = 1; $i -le 5; $i++) { $map["$obj/r$i"] = @{ status = 302; location = "$obj/r$($i + 1)" } }
+    $map["$obj/r6"] = @{ status = 200; file = 'site/ok.zip' }
+    $map["$gh/v0.1.8/markers-0.1.8.zip"] = @{ status = 302; location = "$obj/s1" }
+    for ($i = 1; $i -le 4; $i++) { $map["$obj/s$i"] = @{ status = 302; location = "$obj/s$($i + 1)" } }
+    $map["$obj/s5"] = @{ status = 200; file = 'site/ok.zip' }
+    # 0.1.9: the release host answers 429 Retry-After 120.
+    $map["$gh/v0.1.9/markers-0.1.9.zip"] = @{ status = 429; retryAfter = 120 }
     $mapFile = Join-Path $tmp 'map.json'
     $map | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $mapFile -Encoding utf8NoBOM
     $control = Join-Path $tmp 'control.txt'
@@ -169,9 +175,11 @@ try {
 
     # ---------------------------------------------------------------- downloads
     $dl = Join-Path $tmp 'downloads'
-    function Download([string] $version, [string] $id = 'nuclearnightmare-community.markers', [string] $folder = $dl) {
-        Run-Exe -Download -Index $ixFile -Revoked $rvFile -Id $id -Version $version -OutDir $folder @net
+    function Download([string] $version, [string] $id = 'nuclearnightmare-community.markers', [string] $folder = $dl, [string] $state) {
+        $extra = if ($state) { @('-StateFile', $state) } else { @() }
+        Run-Exe -Download -Index $ixFile -Revoked $rvFile -Id $id -Version $version -OutDir $folder @net @extra
     }
+    function Payload { $l = $script:out | Where-Object { $_.StartsWith('payload: ') } | Select-Object -First 1; if ($l) { $l.Substring(9) | ConvertFrom-Json -AsHashtable } }
     function Left([string] $folder = $dl) { @(Get-ChildItem -LiteralPath $folder -Force -ErrorAction SilentlyContinue | ForEach-Object Name) }
     $final = "$sha.zip"
 
@@ -179,6 +187,9 @@ try {
     $file = Join-Path $dl $final
     Ok ((Outcome) -eq 'outcome: ok' -and $script:code -eq 0 -and (Has-Line "file: $file") -and (Test-Path -LiteralPath $file) -and
         ((Get-FileHash -LiteralPath $file).Hash -eq $sha.ToUpperInvariant()) -and (Left).Count -eq 1) 'download ok: <sha256>.zip in the folder, its hash the index''s' (Shown)
+    $pl = Payload
+    Ok ($pl -and $pl.Count -eq 5 -and $pl.id -ceq 'nuclearnightmare-community.markers' -and $pl.version -ceq '0.1.0' -and $pl.sha256 -ceq $sha -and $pl.size -eq $bytes.Length -and
+        $pl.file -ceq $file) 'download ok: payload {id, version, sha256, size, file}' (Shown)
     Download '0.1.0'
     Ok ((Outcome) -eq 'outcome: ok' -and (Has-Line 'already downloaded')) 'download again: the verified file is kept, nothing fetched' (Shown)
     Remove-Item -LiteralPath $file
@@ -193,14 +204,30 @@ try {
                      @{ v = '0.1.7'; want = 'unreachable'; text = 'HTTP 503'; what = 'HTTP 503' })) {
         Download $c.v
         $left = Left
-        Ok ((Outcome) -eq "outcome: $($c.want)" -and $script:code -eq 1 -and (Has-Line $c.text) -and $left.Count -eq 0) "download $($c.what): $($c.want), nothing left in the folder" "$(Shown); left: $($left -join ', ')"
+        $pl = Payload
+        Ok ((Outcome) -eq "outcome: $($c.want)" -and $script:code -eq 1 -and (Has-Line $c.text) -and $left.Count -eq 0 -and $pl -and $pl.Count -eq 2 -and $pl.version -ceq $c.v) "download $($c.what): $($c.want), nothing left in the folder, payload {id, version}" "$(Shown); left: $($left -join ', ')"
     }
+    Download '0.1.8'
+    Ok ((Outcome) -eq 'outcome: ok' -and (Test-Path -LiteralPath $file)) 'download through exactly 5 redirects: ok' (Shown)
+    Remove-Item -LiteralPath $file
+    # Back-off on the release host, under -StateFile (core's state.json): saved, then the next download is refused unasked.
+    $boState = Join-Path $tmp 'bo\state.json'
+    $url9 = "$gh/v0.1.9/markers-0.1.9.zip"
+    Download '0.1.9' -state $boState
+    $bo = if (Test-Path $boState) { (Get-Content $boState -Raw | ConvertFrom-Json -AsHashtable).backoff } else { $null }
+    Ok ((Outcome) -eq 'outcome: unreachable' -and (Has-Line 'HTTP 429') -and (Has-Line 'github.com backed off until') -and $bo -and $bo.ContainsKey('github.com')) 'release host 429 Retry-After: unreachable, github.com backed off in the state file' (Shown)
+    $seen = @(Get-Content $serverLog | Where-Object { $_.Contains($url9) }).Count
+    Download '0.1.9' -state $boState
+    $seen2 = @(Get-Content $serverLog | Where-Object { $_.Contains($url9) }).Count
+    Ok ((Outcome) -eq 'outcome: unreachable' -and (Has-Line 'github.com is backed off until') -and $seen -eq 1 -and $seen2 -eq 1) 'a second download while backed off: refused without a request' "$(Shown); requests $seen, $seen2"
     Download '9.9.9'
     Ok ((Outcome) -eq 'outcome: refused' -and (Has-Line 'message: not in the catalog')) 'download of an unknown version: refused, not in the catalog' (Shown)
     Download '0.1.0' 'nuclearnightmare-community.other'
     Ok ((Outcome) -eq 'outcome: refused' -and (Has-Line 'message: not in the catalog')) 'download of an unknown id: refused, not in the catalog' (Shown)
     Download '0.3.0' 'GitHub.com/NuclearNightmare-Community.Markers'
-    Ok ((Outcome) -eq 'outcome: revoked' -and (Has-Line 'is revoked (disable): crash on map load') -and (Left).Count -eq 0) 'download of a revoked version (disable, id in another form): revoked, nothing fetched' (Shown)
+    $pl = Payload
+    Ok ((Outcome) -eq 'outcome: revoked' -and (Has-Line 'is revoked (disable): crash on map load') -and (Left).Count -eq 0 -and $pl -and $pl.Count -eq 2 -and
+        $pl.id -ceq 'nuclearnightmare-community.markers' -and $pl.version -ceq '0.3.0') 'download of a revoked version (disable, id in another form): revoked, nothing fetched, payload {id, version}' (Shown)
     Download '0.3.1'
     Ok ((Outcome) -eq 'outcome: revoked' -and (Has-Line 'is revoked (block): bad build')) 'download of a revoked version (block): revoked' (Shown)
     Download '0.2.0'
@@ -211,8 +238,10 @@ try {
     Download '0.1.0' -folder $full
     Ok ((Outcome) -eq 'outcome: refused' -and (Has-Line 'message: downloads folder full')) 'download that would pass 512 MiB in the folder: refused, downloads folder full' (Shown)
     Remove-Item -LiteralPath (Join-Path $full 'other.zip')
+    # An interrupted download's leftover .part-* file doesn't count toward the cap, and the download removes it.
+    $fs = [IO.File]::Create((Join-Path $full '.part-deadbeef')); $fs.SetLength(600MB); $fs.Dispose()
     Download '0.1.0' -folder $full
-    Ok ((Outcome) -eq 'outcome: ok') 'the same download once the folder has room: ok' (Shown)
+    Ok ((Outcome) -eq 'outcome: ok' -and -not (Test-Path -LiteralPath (Join-Path $full '.part-deadbeef'))) 'the same download once the folder has room (a 600 MiB .part-* leftover not counted): ok, leftover removed' (Shown)
     Run-Exe -Download -Index $ixFile -Id 'nucleus' -Version '0.1.0' -OutDir $dl @net
     Ok ((Outcome) -eq 'outcome: error' -and (Has-Line 'an id needs a namespace')) 'download with an id the normalizer refuses: error' (Shown)
 
