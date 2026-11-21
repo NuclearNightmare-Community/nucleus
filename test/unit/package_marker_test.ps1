@@ -23,9 +23,10 @@ $native = Get-Content -Raw (Join-Path $repo 'native\src\catalog.cpp')
 $want = if ($native -match 'k_test_marker\s*(\[\])?\s*=\s*"([^"]+)"') { $Matches[2] } else { $null }
 Ok ($null -ne $want) 'catalog.cpp defines k_test_marker'
 if ($fn -and $asg) {
-    $testMarker = Invoke-Expression $asg.Right.Extent.Text
+    # build.ps1's own text (parsed above), evaluated here: the marker's value, then the function dot-sourced into scope
+    $testMarker = & ([scriptblock]::Create($asg.Right.Extent.Text))
     Ok ($testMarker -ceq $want) "build.ps1's marker equals catalog.cpp's" "$testMarker vs $want"
-    Invoke-Expression $fn.Extent.Text
+    . ([scriptblock]::Create($fn.Extent.Text))
     $tmp = Join-Path ([IO.Path]::GetTempPath()) "nucleus-marker-$PID"
     New-Item -ItemType Directory -Force $tmp | Out-Null
     try {
