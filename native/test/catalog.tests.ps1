@@ -192,6 +192,13 @@ try {
         $pl.file -ceq $file) 'download ok: payload {id, version, sha256, size, file}' (Shown)
     Download '0.1.0'
     Ok ((Outcome) -eq 'outcome: ok' -and (Has-Line 'already downloaded')) 'download again: the verified file is kept, nothing fetched' (Shown)
+    # A file already in place that is not the index's (one byte changed, same size; truncated) is fetched again, never reused.
+    foreach ($c in @(@{ what = 'one byte changed, same size'; bytes = { $b = [byte[]]$bytes.Clone(); $b[100] = $b[100] -bxor 0xFF; $b } },
+                     @{ what = 'truncated'; bytes = { [byte[]]$bytes[0..($bytes.Length - 2)] } })) {
+        [IO.File]::WriteAllBytes($file, (& $c.bytes))
+        Download '0.1.0'
+        Ok ((Outcome) -eq 'outcome: ok' -and -not (Has-Line 'already downloaded') -and ((Get-FileHash -LiteralPath $file).Hash -eq $sha.ToUpperInvariant()) -and (Left).Count -eq 1) "download over a wrong file in place ($($c.what)): fetched again, its hash the index's" (Shown)
+    }
     Remove-Item -LiteralPath $file
     Download '0.1.1'
     Ok ((Outcome) -eq 'outcome: ok' -and (Test-Path -LiteralPath $file)) 'download through a redirect to objects.githubusercontent.com: ok' (Shown)

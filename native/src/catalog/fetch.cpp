@@ -767,7 +767,8 @@ namespace catalog::fetch
             std::error_code e2;
             // A .part-* file is an interrupted download's leftover, which run_download removes: it doesn't count.
             if (!it->is_regular_file(e2) || it->path() == final_file || it->path().filename().wstring().rfind(L".part-", 0) == 0) continue;
-            used += it->file_size(e2);
+            const uintmax_t sz = it->file_size(e2);
+            if (!e2) used += sz;
         }
         if (used + p.size > k_max_download_folder)
         {
