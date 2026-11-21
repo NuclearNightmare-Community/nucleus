@@ -5,7 +5,8 @@
 // interception natives (intercept.cpp, core story 43: <Core>_FnIntercept, <Core>_FnRelease, <Core>_FnSuspend,
 // <Core>_FnList) and the restart natives (restart.cpp, core story 45 / Mod Manager story 8: <Core>_RestartMode,
 // <Core>_RestartStart, which start the relaunch helper bin/<Core>Restart.exe) and the catalog natives (catalog.cpp, Mod Manager
-// v2 story 2: <Core>_CatalogRefresh, <Core>_CatalogDownload, <Core>_CatalogPoll, run on a background worker) into every Lua
+// v2 story 2: <Core>_CatalogRefresh, <Core>_CatalogDownload, <Core>_CatalogPoll, run on a background worker) and the staged-change
+// natives (apply.cpp, Mod Manager v2 story 3: <Core>_ApplyStatus, <Core>_ApplyStart, <Core>_ApplyAck) into every Lua
 // mod's state in on_lua_start, before that mod's main.lua runs. <Core> is CORE_NAME (core_config.hpp, generated from mod.json
 // "name"); nothing here spells the name. Weak handles are FWeakObjectPtr (GUObjectArray index + serial number), so a
 // handle never resolves to an object that took over a freed object's slot or address.
@@ -38,6 +39,7 @@
 #include <Unreal/FWeakObjectPtr.hpp>
 #include <Unreal/UObjectArray.hpp>
 
+#include "apply.hpp"
 #include "catalog.hpp"
 #include "core_shared.hpp"
 #include "core_config.hpp"
@@ -317,6 +319,9 @@ class CoreNative : public CppUserModBase
                 lua.register_function(catalog_natives::g_fn_refresh.c_str(), &catalog_natives::l_refresh);
                 lua.register_function(catalog_natives::g_fn_download.c_str(), &catalog_natives::l_download);
                 lua.register_function(catalog_natives::g_fn_poll.c_str(), &catalog_natives::l_poll);
+                lua.register_function(apply::g_fn_status.c_str(), &apply::l_status);
+                lua.register_function(apply::g_fn_start.c_str(), &apply::l_start);
+                lua.register_function(apply::g_fn_ack.c_str(), &apply::l_ack);
             }
             catch (const std::exception& e)
             {

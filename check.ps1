@@ -1099,6 +1099,16 @@ foreach ($p in 'menu1', 'match1') {
     foreach ($id in $catCaseIds) { $badInput += "\[$T\] OK CASE $p\.cat-$id "; $badInput += "\[$T\] OK CASE $p\.off-cat-$id " }
     foreach ($id in 'has', 'wrap-poll-float', 'wrap-poll-max', 'wrap-dl-nul', 'wrap-dl-bare') { $badInput += "\[$T\] OK CASE $p\.cat-$id " }
 }
+# Mod Manager v2 story 3 (core 0.24.0): the staged-change natives' bad-input group (apply.lua), in both worlds and off
+# the game thread: argument checks, and on the dev copy (nothing staged, no result) status "none none", start "nothing
+# staged" (no helper is started), ack "no result"; the core.apply wrappers.
+$applyCaseIds = @('status', 'start', 'ack', 'ack-none', 'ack-two', 'ack-nil', 'ack-int', 'ack-table', 'ack-short', 'ack-long', 'ack-upper', 'ack-path',
+                  'ack-nul', 'ack-huge')
+foreach ($b in '1', 'nil', 'str', 'table', 'true', 'two') { $applyCaseIds += "status-$b"; $applyCaseIds += "start-$b" }
+foreach ($p in 'menu1', 'match1') {
+    foreach ($id in $applyCaseIds) { $badInput += "\[$T\] OK CASE $p\.apply-$id "; $badInput += "\[$T\] OK CASE $p\.off-apply-$id " }
+    foreach ($id in 'has', 'wrap-status', 'wrap-start', 'wrap-ack-bad', 'wrap-ack') { $badInput += "\[$T\] OK CASE $p\.apply-$id " }
+}
 foreach ($id in 'dl-unverified', 'refresh', 'refresh-busy', 'dl-busy', 'wrap-refresh-busy', 'poll-gap', 'poll-done', 'wrap-poll-done', 'dl-after', 'poll-again') {
     $badInput += "\[$T\] OK CASE menu1\.cat-$id "
 }

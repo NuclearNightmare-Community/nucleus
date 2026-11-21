@@ -8,6 +8,11 @@
 // helper's command line: both natives take no arguments. At most one helper waits at a time (a call while it waits
 // answers "already started"; after it has exited a call starts a new one); the caller quits the game itself.
 //
+// Mod Manager v2 story 3: apply.cpp starts the same helper in apply mode (--apply; the handle also has
+// PROCESS_QUERY_LIMITED_INFORMATION so the helper knows the game's PID). While that helper waits, <Core>_RestartStart
+// starts no second helper: it writes ue4ss\<Core>Data\relaunch.txt (this game's PID and the helper's) and answers true;
+// the helper relaunches after applying. Without an apply helper its behaviour is story 8's, unchanged.
+//
 // Both natives touch no UObject, so any thread may call them. Every path returns a value or a "nil, reason" pair;
 // argument problems raise "<fn>: takes no arguments"; a C++ exception becomes "<fn>: internal error ..." (guarded()).
 #include <atomic>
@@ -22,6 +27,7 @@
 #include "restart.hpp"
 // After the UE4SS headers (core_shared.hpp), so their own Windows setup wins.
 #include "restart_mode.hpp"
+#include "stage/apply.hpp"
 
 namespace core_native::restart
 {
@@ -31,10 +37,13 @@ namespace core_native::restart
     namespace
     {
         std::mutex g_mutex;
-        // Under g_mutex: a SYNCHRONIZE handle to the helper this session started, while it may still be waiting. Once
-        // it has exited (it relaunched nothing because the game didn't quit within 120 s, or QuitGame failed), the next
-        // start begins a new one.
+        // Under g_mutex: a SYNCHRONIZE handle to the restart helper this session started, while it may still be
+        // waiting. Once it has exited (it relaunched nothing because the game didn't quit within 120 s, or QuitGame
+        // failed), the next start begins a new one.
         HANDLE g_helper = nullptr;
+        // Under g_mutex (Mod Manager v2 story 3): this session's apply helper and its PID.
+        HANDLE g_apply = nullptr;
+        DWORD g_apply_pid = 0;
 
         void no_args(const Lua& lua, const std::string& fn)
         {
@@ -49,18 +58,7 @@ namespace core_native::restart
         }
 
         // GetModuleFileNameW into a growing buffer (long paths). Empty on failure.
-        std::wstring module_path(HMODULE m)
-        {
-            std::vector<wchar_t> buf(MAX_PATH);
-            while (buf.size() <= 32768)
-            {
-                const DWORD n = GetModuleFileNameW(m, buf.data(), static_cast<DWORD>(buf.size()));
-                if (n == 0) return {};
-                if (n < buf.size()) return std::wstring(buf.data(), n);
-                buf.resize(buf.size() * 2);
-            }
-            return {};
-        }
+        std::wstring module_path(HMODULE m) { return core_stage::module_file(m); }
 
         std::wstring current_dir()
         {
@@ -73,16 +71,21 @@ namespace core_native::restart
             return s;
         }
 
-        // Mods/<Core>/bin/<Core>Restart.exe from this DLL's path Mods/<Core>/dlls/main.dll. Empty when unknown.
-        std::wstring helper_path()
+        std::wstring own_dll()
         {
             HMODULE self = nullptr;
-            if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                                    reinterpret_cast<LPCWSTR>(&helper_path), &self))
+            if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, reinterpret_cast<LPCWSTR>(&own_dll),
+                                    &self))
             {
                 return {};
             }
-            const std::wstring dll = module_path(self);
+            return module_path(self);
+        }
+
+        // Mods/<Core>/bin/<Core>Restart.exe from this DLL's path Mods/<Core>/dlls/main.dll. Empty when unknown.
+        std::wstring helper_path()
+        {
+            const std::wstring dll = own_dll();
             const std::wstring mod = core_restart::parent_of(core_restart::parent_of(dll));
             if (mod.empty()) return {};
             return mod + L"\\bin\\" + widen_ascii(CORE_NAME) + L"Restart.exe";
@@ -96,17 +99,18 @@ namespace core_native::restart
             return r;
         }
 
-        // Starts the helper; returns the Win32 error code (0 on success). Closes everything it opened.
-        DWORD start_helper(const std::wstring& helper, core_restart::Mode mode, const std::wstring& exe, const std::wstring& cwd, DWORD* pid,
+        // Starts the helper; returns the Win32 error code (0 on success). Closes everything it opened. mode_word is
+        // "steam", "direct" or (apply mode only) "none".
+        DWORD start_helper(const std::wstring& helper, const wchar_t* mode_word, bool apply, const std::wstring& exe, const std::wstring& cwd, DWORD* pid,
                            bool* too_long, HANDLE* helper_handle)
         {
             *helper_handle = nullptr;
             *too_long = false;
             HANDLE wait = nullptr;
-            if (!DuplicateHandle(GetCurrentProcess(), GetCurrentProcess(), GetCurrentProcess(), &wait, SYNCHRONIZE, TRUE, 0)) return GetLastError();
-            std::wstring cmd = L"\"" + helper + L"\" --wait " + std::to_wstring(reinterpret_cast<uintptr_t>(wait)) + L" --mode " +
-                               (mode == core_restart::Mode::Steam ? L"steam" : L"direct") + L" --cwd \"" + cwd + L"\" --exe \"" + exe + L"\" -- " +
-                               GetCommandLineW();
+            const DWORD access = apply ? (SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION) : SYNCHRONIZE;
+            if (!DuplicateHandle(GetCurrentProcess(), GetCurrentProcess(), GetCurrentProcess(), &wait, access, TRUE, 0)) return GetLastError();
+            std::wstring cmd = L"\"" + helper + L"\" --wait " + std::to_wstring(reinterpret_cast<uintptr_t>(wait)) + (apply ? L" --apply" : L"") + L" --mode " +
+                               mode_word + L" --cwd \"" + cwd + L"\" --exe \"" + exe + L"\" -- " + GetCommandLineW();
             if (cmd.size() > core_restart::k_max_cmdline)
             {
                 CloseHandle(wait);
@@ -160,7 +164,63 @@ namespace core_native::restart
             CloseHandle(wait); // the helper holds its own inherited copy
             return err;
         }
+
+        // Under g_mutex.
+        bool apply_waiting_locked(DWORD* pid)
+        {
+            if (!g_apply) return false;
+            if (WaitForSingleObject(g_apply, 0) == WAIT_TIMEOUT)
+            {
+                if (pid) *pid = g_apply_pid;
+                return true;
+            }
+            CloseHandle(g_apply); // it has exited (applied, or failed to start waiting)
+            g_apply = nullptr;
+            g_apply_pid = 0;
+            return false;
+        }
     } // namespace
+
+    Guard::Guard() { g_mutex.lock(); }
+    Guard::~Guard() { g_mutex.unlock(); }
+
+    bool apply_waiting(uint32_t* pid)
+    {
+        DWORD p = 0;
+        const bool w = apply_waiting_locked(&p);
+        if (pid) *pid = w ? p : 0;
+        return w;
+    }
+
+    bool own_layout(core_stage::Layout& out) { return core_stage::layout_from_module(own_dll(), widen_ascii(CORE_NAME), out); }
+
+    std::string start_apply_helper(uint32_t* pid)
+    {
+        if (pid) *pid = 0;
+        const std::wstring exe = module_path(nullptr);
+        const core_restart::Mode m = core_restart::mode_for(exe);
+        const std::wstring helper = helper_path();
+        if (!core_restart::is_file(helper)) return "helper missing";
+        const std::wstring cwd = current_dir();
+        if (cwd.empty() || exe.empty())
+        {
+            const DWORD e = GetLastError();
+            return std::format("start failed: {}", e ? e : ERROR_GEN_FAILURE);
+        }
+        DWORD p = 0;
+        bool too_long = false;
+        HANDLE started = nullptr;
+        const DWORD err = start_helper(helper, m == core_restart::Mode::Steam ? L"steam" : m == core_restart::Mode::Direct ? L"direct" : L"none", true, exe, cwd, &p,
+                                       &too_long, &started);
+        if (too_long) return "command line too long";
+        if (err != 0) return std::format("start failed: {}", err);
+        if (g_apply) CloseHandle(g_apply);
+        g_apply = started; // without a handle (duplication failed) status can't say "waiting"; the helper still applies
+        g_apply_pid = p;
+        if (pid) *pid = p;
+        logf("apply: helper started (mode={}, pid={})", core_restart::mode_name(m), p);
+        return {};
+    }
 
     int l_mode(const Lua& lua)
     {
@@ -180,6 +240,28 @@ namespace core_native::restart
         return guarded(lua, g_fn_start, [&] {
             no_args(lua, g_fn_start);
             std::lock_guard guard{g_mutex};
+            // Mod Manager v2 story 3: this session's apply helper waits; it relaunches after applying.
+            DWORD apply_pid = 0;
+            if (apply_waiting_locked(&apply_pid))
+            {
+                if (core_restart::mode_for(module_path(nullptr)) == core_restart::Mode::None)
+                {
+                    logf("restart: not started: unsupported launch");
+                    return nil_reason("unsupported launch");
+                }
+                core_stage::Layout layout;
+                const DWORD e = own_layout(layout) ? core_stage::write_relaunch(layout, GetCurrentProcessId(), apply_pid) : ERROR_PATH_NOT_FOUND;
+                if (e != 0)
+                {
+                    logf("restart: relaunch request not written: start failed: {}", e);
+                    return nil_reason(std::format("start failed: {}", e));
+                }
+                logf("restart: the waiting apply helper (pid={}) will relaunch the game", apply_pid);
+                Result r;
+                r.kind = Result::Kind::Bool;
+                r.boolean = true;
+                return r;
+            }
             if (g_helper)
             {
                 if (WaitForSingleObject(g_helper, 0) == WAIT_TIMEOUT) return nil_reason("already started");
@@ -210,7 +292,7 @@ namespace core_native::restart
             DWORD pid = 0;
             bool too_long = false;
             HANDLE started = nullptr;
-            const DWORD err = start_helper(helper, m, exe, cwd, &pid, &too_long, &started);
+            const DWORD err = start_helper(helper, m == core_restart::Mode::Steam ? L"steam" : L"direct", false, exe, cwd, &pid, &too_long, &started);
             if (too_long)
             {
                 logf("restart: not started: command line too long");

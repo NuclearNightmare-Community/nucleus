@@ -190,7 +190,8 @@ Step 'native' {
         Write-Host ("   {0} {1:N0} bytes ({2})" -f $t.Out, $exe.Length, $t.Name)
         # Windows system libraries only (the C runtime is linked in statically): never UE4SS, never anything of ours.
         $deps = @(& dumpbin /nologo /dependents $dest | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '\.dll$' })
-        $allowed = if ($t.Net) { '^(?i:kernel32|user32|shell32|ole32|advapi32|winhttp|bcrypt|crypt32|api-ms-win-[a-z0-9-]+)\.dll$' } else { '^(?i:kernel32|user32|shell32|ole32|advapi32|api-ms-win-[a-z0-9-]+)\.dll$' }
+        # Mod Manager v2 story 3: the helper applies staged changes and hashes them with Windows CNG (bcrypt).
+        $allowed = if ($t.Net) { '^(?i:kernel32|user32|shell32|ole32|advapi32|winhttp|bcrypt|crypt32|api-ms-win-[a-z0-9-]+)\.dll$' } else { '^(?i:kernel32|user32|shell32|ole32|advapi32|bcrypt|api-ms-win-[a-z0-9-]+)\.dll$' }
         $foreign = @($deps | Where-Object { $_ -notmatch $allowed })
         if (-not $deps -or $foreign) { throw "$($t.Name).exe imports $(if ($foreign) { $foreign -join ', ' } else { 'nothing readable' }); only Windows system DLLs are allowed" }
         Write-Host "   $($t.Out) imports: $($deps -join ', ')"
@@ -349,7 +350,7 @@ Step 'lua' {
     # dependent's API and the shared checks, comes with lua/pkg/*.lua above).
     New-Item -ItemType Directory -Force (Join-Path $pkg 'input') | Out-Null
     Copy-Item (Join-Path $here 'lua\pkg\input\*.lua') (Join-Path $pkg 'input')
-    foreach ($f in 'json.lua', 'restart.lua', 'catalog.lua', 'input.lua', 'input\service.lua', 'input\screen.lua', 'settings\store.lua', 'settings\schema.lua', 'settings\client.lua', 'modid.lua', 'net\state.lua', 'net\host.lua', 'net\client.lua',
+    foreach ($f in 'json.lua', 'restart.lua', 'catalog.lua', 'apply.lua', 'input.lua', 'input\service.lua', 'input\screen.lua', 'settings\store.lua', 'settings\schema.lua', 'settings\client.lua', 'modid.lua', 'net\state.lua', 'net\host.lua', 'net\client.lua',
                 'net\presence.lua', 'net\players.lua') {
         if (-not (Test-Path (Join-Path $pkg $f))) { throw "lua step: $f was not staged" }
     }

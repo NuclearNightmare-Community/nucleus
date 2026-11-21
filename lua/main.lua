@@ -210,6 +210,15 @@ local function start()
     if #missingCatalog > 0 then
         log.error("catalog natives missing from the native part (%s); core.catalog is unavailable. Reinstall %s.", table.concat(missingCatalog, ", "), NAME)
     end
+    -- The staged-change natives (native/src/apply.cpp, Mod Manager v2 story 3). Checked once; without them core.apply
+    -- answers nil, "native part missing" (lua/pkg/apply.lua), and nothing staged is applied.
+    local missingApply = {}
+    for _, suffix in ipairs({ "_ApplyStatus", "_ApplyStart", "_ApplyAck" }) do
+        if type(_G[NAME .. suffix]) ~= "function" then missingApply[#missingApply + 1] = NAME .. suffix end
+    end
+    if #missingApply > 0 then
+        log.error("apply natives missing from the native part (%s); core.apply is unavailable. Reinstall %s.", table.concat(missingApply, ", "), NAME)
+    end
 
     -- The map service: the Start marker's and the game state's BeginPlay hooks (InitGameState post-hook); the setup's
     -- LoadMap part runs from core's one LoadMap post-hook below.

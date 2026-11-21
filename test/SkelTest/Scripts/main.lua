@@ -668,6 +668,7 @@ local function offThreadCases(phase)
                 SETS.FN.offThread(P) -- core story 43
                 SETS.CT.offThread(P) -- core story 44
                 SETS.CAT.offThread(P) -- Mod Manager v2 story 2
+                SETS.AP.offThread(P) -- Mod Manager v2 story 3
             end)
             if not ok then check(false, "CASE %s off-thread block threw: %s", P .. "off", firstLine(err)) end
             doneOff = true
@@ -2024,6 +2025,7 @@ local function badInputCases(phase)
     SETS.FN.badInput(phase) -- core story 43
     SETS.CT.badInput(phase) -- core story 44
     SETS.CAT.badInput(phase) -- Mod Manager v2 story 2
+    SETS.AP.badInput(phase) -- Mod Manager v2 story 3
     offThreadCases(phase)
 end
 
@@ -5836,6 +5838,8 @@ SETS.FN = dofile(scriptDir .. "\\intercept.lua")({ case = case, E = E, step = st
 -- Mod Manager v2 story 2: the catalog natives' bad-input cases and one refresh polled until done (catalog.lua).
 SETS.CAT = dofile(scriptDir .. "\\catalog.lua")({ case = case, E = E, step = step, check = check, say = say, CORE = CORE,
     core = function() return core end, clock = function() return native("_ClockMicros")() end })
+-- Mod Manager v2 story 3: the staged-change natives' bad-input cases (apply.lua).
+SETS.AP = dofile(scriptDir .. "\\apply.lua")({ case = case, E = E, step = step, CORE = CORE, core = function() return core end })
 -- Core story 44: core.input's bad-input cases and the controls / controls-restart scenarios (controls.lua).
 SETS.CT = dofile(scriptDir .. "\\controls.lua")({ case = case, E = E, step = step, check = check, say = say, CORE = CORE,
     core = function() return core end, request = request, waitWorld = waitWorld, travel = travel, MATCH_MAP = MATCH_MAP, scriptDir = scriptDir })
