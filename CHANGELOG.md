@@ -4,6 +4,8 @@ All notable changes to Nucleus are recorded here. The format follows [Keep a Cha
 
 ## [0.22.0] - 2026-11-20
 
+- Catalog listing: the display name "Nucleus (Mod Core)", a description and categories.
+
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
 
 For players: mods can now add their own controls to the game's Controls menu (Settings, Controls). You bind them there like any game control, with a key or a gamepad button, and the game saves them with your other bindings. When you uninstall such a mod its row disappears, and your binding comes back if you install the mod again. That needs Nucleus itself installed: without Nucleus, such saved rows show unlabeled at the bottom of the Controls page.
