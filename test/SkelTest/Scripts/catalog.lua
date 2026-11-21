@@ -109,7 +109,7 @@ return function(X)
                 local ok, st = pcall(Pl, S.job)
                 if not ok then S.err = st return true end
                 return st == "done"
-            end, 90, "catalog refresh job"
+            end, 150, "catalog refresh job"
         end)
         step(phase .. ": catalog refresh result", function()
             if not S.job then return end

@@ -12,6 +12,7 @@ $inst = 'C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463'   # absol
 ./run.ps1 -Instance $inst -Scenario skeleton -Target vm   # the same in the Hyper-V VM, while you play (below)
 pwsh -File test/unit/run_guard_test.ps1       # run.ps1 refuses while another runner's test mod is enabled (-AllowOtherDrivers)
 pwsh -File native/test/restart-helper.tests.ps1   # the relaunch helper's test build (after build.ps1's native step; launches nothing)
+pwsh -File native/test/catalog.tests.ps1      # the catalog's test build against verify.ps1's runners and a local HTTPS fixture server (after the native step)
 ./check.ps1 -Instance $inst -Scenario skeleton
 ```
 
