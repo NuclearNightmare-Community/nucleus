@@ -15,16 +15,34 @@ add_library(CoreMonocypherMT STATIC ${MONOCYPHER_SRC})
 target_include_directories(CoreMonocypherMT PUBLIC ${MONOCYPHER_DIR})
 target_compile_options(CoreMonocypherMT PRIVATE /O2 /W3)
 set_target_properties(CoreMonocypherMT PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded")
+# Mod Manager v2 story 5: miniz 3.0.2 (MIT; third_party/miniz-3.0.2/README.md) for raw Deflate inflate (tinfl) and
+# CRC-32 in core's zip reader, which Windows lacks. Built like Monocypher: one static library per C runtime, the
+# unmodified miniz.c with its archive, stdio, time and zlib-name parts compiled out.
+set(MINIZ_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/miniz-3.0.2)
+set(MINIZ_DEFS MINIZ_NO_STDIO MINIZ_NO_TIME MINIZ_NO_ARCHIVE_APIS MINIZ_NO_ZLIB_COMPATIBLE_NAMES)
+add_library(CoreMiniz STATIC ${MINIZ_DIR}/miniz.c)
+target_include_directories(CoreMiniz PUBLIC ${MINIZ_DIR})
+target_compile_definitions(CoreMiniz PUBLIC ${MINIZ_DEFS})
+target_compile_options(CoreMiniz PRIVATE /O2 /W3)
+set_target_properties(CoreMiniz PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
+add_library(CoreMinizMT STATIC ${MINIZ_DIR}/miniz.c)
+target_include_directories(CoreMinizMT PUBLIC ${MINIZ_DIR})
+target_compile_definitions(CoreMinizMT PUBLIC ${MINIZ_DEFS})
+target_compile_options(CoreMinizMT PRIVATE /O2 /W3)
+set_target_properties(CoreMinizMT PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded")
 # The catalog's code (JSON, minisign, the verify.ps1 port, fetching), shared by core's DLL and the test exe.
 set(CATALOG_SRC catalog/json.cpp catalog/minisig.cpp catalog/verify.cpp catalog/fetch.cpp)
 # Mod Manager v2 story 3: staged changes (the plan, the layout and targets, SHA-256 through CNG; the apply engine),
 # shared by core's DLL (status, start, ack) and the relaunch helper (which applies). Windows and the C++ library only.
 set(STAGE_SRC stage/plan.cpp stage/apply.cpp)
+# Mod Manager v2 story 5: the zip reader and the install stage writer (<Core>_CatalogStage), on top of the catalog and
+# stage code; core's DLL and the catalog test exe (never the helper, which only copies hashed files).
+set(INSTALL_SRC stage/zip.cpp stage/install.cpp)
 
-add_library(${TARGET} SHARED dllmain.cpp core_shared.cpp objectives.cpp intercept.cpp restart.cpp apply.cpp catalog.cpp ${CATALOG_SRC} ${STAGE_SRC})
+add_library(${TARGET} SHARED dllmain.cpp core_shared.cpp objectives.cpp intercept.cpp restart.cpp apply.cpp catalog.cpp ${CATALOG_SRC} ${STAGE_SRC} ${INSTALL_SRC})
 target_include_directories(${TARGET} PRIVATE . ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries(${TARGET} PUBLIC UE4SS)
-target_link_libraries(${TARGET} PRIVATE CoreMonocypher winhttp bcrypt crypt32)
+target_link_libraries(${TARGET} PRIVATE CoreMonocypher CoreMiniz winhttp bcrypt crypt32)
 # Record only the PDB's file name in the DLL, not the absolute build path (which contains the Windows user name).
 target_link_options(${TARGET} PRIVATE "/PDBALTPATH:%_PDB%")
 
@@ -63,10 +81,11 @@ target_link_options(${RESTART_TEST_TARGET} PRIVATE "/PDBALTPATH:%_PDB%")
 # CORE_CATALOG_TEST: verify.ps1's parameters and output over core's catalog code, plus a named proxy and a pinned server
 # certificate for the local HTTPS fixture server. Windows system libraries and the static C runtime only, never UE4SS.
 set(CATALOG_TEST_TARGET ${CORE_NAME}CatalogTest)
-add_executable(${CATALOG_TEST_TARGET} catalog_cli.cpp ${CATALOG_SRC})
+# Story 5: also the stage code and miniz, for -Stage (a temp install layout under -Root).
+add_executable(${CATALOG_TEST_TARGET} catalog_cli.cpp ${CATALOG_SRC} ${STAGE_SRC} ${INSTALL_SRC})
 target_include_directories(${CATALOG_TEST_TARGET} PRIVATE . ${CMAKE_CURRENT_BINARY_DIR})
 target_compile_definitions(${CATALOG_TEST_TARGET} PRIVATE UNICODE _UNICODE CORE_CATALOG_TEST=1)
 target_compile_options(${CATALOG_TEST_TARGET} PRIVATE /O2 /utf-8)
 set_target_properties(${CATALOG_TEST_TARGET} PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded" CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
-target_link_libraries(${CATALOG_TEST_TARGET} PRIVATE CoreMonocypherMT winhttp bcrypt crypt32)
+target_link_libraries(${CATALOG_TEST_TARGET} PRIVATE CoreMonocypherMT CoreMinizMT winhttp bcrypt crypt32)
 target_link_options(${CATALOG_TEST_TARGET} PRIVATE "/PDBALTPATH:%_PDB%")

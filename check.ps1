@@ -1109,9 +1109,14 @@ $catCaseIds = @('refresh-1', 'refresh-nil', 'refresh-str', 'refresh-table', 'ref
                 'dl-id-nil', 'dl-id-table', 'dl-ver-int', 'dl-ver-float', 'dl-ver-bool', 'dl-id-bare', 'dl-id-url', 'dl-id-empty',
                 'dl-id-201', 'dl-id-huge', 'dl-ver-semver', 'dl-ver-empty', 'dl-ver-lead0', 'dl-ver-ctrl', 'dl-ver-129', 'poll-none',
                 'poll-two', 'poll-nil', 'poll-float', 'poll-1\.0', 'poll-numstr', 'poll-0', 'poll--1', 'poll-2\^53', 'poll-minint', 'poll-max')
+# Mod Manager v2 story 5 (core 0.26.0): <Core>_CatalogStage's argument checks, in both worlds and off the game thread.
+$catCaseIds += @('stage-none', 'stage-one', 'stage-odd', 'stage-17', 'stage-33', 'stage-id-int', 'stage-ver-nil', 'stage-id3-table', 'stage-ver4-float',
+                 'stage-ver-bool', 'stage-id-bare', 'stage-id-empty', 'stage-id-201', 'stage-id-huge', 'stage-ver-semver', 'stage-ver2-semver',
+                 'stage-ver-129', 'stage-ver-ctrl', 'stage-dup')
 foreach ($p in 'menu1', 'match1') {
     foreach ($id in $catCaseIds) { $badInput += "\[$T\] OK CASE $p\.cat-$id "; $badInput += "\[$T\] OK CASE $p\.off-cat-$id " }
-    foreach ($id in 'has', 'wrap-poll-float', 'wrap-poll-max', 'wrap-dl-nul', 'wrap-dl-bare') { $badInput += "\[$T\] OK CASE $p\.cat-$id " }
+    foreach ($id in 'has', 'wrap-poll-float', 'wrap-poll-max', 'wrap-dl-nul', 'wrap-dl-bare', 'wrap-stage-empty', 'wrap-stage-str', 'wrap-stage-nul',
+                    'wrap-stage-dup') { $badInput += "\[$T\] OK CASE $p\.cat-$id " }
 }
 # Mod Manager v2 story 3 (core 0.24.0): the staged-change natives' bad-input group (apply.lua), in both worlds and off
 # the game thread: argument checks, and on the dev copy (nothing staged, no result) status "none none", start "nothing
@@ -1123,7 +1128,8 @@ foreach ($p in 'menu1', 'match1') {
     foreach ($id in $applyCaseIds) { $badInput += "\[$T\] OK CASE $p\.apply-$id "; $badInput += "\[$T\] OK CASE $p\.off-apply-$id " }
     foreach ($id in 'has', 'wrap-status', 'wrap-start', 'wrap-ack-bad', 'wrap-ack') { $badInput += "\[$T\] OK CASE $p\.apply-$id " }
 }
-foreach ($id in 'dl-unverified', 'refresh', 'refresh-busy', 'dl-busy', 'wrap-refresh-busy', 'poll-gap', 'poll-done', 'wrap-poll-done', 'dl-after', 'poll-again') {
+foreach ($id in 'dl-unverified', 'refresh', 'refresh-busy', 'dl-busy', 'wrap-refresh-busy', 'poll-gap', 'poll-done', 'wrap-poll-done', 'dl-after', 'poll-again',
+                'stage-unverified', 'stage-busy', 'stage-after') {
     $badInput += "\[$T\] OK CASE menu1\.cat-$id "
 }
 $badInput += "\[$N\] native: catalog: refresh job \d+ started"

@@ -9,12 +9,19 @@
 --                    that decodes with core's JSON reader and holds the detail lines (and on ok the source, base and
 --                    verified index). Whatever the live catalog or the network answers is accepted if well-formed: no
 --                    test depends on it. A download after it is "not in the catalog" (ok) or "no verified catalog".
+--                    Mod Manager v2 story 5 (<Core>_CatalogStage, core.catalog.stage): the cat-stage-* argument cases
+--                    (count, odd count, types, the normalizer, semver, sizes, an id twice) and the wrappers; at menu1 a
+--                    stage before any refresh is "no verified index", one while the refresh runs "busy", and one after it
+--                    of a pair no catalog has a job whose outcome is not-in-catalog (or "no verified index" when the
+--                    refresh wasn't ok): nothing is ever staged in the dev copy.
 --   offThread(P)     the same natives off the game thread (inside main.lua's LoopAsync block): none touches a UObject,
 --                    so argument errors and answers are the same as on the game thread
 return function(X)
     local CAT = {}
     local case, E, step, check, say, CORE = X.case, X.E, X.step, X.check, X.say, X.CORE
     local nR, nD, nP = CORE .. "_CatalogRefresh", CORE .. "_CatalogDownload", CORE .. "_CatalogPoll"
+    local nS = CORE .. "_CatalogStage"
+    local function St(...) return _G[nS](...) end
     local function R(...) return _G[nR](...) end
     local function D(...) return _G[nD](...) end
     local function Pl(...) return _G[nP](...) end
@@ -62,6 +69,33 @@ return function(X)
         case(P .. "cat-poll-2^53", nP .. "(2^53)" .. t, f(Pl, 1 << 53), E.err(nP .. ": job 9007199254740992 is out of range"))
         case(P .. "cat-poll-minint", nP .. "(math.mininteger)" .. t, f(Pl, math.mininteger), E.err(nP .. ": job " .. math.mininteger .. " is out of range"))
         case(P .. "cat-poll-max", nP .. "(2^53-1) [never issued]" .. t, f(Pl, MAXJOB), nilReason("unknown job"))
+        -- Mod Manager v2 story 5: <Core>_CatalogStage(id1, v1, ..., idN, vN), N 1..16.
+        local cnt = nS .. ": expected 1 to 16 (id, version) pairs (2 to 32 arguments), got "
+        case(P .. "cat-stage-none", nS .. "()" .. t, f(St), E.err(cnt .. "0"))
+        case(P .. "cat-stage-one", nS .. "(\"a.b\")" .. t, f(St, "a.b"), E.err(cnt .. "1"))
+        case(P .. "cat-stage-odd", nS .. "(\"a.b\", \"1.0.0\", \"c.d\")" .. t, f(St, "a.b", "1.0.0", "c.d"), E.err(nS .. ": expected (id, version) pairs, got an odd count of 3 arguments"))
+        local many = {}
+        for i = 1, 17 do many[#many + 1] = "o.m" .. i; many[#many + 1] = "1.0.0" end
+        case(P .. "cat-stage-17", nS .. "(<17 pairs>)" .. t, function() return St(table.unpack(many, 1, 34)) end, E.err(cnt .. "34"))
+        case(P .. "cat-stage-33", nS .. "(<33 arguments>)" .. t, function() return St(table.unpack(many, 1, 33)) end, E.err(cnt .. "33"))
+        case(P .. "cat-stage-id-int", nS .. "(1, \"1.0.0\")" .. t, f(St, 1, "1.0.0"), E.err(nS .. ": argument 1 (id) must be a string, got an integer"))
+        case(P .. "cat-stage-ver-nil", nS .. "(\"a.b\", nil)" .. t, f(St, "a.b", nil), E.err(nS .. ": argument 2 (version) must be a string, got nil"))
+        case(P .. "cat-stage-id3-table", nS .. "(\"a.b\", \"1.0.0\", {}, \"1.0.0\")" .. t, f(St, "a.b", "1.0.0", {}, "1.0.0"),
+            E.err(nS .. ": argument 3 (id) must be a string, got a table"))
+        case(P .. "cat-stage-ver4-float", nS .. "(\"a.b\", \"1.0.0\", \"c.d\", 1.5)" .. t, f(St, "a.b", "1.0.0", "c.d", 1.5),
+            E.err(nS .. ": argument 4 (version) must be a string, got a float"))
+        case(P .. "cat-stage-ver-bool", nS .. "(\"a.b\", true)" .. t, f(St, "a.b", true), E.err(nS .. ": argument 2 (version) must be a string, got a boolean"))
+        case(P .. "cat-stage-id-bare", nS .. "(\"nucleus\", \"1.0.0\")" .. t, f(St, "nucleus", "1.0.0"), E.err(nS .. ": argument 1 (id): an id needs a namespace"))
+        case(P .. "cat-stage-id-empty", nS .. "(\"\", \"1.0.0\")" .. t, f(St, "", "1.0.0"), E.err(nS .. ": argument 1 (id): an id must not be empty"))
+        case(P .. "cat-stage-id-201", nS .. "(<201-byte id>)" .. t, f(St, long, "1.0.0"), E.err(nS .. ": argument 1 (id): an id must be at most 200 bytes"))
+        case(P .. "cat-stage-id-huge", nS .. "(<1 MiB id>)" .. t, f(St, ("a"):rep(1 << 20), "1.0.0"), E.err(nS .. ": argument 1 (id): an id must be at most 200 bytes"))
+        case(P .. "cat-stage-ver-semver", nS .. "(\"a.b\", \"1.0\")" .. t, f(St, "a.b", "1.0"), E.err(nS .. ": argument 2 (version) is not semver: '1.0'"))
+        case(P .. "cat-stage-ver2-semver", nS .. "(\"a.b\", \"1.0.0\", \"c.d\", \"x\")" .. t, f(St, "a.b", "1.0.0", "c.d", "x"),
+            E.err(nS .. ": argument 4 (version) is not semver: 'x'"))
+        case(P .. "cat-stage-ver-129", nS .. "(\"a.b\", <129 bytes>)" .. t, f(St, "a.b", "1.0.0-" .. ("x"):rep(123)), E.err(nS .. ": argument 2 (version) must be at most 128 bytes, got 129"))
+        case(P .. "cat-stage-ver-ctrl", nS .. "(\"a.b\", \"1.0.0\\1\")" .. t, f(St, "a.b", "1.0.0\1"), E.err(nS .. ": argument 2 (version) is not semver: '1.0.0?'"))
+        case(P .. "cat-stage-dup", nS .. "(\"a.b\", \"1.0.0\", \"A.B\", \"2.0.0\")" .. t, f(St, "a.b", "1.0.0", "A.B", "2.0.0"),
+            E.err(nS .. ": argument 3 (id): a.b is listed twice"))
     end
 
     local function wrapperCases(P)
@@ -73,6 +107,14 @@ return function(X)
             nilReason("bad arguments: id must not contain a NUL byte"))
         case(P .. "cat-wrap-dl-bare", "core.catalog.download(\"nucleus\", \"1.0.0\")", function() return core.catalog.download("nucleus", "1.0.0") end,
             E.ret("nil, \"error: ... an id needs a namespace ...\"", function(r) return r[1] == nil and type(r[2]) == "string" and r[2]:find("an id needs a namespace", 1, true) ~= nil end))
+        -- Mod Manager v2 story 5: core.catalog.stage checks its list before any native call.
+        case(P .. "cat-wrap-stage-empty", "core.catalog.stage({})", function() return core.catalog.stage({}) end, nilReason("bad arguments: list must not be empty"))
+        case(P .. "cat-wrap-stage-str", "core.catalog.stage(\"a.b\")", function() return core.catalog.stage("a.b") end,
+            nilReason("bad arguments: list must be a table of { id, version }"))
+        case(P .. "cat-wrap-stage-nul", "core.catalog.stage({ { id = \"a.b\\0\", version = \"1.0.0\" } })",
+            function() return core.catalog.stage({ { id = "a.b\0", version = "1.0.0" } }) end, nilReason("bad arguments: entry 1's id must not contain a NUL byte"))
+        case(P .. "cat-wrap-stage-dup", "core.catalog.stage({ a.b, A.B })", function() return core.catalog.stage({ { id = "a.b", version = "1.0.0" }, { id = "A.B", version = "1.0.0" } }) end,
+            E.ret("nil, \"error: ... listed twice\"", function(r) return r[1] == nil and type(r[2]) == "string" and r[2]:find("is listed twice", 1, true) ~= nil end))
     end
 
     function CAT.badInput(phase)
@@ -86,6 +128,7 @@ return function(X)
         local S = {}
         step(phase .. ": catalog refresh", function()
             case(P .. "cat-dl-unverified", nD .. "(\"nobody.nothing\", \"1.0.0\") [before any refresh]", f(D, "nobody.nothing", "1.0.0"), nilReason("no verified catalog"))
+            case(P .. "cat-stage-unverified", nS .. "(\"nobody.nothing\", \"1.0.0\") [before any refresh]", f(St, "nobody.nothing", "1.0.0"), nilReason("no verified index"))
             local r = table.pack(pcall(R))
             S.job = r[1] and math.type(r[2]) == "integer" and r[2] or nil
             case(P .. "cat-refresh", nR .. "() [starts the job]", function() return table.unpack(r, 2, r.n) end,
@@ -94,6 +137,7 @@ return function(X)
             -- Busy until it is done: the worker takes the network round trips, so these run while it is queued or running.
             case(P .. "cat-refresh-busy", nR .. "() [while a job runs]", f(R), nilReason("busy"))
             case(P .. "cat-dl-busy", nD .. "(\"nobody.nothing\", \"1.0.0\") [while a job runs]", f(D, "nobody.nothing", "1.0.0"), nilReason("busy"))
+            case(P .. "cat-stage-busy", nS .. "(\"nobody.nothing\", \"1.0.0\") [while a job runs]", f(St, "nobody.nothing", "1.0.0"), nilReason("busy"))
             case(P .. "cat-wrap-refresh-busy", "core.catalog.refresh() [while a job runs]", function() return X.core().catalog.refresh() end, nilReason("busy"))
             S.last, S.gap, S.polls = X.clock(), 0, 0
             say("CATALOG refresh job %d started", S.job)
@@ -141,6 +185,30 @@ return function(X)
             local want = S.outcome == "ok" and "not in the catalog" or "no verified catalog"
             case(P .. "cat-dl-after", nD .. "(\"nobody.nothing\", \"1.0.0\") [after the refresh: " .. tostring(S.outcome) .. "]", f(D, "nobody.nothing", "1.0.0"), nilReason(want))
             case(P .. "cat-poll-again", nP .. "(" .. S.job .. ") [kept after reading]", f(Pl, S.job), E.ret("\"done\" again", function(r) return r[1] == "done" end))
+            -- Mod Manager v2 story 5: a stage of a pair no catalog has: a job (ok refresh) that ends not-in-catalog, or
+            -- "no verified index"; nothing is staged either way.
+            local sr = table.pack(pcall(St, "nobody.nothing", "1.0.0"))
+            S.stageJob = sr[1] and math.type(sr[2]) == "integer" and sr[2] or nil
+            case(P .. "cat-stage-after", nS .. "(\"nobody.nothing\", \"1.0.0\") [after the refresh: " .. tostring(S.outcome) .. "]", function() return table.unpack(sr, 2, sr.n) end,
+                S.outcome == "ok" and E.ret("a job id", function(x) return x.n == 1 and math.type(x[1]) == "integer" and x[1] >= 1 end) or nilReason("no verified index"))
+        end)
+        step(phase .. ": catalog stage done", function()
+            if not S.stageJob then return end
+            return function()
+                local ok, st = pcall(Pl, S.stageJob)
+                if not ok then S.stageErr = st return true end
+                return st == "done"
+            end, 150, "catalog stage job"
+        end)
+        step(phase .. ": catalog stage result", function()
+            if not S.stageJob then return end
+            check(not S.stageErr, "CASE %s cat-stage-raise %s(%d) raised: %s", P, nP, S.stageJob, tostring(S.stageErr))
+            local raw = table.pack(pcall(Pl, S.stageJob))
+            case(P .. "cat-stage-poll", nP .. "(" .. S.stageJob .. ") [the stage of a pair no catalog has]", function() return table.unpack(raw, 2, raw.n) end,
+                E.ret("\"done\", \"not-in-catalog\", a message, a payload naming the pair", function(r)
+                    return r.n == 4 and r[1] == "done" and r[2] == "not-in-catalog" and type(r[3]) == "string" and type(r[4]) == "string" and r[4]:find("nobody.nothing", 1, true) ~= nil
+                end))
+            say("CATALOG stage outcome=%s message=%s", tostring(raw[3]), tostring(raw[4]))
         end)
     end
 

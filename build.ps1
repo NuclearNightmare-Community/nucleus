@@ -33,9 +33,11 @@
                component that isn't editor-only): its editor-only preview slots and icon must be stripped.
     lua        Stage lua/main.lua and lua/pkg/ (with lua/pkg/ui/, lua/pkg/map/, lua/pkg/settings/, lua/pkg/net/ and lua/pkg/input/) as Scripts/main.lua and Scripts/<lowercase name>/, plus a generated
                Scripts/<lowercase name>/version.lua.
-    package    build/package/Mods/<name>/{mod.json,dlls/main.dll,bin/<name>Restart.exe,Scripts/,LICENSES/monocypher.txt}
-               and build/package/LogicMods/<name>.pak. LICENSES/monocypher.txt is Monocypher's LICENCE.md (main.dll
-               contains Monocypher, CC0-1.0 OR BSD-2-Clause; native/third_party/monocypher-4.0.2/README.md).
+    package    build/package/Mods/<name>/{mod.json,dlls/main.dll,bin/<name>Restart.exe,Scripts/,LICENSES/monocypher.txt,
+               LICENSES/miniz.txt} and build/package/LogicMods/<name>.pak. LICENSES/monocypher.txt is Monocypher's
+               LICENCE.md (main.dll contains Monocypher, CC0-1.0 OR BSD-2-Clause; native/third_party/monocypher-4.0.2/
+               README.md); LICENSES/miniz.txt is miniz's LICENSE (main.dll contains miniz's inflate and CRC-32, MIT;
+               native/third_party/miniz-3.0.2/README.md, Mod Manager v2 story 5).
   Never builds anything into or copies UE4SS.dll. Only our own generated assets go into the pak.
   -Ue4ssSrc defaults to ue4ss-src/ here, then ue4ss-src/ in this repo's main checkout. It must be the pinned
   commit with submodules (tools/README.md, "UE4SS C++ mods"); clone it as mods/cpp-spike/build.ps1 does.
@@ -368,6 +370,7 @@ Step 'package' {
         'Scripts'     = Join-Path $out 'lua-out\Scripts'
         "$name.pak"   = Join-Path $out "$name.pak"
         'monocypher'  = Join-Path $here 'native\third_party\monocypher-4.0.2\LICENCE.md'
+        'miniz'       = Join-Path $here 'native\third_party\miniz-3.0.2\LICENSE'
     }
     foreach ($p in $parts.GetEnumerator()) { if (-not (Test-Path $p.Value)) { throw "Missing $($p.Key) ($($p.Value)); run its build step" } }
     Copy-Item (Join-Path $here 'mod.json') $modDir
@@ -375,6 +378,8 @@ Step 'package' {
     Copy-Item $parts['helper'] (Join-Path $modDir "bin\$($name)Restart.exe")
     # Mod Manager v2 story 2: main.dll contains Monocypher; its licence notice ships with it.
     Copy-Item $parts['monocypher'] (Join-Path $modDir 'LICENSES\monocypher.txt')
+    # Mod Manager v2 story 5: main.dll contains miniz (inflate and CRC-32); its licence notice ships with it.
+    Copy-Item $parts['miniz'] (Join-Path $modDir 'LICENSES\miniz.txt')
     Copy-Item $parts['Scripts'] $modDir -Recurse
     Copy-Item $parts["$name.pak"] (Join-Path $pkgRoot 'LogicMods')
     Get-ChildItem $pkgRoot -Recurse -File | ForEach-Object {

@@ -123,7 +123,7 @@ M.UI = {
 -- fn: core story 43 (core.fn, a module: intercept, release, runOriginal, list).
 -- restart: core story 45 (core.restart, a module: mode, start; Mod Manager story 8's RESTART NOW).
 -- input: core story 44 (core.input, a module: control, release, list, state).
--- catalog: Mod Manager v2 story 2 (core.catalog, a module: refresh, download, poll).
+-- catalog: Mod Manager v2 story 2 (core.catalog, a module: refresh, download, poll; v2 story 5 adds stage).
 -- apply: Mod Manager v2 story 3 (core.apply, a module: status, start, ack).
 M.BASE = { call = "function", ref = "function", deref = "function", free = "function", clock = "module", settings = "module", net = "module", fn = "module",
     restart = "module", input = "module", catalog = "module", apply = "module" }

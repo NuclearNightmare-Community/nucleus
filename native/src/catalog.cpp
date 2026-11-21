@@ -25,6 +25,12 @@
 //     url-not-allowed, unreachable, error. Payload of ok: {"id","version","sha256","size","file"}.
 //   <Core>_CatalogPoll(job) -> "running" | "done", outcome, message, payloadJson; nil, "unknown job" for a job that
 //     never existed or is no longer kept (the last 8 finished jobs are).
+//   <Core>_CatalogStage(id1, v1, ..., idN, vN) -> job, or nil, reason before anything is fetched (Mod Manager v2 story 5):
+//     N 1..16 (id, version) pairs, each id through the normalizer (at most 200 bytes), each version semver (at most 128
+//     bytes), no id twice. Reasons: "busy", "no verified index" (no ok refresh in this session), "applying" (apply.lock
+//     held), "interrupted" (a journal without "done"), "data folder unknown". The job downloads, verifies, reads and maps
+//     each pair's zip and merges it into story 3's staged plan (stage/install.hpp has the rules and outcomes). Payload
+//     of ok: {"txn","owners":[{"id","version","name","files","bytes"}],"ops"}; otherwise {"failed":<id>|null}.
 // One job at a time: a start while one is queued or running answers nil, "busy". Arguments: Refresh takes none; Download
 // two strings (id through the mod id normalizer, at most 200 bytes; version semver, at most 128 bytes); Poll one
 // integer 1..2^53-1. Anything else raises "<fn>: <problem>". The worker never touches Lua or a UObject; it catches
@@ -44,6 +50,7 @@
 #include "catalog/json.hpp"
 #include "catalog/verify.hpp"
 #include "core_config.hpp"
+#include "stage/install.hpp"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -58,6 +65,7 @@ namespace core_native::catalog_natives
     const std::string g_fn_refresh = std::string{CORE_NAME} + "_CatalogRefresh";
     const std::string g_fn_download = std::string{CORE_NAME} + "_CatalogDownload";
     const std::string g_fn_poll = std::string{CORE_NAME} + "_CatalogPoll";
+    const std::string g_fn_stage = std::string{CORE_NAME} + "_CatalogStage";
 
     namespace
     {
@@ -69,23 +77,26 @@ namespace core_native::catalog_natives
         constexpr size_t k_kept = 8;
         constexpr size_t k_max_version = 128;
 
+        // The verified catalog downloads and stages use (an ok refresh's).
+        struct Verified
+        {
+            Value ix;
+            std::optional<Value> rv;
+        };
+
         struct Job
         {
             enum class Kind
             {
                 Refresh,
-                Download
+                Download,
+                Stage
             } kind = Kind::Refresh;
             int64_t id = 0;
             cat::fetch::Plan plan;
+            std::vector<core_stage::install::Item> items; // Stage
+            std::shared_ptr<const Verified> verified;     // Stage: the catalog it was asked against
             std::string outcome, message, payload;
-        };
-
-        // The verified catalog downloads use (an ok refresh's).
-        struct Verified
-        {
-            Value ix;
-            std::optional<Value> rv;
         };
 
         std::mutex g_mu;
@@ -291,6 +302,39 @@ namespace core_native::catalog_natives
             job.payload = cat::fetch::download_payload(plan, nullptr);
         }
 
+        // The layout from this DLL's own path (Mods/<Core>/dlls/main.dll); false when it differs.
+        bool own_layout(core_stage::Layout& l)
+        {
+            HMODULE self = nullptr;
+            if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, reinterpret_cast<LPCWSTR>(&own_layout),
+                                    &self))
+            {
+                return false;
+            }
+            return core_stage::layout_from_module(core_stage::module_file(self), cat::widen(CORE_NAME), l);
+        }
+
+        void run_stage(Job& job, const fs::path& data)
+        {
+            core_stage::Layout l;
+            if (!own_layout(l) || !job.verified)
+            {
+                job.outcome = "error";
+                job.message = "data folder unknown";
+                job.payload = "{\"failed\":null}";
+                return;
+            }
+            core_stage::install::Outcome o;
+            with_transport([&](cat::fetch::Transport& t) {
+                o = core_stage::install::run_stage(l, job.verified->ix, job.verified->rv ? &*job.verified->rv : nullptr, job.items, t, data / L"catalog" / L"state.json",
+                                                   g_cancel);
+            });
+            for (const auto& d : o.details) logf("catalog: stage job {}: {}", job.id, d);
+            job.outcome = o.outcome;
+            job.message = o.message;
+            job.payload = o.payload;
+        }
+
         void worker()
         {
             while (true)
@@ -304,7 +348,7 @@ namespace core_native::catalog_natives
                     g_pending.reset();
                     g_running = job.id;
                 }
-                const char* what = job.kind == Job::Kind::Refresh ? "refresh" : "download";
+                const char* what = job.kind == Job::Kind::Refresh ? "refresh" : job.kind == Job::Kind::Download ? "download" : "stage";
                 try
                 {
                     const fs::path data = data_dir();
@@ -317,6 +361,10 @@ namespace core_native::catalog_natives
                     else if (job.kind == Job::Kind::Refresh)
                     {
                         run_refresh(job, data);
+                    }
+                    else if (job.kind == Job::Kind::Stage)
+                    {
+                        run_stage(job, data);
                     }
                     else
                     {
@@ -421,6 +469,55 @@ namespace core_native::catalog_natives
             job.plan = *plan;
             const int64_t id = queue(std::move(job));
             logf("catalog: download job {} started ({} {})", id, plan->id, plan->version);
+            return integer(id);
+        });
+    }
+
+    int l_stage(const Lua& lua)
+    {
+        return guarded(lua, g_fn_stage, [&] {
+            const std::string& fn = g_fn_stage;
+            constexpr size_t max_pairs = core_stage::install::k_max_pairs;
+            const int n = lua.get_stack_size();
+            if (n < 2 || n > static_cast<int>(2 * max_pairs))
+                throw ArgError(std::format("{}: expected 1 to {} (id, version) pairs (2 to {} arguments), got {}", fn, max_pairs, 2 * max_pairs, n));
+            if (n % 2 != 0) throw ArgError(std::format("{}: expected (id, version) pairs, got an odd count of {} arguments", fn, n));
+            std::vector<core_stage::install::Item> items;
+            // Arguments are taken from the bottom of the stack: each read removes argument 1.
+            for (int k = 1; k <= n; k += 2)
+            {
+                if (!lua.is_string(1)) throw ArgError(std::format("{}: argument {} (id) must be a string, got {}", fn, k, describe_first_arg(lua)));
+                const std::string id_in{lua.get_string(1)};
+                if (!lua.is_string(1)) throw ArgError(std::format("{}: argument {} (version) must be a string, got {}", fn, k + 1, describe_first_arg(lua)));
+                const std::string version{lua.get_string(1)};
+                const auto nid = cat::modid::normalize(id_in);
+                if (!nid.error.empty()) throw ArgError(std::format("{}: argument {} (id): {}", fn, k, nid.error));
+                if (version.size() > k_max_version) throw ArgError(std::format("{}: argument {} (version) must be at most {} bytes, got {}", fn, k + 1, k_max_version, version.size()));
+                if (!cat::is_semver(version)) throw ArgError(std::format("{}: argument {} (version) is not semver: '{}'", fn, k + 1, echo(version)));
+                for (const auto& it : items)
+                    if (it.id == nid.id) throw ArgError(std::format("{}: argument {} (id): {} is listed twice", fn, k, nid.id));
+                items.push_back({nid.id, version});
+            }
+            core_stage::Layout l;
+            if (data_dir().empty() || !own_layout(l)) return nil_reason("data folder unknown");
+            std::shared_ptr<const Verified> verified;
+            {
+                std::lock_guard g{g_mu};
+                if (g_stop || busy()) return nil_reason("busy");
+                verified = g_verified;
+            }
+            if (!verified) return nil_reason("no verified index");
+            if (const std::string b = core_stage::install::blocked(l); !b.empty()) return nil_reason(b);
+            std::lock_guard g{g_mu};
+            if (g_stop || busy()) return nil_reason("busy");
+            Job job;
+            job.kind = Job::Kind::Stage;
+            job.items = std::move(items);
+            job.verified = std::move(verified);
+            std::string list;
+            for (const auto& it : job.items) list += (list.empty() ? "" : ", ") + it.id + " " + it.version;
+            const int64_t id = queue(std::move(job));
+            logf("catalog: stage job {} started ({})", id, list);
             return integer(id);
         });
     }
