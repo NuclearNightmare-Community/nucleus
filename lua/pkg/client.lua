@@ -20,6 +20,8 @@ local fnOk, fnm = pcall(require, BASE .. ".fn")
 local restartOk, restartm = pcall(require, BASE .. ".restart")
 -- core.catalog (Mod Manager v2 story 2). The same: a failure here costs core.catalog, not connect.
 local catalogOk, catalogm = pcall(require, BASE .. ".catalog")
+-- core.apply (Mod Manager v2 story 3). The same: a failure here costs core.apply, not connect.
+local applyOk, applym = pcall(require, BASE .. ".apply")
 -- core.input (core story 44, CAP-14). The same: a failure here costs core.input, not connect.
 local inputOk, inputm = pcall(require, BASE .. ".input")
 -- UI helpers (ui-helpers-contract.md). Loading them registers the HUD creation callback (ui/hud.lua) in this Lua state.
@@ -350,6 +352,9 @@ function C.connect(opts)
         -- Mod Manager v2 story 2: core.catalog, over core's catalog natives (refresh, download, poll; never raise).
         if catalogOk then api.catalog = { refresh = catalogm.refresh, download = catalogm.download, poll = catalogm.poll }
         else log.error("%s's catalog module failed to load (%s); core.catalog is not available.", NAME, tostring(catalogm)) end
+        -- Mod Manager v2 story 3: core.apply, over core's staged-change natives (status, start, ack; never raise).
+        if applyOk then api.apply = { status = applym.status, start = applym.start, ack = applym.ack }
+        else log.error("%s's apply module failed to load (%s); core.apply is not available.", NAME, tostring(applym)) end
         -- Core story 44: core.input, bound to this mod's mod.json id (nil: every call raises "own mod id unknown"); its
         -- controls are released when its Lua stops (chained at the first control).
         if inputOk then

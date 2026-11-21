@@ -2,6 +2,23 @@
 
 All notable changes to Nucleus are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). From 0.5.0 a dependent's `need` and `dependsOn` are minimum versions (`>=0.5.0`), so a newer Nucleus never asks dependents to raise them. Up to 0.3.0, below 1.0.0 a dependent connected only to the same minor version (`need = "0.3.0"` accepted 0.3.x).
 
+## [0.24.0] - 2026-11-21
+
+Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
+
+For players: when the Mod Manager installs, updates or removes a mod while the game runs (coming in its next versions), Nucleus now finishes the job after the game closes, however it closes: quitting from the menu, Alt+F4, or the game being ended. If anything goes wrong (for example a file another program holds open), every file is put back exactly as it was and the change is tried again next time; the Mod Manager tells you what happened when you next open it. Nucleus's small helper `NucleusRestart.exe` does this; it only ever writes mod files, the Blueprint and `_P` paks of mods, `mods.txt` lines, and its own `NucleusData` folder, never UE4SS or the game's own files.
+
+### Added
+
+- Staged changes (Mod Manager v2 story 3; README "Staged changes"). A change is a plan `ue4ss/NucleusData/staged/plan.txt` plus staged files named by their SHA-256 (`native/src/stage/plan.cpp`: the format, the allowed targets, the install layout from the module path, SHA-256 through Windows CNG). The relaunch helper gains an apply mode (`--apply`, `--mode none`; no time limit): it waits for the game to exit, then (`native/src/stage/apply.cpp`) checks the plan, every target (only mod files under `Mods/<Name>/`, `LogicMods/<Name>.pak` and `Paks/<Name>_P.pak`; never a stock UE4SS mod, a reparse point or anything else) and every staged file's size and SHA-256, takes `NucleusData/apply.lock`, and applies with a journal and backups: new files written beside their target and renamed into place, `mods.txt` edited with the Mod Manager's rule, `NucleusData/installed.txt` recording the owner, SHA-256 and target of every file, and on any failure every step undone in reverse order, byte for byte. An interrupted apply is rolled back by the next helper first. A failed change stays staged (`failed`) and is discarded after 3 attempts, or at once for a bad plan or a staged file that doesn't match (`NucleusData/failed/`). The result is `NucleusData/apply-result.txt`. A plan may update the helper itself (the running copy is renamed to `bin/NucleusRestart.<txn>.old`, deleted by a later helper). The helper relaunches the game after applying only when `relaunch.txt` asks for it.
+- New natives `Nucleus_ApplyStatus()` (`staged, result, txn, reason, path, attempts, changes`), `Nucleus_ApplyStart()` (starts the helper in apply mode: `true` or `nil, "nothing staged" | "already started" | "applying" | "helper missing" | "command line too long" | "start failed: <code>"`) and `Nucleus_ApplyAck(txn)` (`true` or `nil, "no result" | "txn mismatch"`), any thread. `core.apply` (`status`, `start`, `ack`; never raises) and `require("nucleus.apply")`; feature `apply`.
+- Tests: `native/test/apply.tests.ps1` (every case against the helper's test build and a temporary install layout; the test build gains `--root`, `--fail-after` and `--crash-after`), `native/test/New-StagedPlan.ps1` (writes plans), `test/unit/apply_test.lua`, and `bad-input`'s `apply-*` cases.
+
+### Changed
+
+- `Nucleus_RestartStart`: while this session's apply helper waits, it writes `NucleusData/relaunch.txt` (the game's and the helper's process ids) and answers `true` instead of starting a second helper, so Restart now applies the staged change and then starts the game. Without a waiting apply helper it is unchanged.
+- The helper now links Windows CNG (`bcrypt.dll`); `build.ps1` allows it in the helper's imports and still scans `main.dll` and the helper with Windows Defender.
+
 ## [0.23.0] - 2026-11-20
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.

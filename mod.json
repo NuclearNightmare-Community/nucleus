@@ -4,7 +4,7 @@
   "displayName": "Nucleus (Mod Core)",
   "description": "The shared core that other Nuclear Nightmare mods build on: settings, menus, and controls in the game's own style, and safe hooks into the game. Installed once.",
   "categories": ["library"],
-  "version": "0.23.0",
+  "version": "0.24.0",
   "scope": "client",
   "game": { "version": "V8.2.3", "build": "26601774" },
   "ue4ss": "v3.0.1-1181-g83330635",
