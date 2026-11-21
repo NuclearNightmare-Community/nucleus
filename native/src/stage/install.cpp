@@ -321,7 +321,7 @@ namespace core_stage::install
     }
 
     Outcome run_stage(const Layout& l, const Value& ix, const Value* rv, const std::vector<Item>& items, cat::fetch::Transport& t, const fs::path& state_file,
-                      const std::atomic<bool>& cancel)
+                      const std::atomic<bool>& cancel, bool precheck)
     {
         Outcome out;
         std::string failed_id;
@@ -340,7 +340,7 @@ namespace core_stage::install
         try
         {
             if (items.empty() || items.size() > k_max_pairs) return refuse("error", "1 to 16 pairs");
-            if (const std::string b = blocked(l); !b.empty()) return refuse(b, b == "applying" ? "a staged change is being applied" : "an apply was cut short; it is rolled back first");
+            if (const std::string b = precheck ? blocked(l) : std::string{}; !b.empty()) return refuse(b, b == "applying" ? "a staged change is being applied" : "an apply was cut short; it is rolled back first");
             const fs::path downloads = fs::path{l.data} / L"downloads";
             std::vector<Pair> pairs;
             uint64_t total = 0;
@@ -430,6 +430,8 @@ namespace core_stage::install
             lock.h = CreateFileW((l.data + L"\\apply.lock").c_str(), GENERIC_READ | GENERIC_WRITE | DELETE, 0, nullptr, OPEN_ALWAYS,
                                  FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
             if (lock.h == INVALID_HANDLE_VALUE) return refuse("applying", "a staged change is being applied (apply.lock is held)");
+            // Again under the lock: an apply cut short while the downloads ran is rolled back first; nothing is written.
+            if (journal_interrupted(l)) return refuse("interrupted", "an apply was cut short (found under apply.lock); it is rolled back first");
             const std::wstring staged = l.data + L"\\staged";
             const std::wstring files_dir = staged + L"\\files";
             const std::wstring plan_path = staged + L"\\plan.txt";
@@ -480,9 +482,10 @@ namespace core_stage::install
                 std::string why, bad;
                 if (!parse_plan(plan_text, check, why, bad))
                 {
-                    const bool caps = why.find("1 MiB") != std::string::npos || why.find("512 MiB") != std::string::npos || why.find("1024") != std::string::npos;
+                    // twice first: its message names a line number, which may contain "1024"
                     const bool twice = why.find("two operations on one target") != std::string::npos || why.find("two modstxt") != std::string::npos;
-                    return refuse(caps ? "too-large" : twice ? "folder-in-use" : "error", "the merged plan is refused: " + why + (bad.empty() ? "" : " (" + bad + ")"));
+                    const bool caps = why.find("1 MiB") != std::string::npos || why.find("512 MiB") != std::string::npos || why.find("1024") != std::string::npos;
+                    return refuse(twice ? "folder-in-use" : caps ? "too-large" : "error", "the merged plan is refused: " + why + (bad.empty() ? "" : " (" + bad + ")"));
                 }
             }
 

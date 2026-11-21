@@ -64,9 +64,11 @@ namespace core_stage::install
     // "applying" (apply.lock held), "interrupted" (a journal without "done"), or "" (stageable now).
     std::string blocked(const Layout& l);
 
-    // The whole stage (above). state_file: story 2's state.json, for download back-off (may be empty).
+    // The whole stage (above). state_file: story 2's state.json, for download back-off (may be empty). precheck false
+    // (the test exe's -NoPrecheck only) skips the applying/interrupted check before the downloads, so the checks made
+    // once apply.lock is taken can be tested; they always run.
     Outcome run_stage(const Layout& l, const catalog::json::Value& ix, const catalog::json::Value* rv, const std::vector<Item>& items, catalog::fetch::Transport& t,
-                      const std::filesystem::path& state_file, const std::atomic<bool>& cancel);
+                      const std::filesystem::path& state_file, const std::atomic<bool>& cancel, bool precheck = true);
 
     // semver precedence: <0, 0, >0; nullopt-like 2 when either isn't semver.
     int semver_compare(const std::string& a, const std::string& b);

@@ -15,6 +15,8 @@
 //                         story 5; stage/install.hpp), against the install layout under <dir> (story 3's --root: a temp
 //                         folder holding NuclearNightmare\...); prints the outcome, the message, the detail lines and
 //                         "payload: <json>"; downloads go to <dir>'s <Core>Data\downloads
+//   -NoPrecheck           with -Stage: skip the applying/interrupted checks made before the downloads (here and in
+//                         run_stage), so the ones made once apply.lock is held answer (stage.tests.ps1)
 // -Minisign is accepted and ignored (signatures are checked in process).
 #include <cstdio>
 #include <map>
@@ -94,7 +96,7 @@ namespace
     {
         static const char* valued[] = {"index", "signature", "revoked", "revokedsignature", "keys", "keyssignature", "url", "outdir", "transport",
                                        "statefile", "package", "id", "version", "trustedkeys", "minisign", "proxy", "pincert", "modid", "root"};
-        static const char* flags[] = {"fetch", "printbuiltins", "download"};
+        static const char* flags[] = {"fetch", "printbuiltins", "download", "noprecheck"};
         Args a;
         for (int i = 1; i < argc; ++i)
         {
@@ -273,10 +275,12 @@ namespace
                 const fs::path rvf = full_path(revoked);
                 rv = v.check_revoked_file(rvf, fs::path{rvf} += L".minisig");
             }
-            if (const std::string b = core_stage::install::blocked(l); !b.empty()) return finish(b, "refused before the job: " + b, v.details);
+            // -NoPrecheck (test only): no check here nor before the downloads, so run_stage's checks under apply.lock answer.
+            const bool precheck = !a.sw("noprecheck");
+            if (const std::string b = precheck ? core_stage::install::blocked(l) : std::string{}; !b.empty()) return finish(b, "refused before the job: " + b, v.details);
             auto t = fetch::make_transport(transport_options(a));
             std::atomic<bool> cancel{false};
-            const auto o = core_stage::install::run_stage(l, ix, rv ? &*rv : nullptr, items, *t, state_file, cancel);
+            const auto o = core_stage::install::run_stage(l, ix, rv ? &*rv : nullptr, items, *t, state_file, cancel, precheck);
             for (const auto& d : o.details) v.note(d);
             v.note("payload: " + o.payload);
             return finish(o.outcome, o.message, v.details);

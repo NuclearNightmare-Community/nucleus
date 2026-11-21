@@ -310,11 +310,18 @@ try {
     try {
         Stage 'nuclearnightmare-community.alpha', '1.0.0'
         Ok ((Outcome) -eq 'outcome: applying' -and (Same $before (Snap $staged))) 'apply.lock held: applying, nothing staged' (Shown)
+        # The job's own check once the downloads are done (-NoPrecheck skips the checks before them).
+        Run-Exe -Stage 'nuclearnightmare-community.alpha' '1.0.0' -Root $root @net -NoPrecheck
+        Ok ((Outcome) -eq 'outcome: applying' -and (Has-Line 'apply.lock is held') -and (Same $before (Snap $staged)) -and
+            @(Get-ChildItem -LiteralPath (Join-Path $data 'downloads') -File -Force -ErrorAction SilentlyContinue).Count -eq 0) 'apply.lock held at write time (-NoPrecheck): applying from the job, staged\ unchanged, the download removed' (Shown)
     } finally { $lock.Dispose(); Remove-Item -LiteralPath (Join-Path $data 'apply.lock') -ErrorAction SilentlyContinue }
     New-Item -ItemType Directory -Force (Join-Path $data 'rollback') | Out-Null
     [IO.File]::WriteAllText((Join-Path $data 'rollback\journal.txt'), "nucleus-journal`t1`ntxn`t$('ab' * 16)`n", $utf8)
     Stage 'nuclearnightmare-community.alpha', '1.0.0'
     Ok ((Outcome) -eq 'outcome: interrupted' -and (Same $before (Snap $staged))) 'a journal without done: interrupted, nothing staged' (Shown)
+    Run-Exe -Stage 'nuclearnightmare-community.alpha' '1.0.0' -Root $root @net -NoPrecheck
+    Ok ((Outcome) -eq 'outcome: interrupted' -and (Has-Line 'cut short (found under apply.lock)') -and (Same $before (Snap $staged)) -and
+        -not (Test-Path (Join-Path $data 'apply.lock'))) 'a journal without done found under the lock (-NoPrecheck): interrupted from the job, staged\ unchanged' (Shown)
     Remove-Item -LiteralPath (Join-Path $data 'rollback') -Recurse -Force
 
     # ---------------------------------------------------------------- merges

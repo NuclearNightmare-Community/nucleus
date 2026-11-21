@@ -1041,6 +1041,12 @@ namespace core_stage
 
     bool plan_exists(const Layout& l) { return file_exists(paths_of(l).plan); }
 
+    bool journal_interrupted(const Layout& l)
+    {
+        const JournalState j = read_journal(l, paths_of(l));
+        return j.exists && !j.done;
+    }
+
     StagedState staged_state(const Layout& l)
     {
         const Paths p = paths_of(l);
