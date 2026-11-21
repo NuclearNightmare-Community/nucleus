@@ -13,7 +13,10 @@ namespace core_stage
     {
         constexpr int k_max_attempts = 3;
         constexpr size_t k_max_mods_txt = 262144; // Mod Manager's modstxt.lua MAX
-        constexpr size_t k_max_journal = 4 * 1024 * 1024;
+        // The journal of a plan at its limits: 1024 operations, each at most a "saved\t<n>\t<target>" line plus up to 8
+        // mkdir or rmdir lines naming a prefix of its target (each at most the target's ~1 KiB), so about 9 x 1 KiB x
+        // 1024 = 9 MiB, plus the mods.txt and installed.txt lines. 16 MiB covers it with room.
+        constexpr size_t k_max_journal = 16 * 1024 * 1024;
 
         // ------------------------------------------------------------ paths
         struct Paths
@@ -836,8 +839,9 @@ namespace core_stage
                     const auto f = split_tabs(lines[1]);
                     if (f.size() == 2 && f[0] == "txn" && is_hex(f[1], 32)) txn = f[1];
                 }
+                const uint64_t tries = read_attempts(p, txn); // before discard_staged moves attempts.txt away
                 discard_staged(p);
-                return finish(p, ResultFile{txn, "discarded", "bad-plan", bad, read_attempts(p, txn)}, "bad plan: " + (read ? why : std::string{"unreadable"}));
+                return finish(p, ResultFile{txn, "discarded", "bad-plan", bad, tries}, "bad plan: " + (read ? why : std::string{"unreadable"}));
             }
             const uint64_t attempts = read_attempts(p, txn);
             // Every target (and the data folder) free of reparse points from <root> down.

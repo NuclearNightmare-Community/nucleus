@@ -4,7 +4,7 @@
 // natives touches a UObject, so any thread may call them.
 //   <Core>_ApplyStatus()   -> staged, result, txn, reason, path, attempts, changes (seven strings)
 //   <Core>_ApplyStart()    -> true | nil, reason
-//   <Core>_ApplyAck(txn)   -> true | nil, "no result" | "txn mismatch"
+//   <Core>_ApplyAck(txn)   -> true | nil, "no result" | "txn mismatch" | "delete failed: <code>"
 #pragma once
 
 #include <string>

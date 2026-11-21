@@ -20,7 +20,7 @@
 --       "nothing staged", "already started", "applying", "helper missing", "command line too long",
 --       "start failed: <code>", "native part missing", "error: <message>".
 --   ack(txn) -> true, or nil, reason
---       The result was shown: forget it. reason: "no result", "txn mismatch", "bad txn" (not 32 lowercase hex: never
+--       The result was shown: forget it. reason: "no result", "txn mismatch", "delete failed: <code>", "bad txn" (not 32 lowercase hex: never
 --       passed on), "native part missing", "error: <message>".
 local V = require((...):gsub("%.apply$", "") .. ".version")
 
