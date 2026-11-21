@@ -18,6 +18,7 @@ For players: when the Mod Manager installs, updates or removes a mod while the g
 
 - `Nucleus_RestartStart`: while this session's apply helper waits, it writes `NucleusData/relaunch.txt` (the game's and the helper's process ids) and answers `true` instead of starting a second helper, so Restart now applies the staged change and then starts the game. Without a waiting apply helper it is unchanged.
 - The helper now links Windows CNG (`bcrypt.dll`); `build.ps1` allows it in the helper's imports and still scans `main.dll` and the helper with Windows Defender.
+- Review of story 3: the helper waits only for game exes (in the game folder or under `NuclearNightmare\Binaries\`), so the crash reporter a crashed game leaves open no longer delays a change by 60 s; an `installed.txt` it can't read or parse fails the apply instead of being rewritten without the other mods' entries; a self-update writes the new copy before renaming the running one aside. New tests for each, and for a self-update cut short.
 
 ## [0.23.0] - 2026-11-20
 

@@ -12,11 +12,13 @@
 //   failed\                                  the latest discarded plan (staged\ moved here)
 //   relaunch.txt                             nucleus-relaunch\t1, game\t<pid>, helper\t<pid>: Restart now was pressed
 //
-// Order (run_apply): game exes under <root> gone (60 s), the lock, recovery of an interrupted journal, the plan parsed
-// and every target checked (allowed shape, no reparse point from <root> down), every staged file's size and SHA-256,
-// every hashed delete's file; then the journal: per target a backup (or "absent"), <target>.<txn>.tmp written and
-// renamed into place; mods.txt edited (Mod Manager's modstxt.lua rule); installed.txt; "done". Any failure puts every
-// step back in reverse order. A put to the helper's own image renames the running copy to bin\<Core>Restart.<txn>.old.
+// Order (run_apply): game exes gone (60 s; in <root>\ or under NuclearNightmare\Binaries\, not Engine\), the lock,
+// recovery of an interrupted journal, the plan parsed and every target checked (allowed shape, no reparse point from
+// <root> down), every staged file's size and SHA-256, every hashed delete's file; then the journal: per target a backup
+// (or "absent"), <target>.<txn>.tmp written and renamed into place; mods.txt edited (Mod Manager's modstxt.lua rule);
+// installed.txt (an existing one that can't be read or parsed fails the apply); "done". Any failure puts every step
+// back in reverse order. A put to the helper's own image writes the new copy, then renames the running copy to
+// bin\<Core>Restart.<txn>.old.
 // Outcomes: applied (plan and staged\ cleared); failed (the plan stays; attempts +1; after 3 attempts discarded);
 // discarded at once for a bad plan or a staged file that doesn't match. "game-running" is not an attempt.
 #pragma once
