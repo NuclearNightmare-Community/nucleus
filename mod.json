@@ -1,7 +1,8 @@
 {
   "id": "nuclearnightmare-community.nucleus",
   "name": "Nucleus",
-  "description": "Shared core library that other Nuclear Nightmare mods build on.",
+  "displayName": "Nucleus (Mod Core)",
+  "description": "The shared core that other Nuclear Nightmare mods build on: settings, menus, and controls in the game's own style, and safe hooks into the game. Installed once.",
   "categories": ["library"],
   "version": "0.22.0",
   "scope": "client",
