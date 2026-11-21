@@ -37,6 +37,9 @@
       kept (kept=1), the payload {txn, owners [{id, version, name, files, kept}], ops}; then the helper applies it all
       (tree and mods.txt checked); an uninstall from installed.txt's records, after whose apply installed.txt has lost
       the owner's records
+    - review cases: the installed version's own release listed but answering 404 refuses both the removal and the
+      update (unreachable; plan.txt, staged\ and downloads\ unchanged); installed.txt naming a settings.json never
+      gets it deleted (player data), and it stays on disk after the apply
   Prints ok:/FAIL: lines and exits 1 on any failure. Needs minisign on PATH and this workspace; under NN_CI=1 it skips.
 .EXAMPLE
   pwsh -NoProfile -File native/test/stage.tests.ps1
@@ -189,6 +192,11 @@ try {
     Add-Zip 'upd-1.1.0.zip' (New-ZipBytes @(@{ Name = "$M/Upd/mod.json"; Text = (ModJson $UPD 'Upd' '1.1.0') }, @{ Name = "$M/Upd/a.lua"; Text = 'a 1.1.0' }))
     Add-Zip 'wm-0.2.1.zip' (New-ZipBytes @(@{ Name = "$M/WhistleMute/mod.json"; Text = (ModJson $WM 'WhistleMute' '0.2.1') }, @{ Name = "$M/WhistleMute/Scripts/main.lua"; Text = 'print("wm")' },
             @{ Name = "$M/WhistleMute/Scripts/b.lua"; Text = 'print("wm b")' }, @{ Name = "$P/LogicMods/WhistleMute.pak"; Text = 'wm pak' }))
+    # Story 6 review: an installed version whose own release the server no longer has (404), and player data on disk.
+    $GONE = 'nuclearnightmare-community.gone'; $PD = 'nuclearnightmare-community.pd'
+    Add-Zip 'gone-1.0.0.zip' (New-ZipBytes @(@{ Name = "$M/Gone/mod.json"; Text = (ModJson $GONE 'Gone' '1.0.0') }, @{ Name = "$M/Gone/a.lua"; Text = 'gone 1.0.0' }))
+    Add-Zip 'gone-1.1.0.zip' (New-ZipBytes @(@{ Name = "$M/Gone/mod.json"; Text = (ModJson $GONE 'Gone' '1.1.0') }, @{ Name = "$M/Gone/a.lua"; Text = 'gone 1.1.0' }))
+    Add-Zip 'pd-1.0.0.zip' (New-ZipBytes @(@{ Name = "$M/Pd/mod.json"; Text = (ModJson $PD 'Pd' '1.0.0') }, @{ Name = "$M/Pd/Scripts/main.lua"; Text = 'print("pd")' }))
 
     # ---------------------------------------------------------------- the signed index, the fixture server
     $keys = @{}
@@ -226,7 +234,11 @@ try {
         (Pkg 'tamper' 'Tamper' @((Ver 'tamper' '1.0.0' 'tamper-short.zip' $tamperOk), (Ver 'tamper' '1.0.1' 'tamper-flip.zip' $tamperOk))),
         (Pkg 'rev' 'Rev' @((Ver 'rev' '0.6.0' 'rev-0.6.0.zip'), (Ver 'rev' '0.4.0' 'rev-0.4.0.zip'), (Ver 'rev' '0.3.1' 'rev-0.3.1.zip'))),
         (Pkg 'upd' 'Upd' @((Ver 'upd' '1.1.0' 'upd-1.1.0.zip'), (Ver 'upd' '1.0.0' 'upd-1.0.0.zip'))),
-        (Pkg 'whistle-mute' 'WhistleMute' @((Ver 'whistle-mute' '0.2.1' 'wm-0.2.1.zip'))))
+        (Pkg 'whistle-mute' 'WhistleMute' @((Ver 'whistle-mute' '0.2.1' 'wm-0.2.1.zip'))),
+        (Pkg 'gone' 'Gone' @((Ver 'gone' '1.1.0' 'gone-1.1.0.zip'), (Ver 'gone' '1.0.0' 'gone-1.0.0.zip'))),
+        (Pkg 'pd' 'Pd' @((Ver 'pd' '1.0.0' 'pd-1.0.0.zip'))))
+    # Story 6 review: the server no longer has Gone 1.0.0's release (listed in the index, answered 404).
+    $map['https://github.com/NuclearNightmare-Community/gone/releases/download/v1.0.0/gone-1.0.0.zip'] = @{ status = 404 }
     $ix = [ordered]@{ schema = 2; serial = 7; issued = '2026-11-21T10:00:00Z'; packages = $packages }
     $ixFile = Join-Path $tmp 'index.json'
     $ix | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath $ixFile -Encoding utf8NoBOM
@@ -536,6 +548,35 @@ try {
     $inst = [IO.File]::ReadAllText((Join-Path $data 'installed.txt'))
     Ok ($result -match "(?m)^outcome`tapplied" -and -not (Test-Path -LiteralPath (Join-Path $root "$HCM\mod.json")) -and -not $inst.Contains("HudClock`t") -and $inst.Contains("Rev`t") -and
         -not [IO.File]::ReadAllText($modsTxt).Contains('HudClock')) 'apply: HudClock removed, its installed.txt records and mods.txt line gone, Rev''s records kept' "helper: $applied; installed: $($inst -replace "`n", ' / ')"
+
+    # Story 6 review: the installed version's own release is listed but can't be downloaded (404): the removal and the
+    # update are refused, plan.txt and staged\ byte-identical, no zip left in downloads\.
+    Install-Zip 'gone-1.0.0.zip' 'Gone'
+    $before = Snap $staged
+    Unstage $GONE '1.0.0'
+    $goneOutcome = Outcome
+    RefusedU $GONE '1.0.0' ($goneOutcome -replace '^outcome: ', '') 'Gone 1.0.0 whose release answers 404'
+    Ok ($goneOutcome -eq 'outcome: unreachable') 'unstage: a 404 for the installed release is unreachable (a download refusal)' (Shown)
+    Refused @($GONE, '1.1.0') ($goneOutcome -replace '^outcome: ', '') 'update Gone 1.0.0 -> 1.1.0 whose installed release answers 404'
+    Ok (Test-Path -LiteralPath (Join-Path $mods 'Gone\a.lua')) 'the refused update and removal left Gone on disk' $null
+
+    # Story 6 review: player data is never listed. installed.txt naming Pd's settings.json (with its hash on disk):
+    # the uninstall deletes main.lua and mod.json, never settings.json, which stays on disk after the apply.
+    Install-Zip 'pd-1.0.0.zip' 'Pd'
+    $pdSettings = Join-Path $mods 'Pd\settings.json'
+    [IO.File]::WriteAllText($pdSettings, '{"x":1}', $utf8)
+    $PDM = 'NuclearNightmare\Binaries\Win64\ue4ss\Mods\Pd'
+    $recs = foreach ($rel in 'mod.json', 'Scripts\main.lua', 'settings.json') { "Pd`t$(Sha ([IO.File]::ReadAllBytes((Join-Path $root "$PDM\$rel"))))`t$PDM\$rel" }
+    $instFile = Join-Path $data 'installed.txt'
+    $it = [IO.File]::ReadAllText($instFile); if (-not $it.EndsWith("`n")) { $it += "`n" }
+    [IO.File]::WriteAllText($instFile, $it + ($recs -join "`n") + "`n", $utf8)
+    Unstage $PD '1.0.0'
+    $pl = Payload
+    $pdDels = @(DeleteLines | Where-Object { $_ -like "delete`tPd`t*" })
+    Ok ((Outcome) -eq 'outcome: ok' -and $pdDels.Count -eq 2 -and -not ($pdDels | Where-Object { $_ -like '*settings.json' }) -and $pl -and $pl.owners[0].files -eq 2 -and
+        $pl.owners[0].kept -eq 0) 'uninstall: installed.txt naming settings.json lists only mod.json and main.lua (player data never listed)' "$(Shown); deletes: $($pdDels -join ' / ')"
+    $applied = Apply
+    Ok ((Test-Path -LiteralPath $pdSettings) -and -not (Test-Path -LiteralPath (Join-Path $mods 'Pd\mod.json')) -and -not (Test-Path -LiteralPath (Join-Path $mods 'Pd\Scripts'))) 'apply: Pd removed but its settings.json, which stays in Mods/Pd/' "helper: $applied"
 } catch {
     $script:failed++
     Write-Host "FAIL: runner failure: $($_.Exception.Message) at line $($_.InvocationInfo.ScriptLineNumber)"
