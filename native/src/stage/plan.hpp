@@ -2,7 +2,8 @@
 // and the allowed targets, and SHA-256 through Windows CNG (BCrypt). Shared by the relaunch helper (restart_helper.cpp,
 // which applies a plan: stage/apply.cpp), core's DLL (apply.cpp: <Core>_ApplyStatus/Start/Ack) and, later, the code
 // that writes plans (Mod Manager v2 stories 5-7). Windows and the C++ standard library only, never UE4SS (the helper
-// links no UE4SS); nothing here spells core's name (the caller passes it from CORE_NAME).
+// links no UE4SS); nothing here spells core's name (the caller passes it from CORE_NAME), except the fixed format
+// tags the spec sets (nucleus-plan, nucleus-result, nucleus-installed), which a rename leaves alone.
 //
 // Layout (from the helper's or main.dll's own module path, never from Lua or argv):
 //   <root>\NuclearNightmare\Binaries\Win64\ue4ss\Mods\<Core>\{bin,dlls}\<file>
@@ -146,7 +147,7 @@ namespace core_stage
     {
         std::string owner, sha256, target;
     };
-    // nucleus-installed\t1, then <owner>\t<sha256>\t<target> lines. false on a malformed file (callers start empty).
+    // nucleus-installed\t1, then <owner>\t<sha256>\t<target> lines. false on a malformed file (the apply then fails; the record is never rewritten from empty).
     bool parse_installed(std::string_view text, std::vector<Installed>& out);
     std::string serialize_installed(const std::vector<Installed>& list);
 

@@ -413,10 +413,11 @@ namespace core_stage
                 }
                 else if (f[0] == "moved" && f.size() == 3)
                 {
+                    // Without case: put() names the set-aside copy after the plan's target, whose case may differ.
                     const std::string bin = parent_rel(helper_rel) + "\\";
                     const std::string stem = narrow(l.core_name) + "Restart.";
-                    ok = same_text_nocase(widen(f[1]), widen(helper_rel)) && f[2].size() == bin.size() + stem.size() + 36 && f[2].compare(0, bin.size(), bin) == 0 &&
-                         f[2].compare(bin.size(), stem.size(), stem) == 0 && is_hex(f[2].substr(bin.size() + stem.size(), 32), 32) && f[2].ends_with(".old");
+                    ok = same_text_nocase(widen(f[1]), widen(helper_rel)) && f[2].size() == bin.size() + stem.size() + 36 &&
+                         same_text_nocase(widen(f[2].substr(0, bin.size() + stem.size())), widen(bin + stem)) && is_hex(f[2].substr(bin.size() + stem.size(), 32), 32) && f[2].ends_with(".old");
                 }
                 if (!ok) return j;
                 j.steps.push_back(f);

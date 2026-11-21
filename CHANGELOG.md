@@ -6,7 +6,7 @@ All notable changes to Nucleus are recorded here. The format follows [Keep a Cha
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
 
-For players: when the Mod Manager installs, updates or removes a mod while the game runs (coming in its next versions), Nucleus now finishes the job after the game closes, however it closes: quitting from the menu, Alt+F4, or the game being ended. If anything goes wrong (for example a file another program holds open), every file is put back exactly as it was and the change is tried again next time; the Mod Manager tells you what happened when you next open it. Nucleus's small helper `NucleusRestart.exe` does this; it only ever writes mod files, the Blueprint and `_P` paks of mods, `mods.txt` lines, and its own `NucleusData` folder, never UE4SS or the game's own files.
+For players: when the Mod Manager installs, updates or removes a mod while the game runs (coming in its next versions), Nucleus now finishes the job after the game closes, however it closes: quitting from the menu, Alt+F4, or the game being ended. If anything goes wrong (for example a file another program holds open), every file is put back as it was and the change is tried again the next time the game closes, up to three times before it is dropped (a damaged download is dropped at once); the Mod Manager tells you what happened when you next open it. Nucleus's small helper `NucleusRestart.exe` does this; it only ever writes mod files, the Blueprint and `_P` paks of mods, `mods.txt` lines, and its own `NucleusData` folder, never UE4SS or the game's own files.
 
 ### Added
 
