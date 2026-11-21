@@ -308,7 +308,7 @@ F._noChip = false -- unit tests only: earlier stories' blocks prove their looks 
 local CHIP_KINDS = { button = true, checkbox = true, choice = true, slider = true, textbox = true }
 -- The one place a focus look is decided: what el shows (on: it holds the window's focus) in the current input mode.
 --   "off"   its own look (not focused)
---   "chip"  keys mode, a button, checkbox, choice or slider inside a row: the focus chip (and its focus look)
+--   "chip"  keys mode, a button, checkbox, choice, slider or text box inside a row: the focus chip (and its focus look)
 --   "face"  a dimmed button or a faceless game-look icon-only one (story 28): the focus face, then its focus look
 --   "hover" anything else focused: its focus look (story 27's hover look) only
 -- The mouse mode never shows a chip; lone controls and BACK never do.

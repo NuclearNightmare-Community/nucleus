@@ -67,17 +67,16 @@ local function charCount(s)
     return nil
 end
 
--- The text read from the widget, cleaned: control bytes (below 0x20, and 0x7F) removed, then cut to maxChars characters
--- (bytes when it isn't valid UTF-8). Returns the cleaned text and whether it changed.
+-- The text read from the widget, cleaned: control characters (C0 below 0x20, DEL 0x7F, C1 U+0080-U+009F) removed; text
+-- that isn't valid UTF-8 loses every byte from 0x80 up (what is left is ASCII, so always valid); then cut to maxChars
+-- characters. Returns the cleaned text and whether it changed. The result is always text set would accept.
 local function clean(raw, maxChars)
     if type(raw) ~= "string" then return "", true end
     local s = raw:gsub("[%z\1-\31\127]", "")
+    if not charCount(s) then s = s:gsub("[\128-\255]", "") end
+    s = s:gsub("\194[\128-\159]", "")
     local n = charCount(s)
-    if n then
-        if n > maxChars then s = s:sub(1, utf8.offset(s, maxChars + 1) - 1) end
-    elseif #s > maxChars then
-        s = s:sub(1, maxChars)
-    end
+    if n > maxChars then s = s:sub(1, utf8.offset(s, maxChars + 1) - 1) end
     return s, s ~= raw
 end
 TB._clean = clean
@@ -200,7 +199,10 @@ end
 -- changed. Core's own work runs with C.inDispatch raised (no asset load inside the hook).
 local function readBox(el, w)
     local okT, raw = pcall(function() return w.Box:GetText():ToString() end)
-    if not okT then return false end
+    if not okT then
+        C.warnOnce("textbox read:" .. el.id, "text box '%s': reading its text failed (is %s's pak current?): %s", el.id, C.NAME, firstLine(raw))
+        return false
+    end
     local text, changed = clean(raw, el.maxChars)
     local before = el.text
     el.text = text
@@ -324,7 +326,8 @@ end
 local function validHint(v, pre)
     if v == nil then return nil end
     if type(v) ~= "string" or #v > MAX_HINT then C.fail("%s: hint must be a string of at most %d bytes or nil, got %s", pre, MAX_HINT, type(v) == "string" and (#v .. " bytes") or C.describe(v)) end
-    if v:find("[%z\1-\31\127]") then C.fail("%s: hint must not contain control characters", pre) end
+    if not charCount(v) then C.fail("%s: hint is not valid UTF-8", pre) end
+    if v:find("[%z\1-\31\127]") or v:find("\194[\128-\159]") then C.fail("%s: hint must not contain control characters", pre) end
     return v
 end
 
@@ -334,7 +337,7 @@ local function validText(v, maxChars, pre)
     local n = charCount(v)
     if not n then C.fail("%s: text is not valid UTF-8", pre) end
     if n > maxChars then C.fail("%s: text is %d characters, at most %d (maxChars)", pre, n, maxChars) end
-    if v:find("[%z\1-\31\127]") then C.fail("%s: text must not contain control characters", pre) end
+    if v:find("[%z\1-\31\127]") or v:find("\194[\128-\159]") then C.fail("%s: text must not contain control characters", pre) end
     return v
 end
 
