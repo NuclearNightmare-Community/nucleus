@@ -1,1 +1,2 @@
 native/third_party/monocypher-4.0.2/** -text
+native/third_party/miniz-3.0.2/** -text

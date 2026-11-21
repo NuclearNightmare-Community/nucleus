@@ -2,6 +2,19 @@
 
 All notable changes to Nucleus are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). From 0.5.0 a dependent's `need` and `dependsOn` are minimum versions (`>=0.5.0`), so a newer Nucleus never asks dependents to raise them. Up to 0.3.0, below 1.0.0 a dependent connected only to the same minor version (`need = "0.3.0"` accepted 0.3.x).
 
+## [0.26.0] - 2026-11-21
+
+Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
+
+For players: the Mod Manager can now install mods from the community catalog. When you confirm an install, Nucleus downloads each mod (and any mod it needs that you don't have, or have in too old a version), checks it against the signed catalog, opens it and checks every file's place before anything is kept; the files are put in place by Nucleus's helper when the game closes. A download that doesn't match the catalog, or a zip with anything unexpected in it, is refused and nothing changes.
+
+### Added
+
+- `Nucleus_CatalogStage(id1, v1, ..., idN, vN)` (Mod Manager v2 story 5; README "Installing from the catalog"): stages 1 to 16 catalog mods in one change on the catalog worker; `nil, reason` up front: `busy`, `no verified index`, `applying`, `interrupted`, `data folder unknown`. Each pair is downloaded through the catalog download (a still-valid `downloads/<sha256>.zip` reused), checked again in memory, read with core's own strict zip reader (`native/src/stage/zip.cpp`: no zip64, multi-disk, encryption or methods other than stored and Deflate; counts, bounds and local headers must agree; safe UTF-8 `/` names, none twice without case; 1024 entries, 256 MiB per entry, 512 MiB in all; inflating capped at the declared size + 1 and the CRC-32 checked), mapped to install-layout targets (`Mods/<Name>/...`, `LogicMods/<Name>.pak`, `<Name>_P.pak` only, through story 3's target rule; one `<Name>`, equal to the index name; never UE4SS, `dwmapi.dll` or player data), checked against the zip's and the disk's `mod.json` (`id-mismatch`, `folder-in-use`, `downgrade`), and merged into the staged plan by owner under `apply.lock` (staged files written as `<sha256>.tmp` and renamed, a fresh txn, unreferenced staged files and the used downloads removed; `delete` lines for files `installed.txt` records that the new version lacks). On any failure the staged plan and files stay byte-identical. Outcomes `ok`, `not-in-catalog`, `not-a-mod`, `revoked`, `too-large`, `downloads-full`, `size-mismatch`, `hash-mismatch`, `url-not-allowed`, `unreachable`, `bad-zip`, `bad-layout`, `name-mismatch`, `id-mismatch`, `folder-in-use`, `downgrade`, `applying`, `interrupted`, `error`; payload of `ok` `{"txn","owners":[{"id","version","name","files","bytes"}],"ops"}`.
+- `core.catalog.stage(list)` (`list = { { id, version }, ... }`, also `require("nucleus.catalog").stage`): checks the list before any native call; never raises.
+- miniz 3.0.2 (MIT, `native/third_party/miniz-3.0.2/`): only `tinfl_decompress` and `mz_crc32` are used. The package gains `LICENSES/miniz.txt`.
+- The catalog test exe's `-Stage <id> <version> ... -Root <dir>` and `native/test/stage.tests.ps1` (fixture zips built at run time, a signed test index, the HTTPS fixture server, then story 3's helper applies the staged plan); `cat-stage-*` bad-input cases on and off the game thread and one stage of a pair no catalog has; `catalog_test.lua` covers `stage`.
+
 ## [0.25.0] - 2026-11-21
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.

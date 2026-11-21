@@ -10,6 +10,11 @@
 //   -PrintBuiltIns        print the compiled-in trust roots, endpoints and redirect hosts
 //   -Download             with -Index [-Revoked] -Id -Version -OutDir <downloads folder>: the release-file download core's
 //                         <Core>_CatalogDownload runs; outcome refused (message: the reason) when it is refused up front
+//   -Stage <id> <version> [<id> <version> ...]
+//                         with -Root <dir> -Index [-Revoked] [-StateFile]: the stage <Core>_CatalogStage runs (Mod Manager v2
+//                         story 5; stage/install.hpp), against the install layout under <dir> (story 3's --root: a temp
+//                         folder holding NuclearNightmare\...); prints the outcome, the message, the detail lines and
+//                         "payload: <json>"; downloads go to <dir>'s <Core>Data\downloads
 // -Minisign is accepted and ignored (signatures are checked in process).
 #include <cstdio>
 #include <map>
@@ -21,6 +26,7 @@
 #include "catalog/text.hpp"
 #include "catalog/verify.hpp"
 #include "core_config.hpp"
+#include "stage/install.hpp"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -67,6 +73,7 @@ namespace
     {
         std::map<std::string, std::string> values; // lower-case name -> value
         std::vector<std::string> switches;
+        std::vector<std::string> stage; // -Stage's id, version pairs
         std::string bad;
         std::string get(const char* n) const
         {
@@ -86,7 +93,7 @@ namespace
     Args parse_args(int argc, wchar_t** argv)
     {
         static const char* valued[] = {"index", "signature", "revoked", "revokedsignature", "keys", "keyssignature", "url", "outdir", "transport",
-                                       "statefile", "package", "id", "version", "trustedkeys", "minisign", "proxy", "pincert", "modid"};
+                                       "statefile", "package", "id", "version", "trustedkeys", "minisign", "proxy", "pincert", "modid", "root"};
         static const char* flags[] = {"fetch", "printbuiltins", "download"};
         Args a;
         for (int i = 1; i < argc; ++i)
@@ -99,6 +106,12 @@ namespace
             }
             const std::string name = text::lower(arg.substr(1));
             bool known = false;
+            if (name == "stage")
+            {
+                a.switches.push_back(name);
+                while (i + 1 < argc && !(argv[i + 1][0] == L'-' && argv[i + 1][1] != L'\0' && !(argv[i + 1][1] >= L'0' && argv[i + 1][1] <= L'9'))) a.stage.push_back(narrow(argv[++i]));
+                continue;
+            }
             for (const char* f : flags)
             {
                 if (name == f)
@@ -228,6 +241,55 @@ namespace
             return finish("error", std::string{"unexpected failure: "} + e.what(), v.details);
         }
     }
+    // -Stage: verify the index (and revoked list) files, then the same stage as <Core>_CatalogStage, under -Root.
+    int run_stage_mode(const Args& a)
+    {
+        Verifier v;
+        try
+        {
+            const std::string index = a.get("index"), revoked = a.get("revoked"), root = a.get("root");
+            if (index.empty() || root.empty()) fail("error", "-Stage needs -Root and -Index");
+            if (a.stage.empty() || a.stage.size() % 2 != 0) fail("error", "-Stage takes <id> <version> pairs");
+            std::vector<core_stage::install::Item> items;
+            for (size_t k = 0; k < a.stage.size(); k += 2)
+            {
+                const auto nid = modid::normalize(a.stage[k]);
+                if (!nid.error.empty()) fail("error", "-Stage id " + a.stage[k] + ": " + nid.error);
+                if (!is_semver(a.stage[k + 1])) fail("error", "-Stage version " + a.stage[k + 1] + ": not semver");
+                for (const auto& it : items)
+                    if (it.id == nid.id) fail("error", "-Stage: " + nid.id + " is listed twice");
+                items.push_back({nid.id, a.stage[k + 1]});
+            }
+            if (items.size() > core_stage::install::k_max_pairs) fail("error", "-Stage: at most 16 pairs");
+            core_stage::Layout l;
+            if (!core_stage::layout_from_root(full_path(root).wstring(), widen(CORE_NAME), l)) fail("error", "-Root is not an absolute folder");
+            const fs::path state_file = a.get("statefile").empty() ? fs::path{} : full_path(a.get("statefile"));
+            trust(v, a, a.get("trustedkeys"));
+            const fs::path ixf = full_path(index);
+            const json::Value ix = v.check_index_file(ixf, fs::path{ixf} += L".minisig");
+            std::optional<json::Value> rv;
+            if (!revoked.empty())
+            {
+                const fs::path rvf = full_path(revoked);
+                rv = v.check_revoked_file(rvf, fs::path{rvf} += L".minisig");
+            }
+            if (const std::string b = core_stage::install::blocked(l); !b.empty()) return finish(b, "refused before the job: " + b, v.details);
+            auto t = fetch::make_transport(transport_options(a));
+            std::atomic<bool> cancel{false};
+            const auto o = core_stage::install::run_stage(l, ix, rv ? &*rv : nullptr, items, *t, state_file, cancel);
+            for (const auto& d : o.details) v.note(d);
+            v.note("payload: " + o.payload);
+            return finish(o.outcome, o.message, v.details);
+        }
+        catch (const Reject& r)
+        {
+            return finish(r.code, r.message, v.details);
+        }
+        catch (const std::exception& e)
+        {
+            return finish("error", std::string{"unexpected failure: "} + e.what(), v.details);
+        }
+    }
 } // namespace
 
 int wmain(int argc, wchar_t** argv)
@@ -242,6 +304,7 @@ int wmain(int argc, wchar_t** argv)
     }
     if (a.sw("printbuiltins")) return print_builtins();
     if (a.sw("download")) return run_download_mode(a);
+    if (a.sw("stage")) return run_stage_mode(a);
 
     Verifier v;
     std::string code, message;

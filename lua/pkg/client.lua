@@ -352,7 +352,8 @@ function C.connect(opts)
         if restartOk then api.restart = { mode = restartm.mode, start = restartm.start }
         else log.error("%s's restart module failed to load (%s); core.restart is not available.", NAME, tostring(restartm)) end
         -- Mod Manager v2 story 2: core.catalog, over core's catalog natives (refresh, download, poll; never raise).
-        if catalogOk then api.catalog = { refresh = catalogm.refresh, download = catalogm.download, poll = catalogm.poll }
+        -- v2 story 5: stage (an install staged for core's apply helper).
+        if catalogOk then api.catalog = { refresh = catalogm.refresh, download = catalogm.download, poll = catalogm.poll, stage = catalogm.stage }
         else log.error("%s's catalog module failed to load (%s); core.catalog is not available.", NAME, tostring(catalogm)) end
         -- Mod Manager v2 story 3: core.apply, over core's staged-change natives (status, start, ack; never raise).
         if applyOk then api.apply = { status = applym.status, start = applym.start, ack = applym.ack }

@@ -16,19 +16,31 @@
 --       outcome "ok" for success, else verify.ps1's codes (bad-signature, unknown-key, serial-rollback, schema-too-new,
 --       invalid-index, url-not-allowed, size-mismatch, hash-mismatch, revoked, error) and, for downloads, unreachable.
 --       A refresh's ok payload: { source = "network" | "copy", base, index_issued, revoked_issued, details, index,
---       revoked }; a download's: { id, version, sha256, size, file }. reason: "unknown job", "bad job",
---       "native part missing", "error: <message>".
+--       revoked }; a download's: { id, version, sha256, size, file }; a stage's: { txn, owners = { { id, version, name,
+--       files, bytes }, ... }, ops }. reason: "unknown job", "bad job", "native part missing", "error: <message>".
+--   stage(list)              -> job, or nil, reason                                   (Mod Manager v2 story 5)
+--       Stages an install of every (id, version) in list = { { id = <string>, version = <string> }, ... } (1 to 16, in
+--       order: dependencies first) into the change core's helper applies when the game exits (core.apply): core's
+--       native part downloads and verifies each release zip, reads it, maps its files to install-layout paths and
+--       merges them into the staged plan. Only the ids and versions reach the native part; nothing from Lua becomes a
+--       path, a name or a hash. Outcomes (poll): ok, not-in-catalog, not-a-mod, revoked, too-large, downloads-full,
+--       size-mismatch, hash-mismatch, url-not-allowed, unreachable, bad-zip, bad-layout, name-mismatch, id-mismatch,
+--       folder-in-use, downgrade, applying, interrupted, error. reason: "busy", "no verified index", "applying",
+--       "interrupted", "data folder unknown", "bad arguments: <why>", "native part missing", "error: <message>" (for
+--       example an id the normalizer refuses, or an id listed twice).
 local BASE = (...):gsub("%.catalog$", "")
 local V = require(BASE .. ".version")
 local json = require(BASE .. ".json")
 
 local M = {}
 local KEY_REFRESH, KEY_DOWNLOAD, KEY_POLL = V.name .. "_CatalogRefresh", V.name .. "_CatalogDownload", V.name .. "_CatalogPoll"
+local KEY_STAGE = V.name .. "_CatalogStage"
 
 -- What a payload may hold: two 4 MiB catalog files and the detail lines, nested at most 64 deep inside one wrapper.
 M.CAPS = { maxBytes = 9 * 1024 * 1024, maxDepth = 66, maxValues = 2000000, maxString = 4 * 1024 * 1024 }
 M.MAX_ID, M.MAX_VERSION = 200, 128
 M.MAX_JOB = (1 << 53) - 1
+M.MAX_PAIRS = 16
 
 -- The native is looked up on every call (never cached): a hot reload registers a new one.
 local function call(key, ...)
@@ -60,6 +72,33 @@ function M.download(id, version)
     local okV, whyV = textArg(version, "version", M.MAX_VERSION)
     if not okV then return nil, "bad arguments: " .. whyV end
     local ok, job, why = call(KEY_DOWNLOAD, id, version)
+    if not ok then return nil, job end
+    if math.type(job) == "integer" then return job end
+    return nil, type(why) == "string" and why or "error: no job"
+end
+
+function M.stage(list)
+    if type(list) ~= "table" then return nil, "bad arguments: list must be a table of { id, version }" end
+    local n = 0
+    for k in pairs(list) do
+        if math.type(k) ~= "integer" or k < 1 then return nil, "bad arguments: list must be a sequence" end
+        n = n + 1
+        if n > M.MAX_PAIRS then return nil, "bad arguments: at most " .. M.MAX_PAIRS .. " entries" end
+    end
+    if n == 0 then return nil, "bad arguments: list must not be empty" end
+    if #list ~= n then return nil, "bad arguments: list must be a sequence" end
+    local args = {}
+    for i = 1, n do
+        local e = list[i]
+        if type(e) ~= "table" then return nil, ("bad arguments: entry %d must be a table"):format(i) end
+        local okId, whyId = textArg(e.id, ("entry %d's id"):format(i), M.MAX_ID)
+        if not okId then return nil, "bad arguments: " .. whyId end
+        local okV, whyV = textArg(e.version, ("entry %d's version"):format(i), M.MAX_VERSION)
+        if not okV then return nil, "bad arguments: " .. whyV end
+        args[#args + 1] = e.id
+        args[#args + 1] = e.version
+    end
+    local ok, job, why = call(KEY_STAGE, table.unpack(args, 1, #args))
     if not ok then return nil, job end
     if math.type(job) == "integer" then return job end
     return nil, type(why) == "string" and why or "error: no job"
