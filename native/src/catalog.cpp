@@ -264,32 +264,13 @@ namespace core_native::catalog_natives
             const auto& plan = job.plan;
             try
             {
-                // The state file only for back-off; a state that can't be read is left alone.
-                v.state_file = data / L"catalog" / L"state.json";
-                try
-                {
-                    (void)v.read_state();
-                }
-                catch (const cat::Reject&)
-                {
-                    v.state_file.clear();
-                }
                 fs::path file;
                 with_transport([&](cat::fetch::Transport& t) {
-                    try
-                    {
-                        file = cat::fetch::run_download(v, t, plan, data / L"downloads", g_cancel);
-                    }
-                    catch (...)
-                    {
-                        if (v.backoff_changed && v.has_state_file()) v.flush_state();
-                        throw;
-                    }
+                    file = cat::fetch::download_with_state(v, t, plan, data / L"downloads", data / L"catalog" / L"state.json", g_cancel);
                 });
                 job.outcome = "ok";
                 job.message = "package " + plan.id + " " + plan.version + " downloaded";
-                job.payload = "{\"id\":" + cat::json::quote(plan.id) + ",\"version\":" + cat::json::quote(plan.version) + ",\"sha256\":" + cat::json::quote(plan.sha256) +
-                              ",\"size\":" + std::to_string(plan.size) + ",\"file\":" + cat::json::quote(cat::shown(file)) + "}";
+                job.payload = cat::fetch::download_payload(plan, &file);
                 return;
             }
             catch (const cat::Reject& r)
@@ -307,7 +288,7 @@ namespace core_native::catalog_natives
                 job.outcome = "error";
                 job.message = std::string{"unexpected failure: "} + e.what();
             }
-            job.payload = "{\"id\":" + cat::json::quote(plan.id) + ",\"version\":" + cat::json::quote(plan.version) + "}";
+            job.payload = cat::fetch::download_payload(plan, nullptr);
         }
 
         void worker()
@@ -428,7 +409,7 @@ namespace core_native::catalog_natives
                 job.plan = *plan;
                 job.outcome = "revoked";
                 job.message = plan->revoked;
-                job.payload = "{\"id\":" + cat::json::quote(plan->id) + ",\"version\":" + cat::json::quote(plan->version) + "}";
+                job.payload = cat::fetch::download_payload(*plan, nullptr);
                 const int64_t id = job.id;
                 logf("catalog: download job {} refused: {}", id, plan->revoked);
                 g_finished.push_back(std::move(job));

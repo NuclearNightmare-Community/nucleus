@@ -175,6 +175,7 @@ namespace
     int run_download_mode(const Args& a)
     {
         Verifier v;
+        std::optional<fetch::Plan> planned;
         try
         {
             const std::string index = a.get("index"), revoked = a.get("revoked"), id_in = a.get("id"), version = a.get("version"), dir = a.get("outdir");
@@ -182,7 +183,7 @@ namespace
             const auto nid = modid::normalize(id_in);
             if (!nid.error.empty()) fail("error", "-Id: " + nid.error);
             if (!is_semver(version)) fail("error", "-Version: not semver");
-            if (!a.get("statefile").empty()) v.state_file = full_path(a.get("statefile"));
+            const fs::path state_file = a.get("statefile").empty() ? fs::path{} : full_path(a.get("statefile"));
             trust(v, a, a.get("trustedkeys"));
             const fs::path ixf = full_path(index);
             const json::Value ix = v.check_index_file(ixf, fs::path{ixf} += L".minisig");
@@ -196,23 +197,34 @@ namespace
             std::string reason;
             const auto plan = fetch::plan_download(ix, rv ? &*rv : nullptr, nid.id, version, downloads, reason);
             if (!plan) return finish("refused", reason, v.details);
-            if (!plan->revoked.empty()) return finish("revoked", plan->revoked, v.details);
+            planned = *plan;
+            if (!plan->revoked.empty())
+            {
+                v.note("payload: " + fetch::download_payload(*plan, nullptr));
+                return finish("revoked", plan->revoked, v.details);
+            }
             auto t = fetch::make_transport(transport_options(a));
             std::atomic<bool> cancel{false};
-            const fs::path file = fetch::run_download(v, *t, *plan, downloads, cancel);
+            // The index and revoked list are verified without a state file (as core's job has them in memory); the state
+            // file serves back-off only, as in core's download job.
+            const fs::path file = fetch::download_with_state(v, *t, *plan, downloads, state_file, cancel);
             v.note("file: " + shown(file));
+            v.note("payload: " + fetch::download_payload(*plan, &file));
             return finish("ok", "package " + plan->id + " " + plan->version + " downloaded", v.details);
         }
         catch (const Reject& r)
         {
+            if (planned) v.note("payload: " + fetch::download_payload(*planned, nullptr));
             return finish(r.code, r.message, v.details);
         }
         catch (const Unreachable& u)
         {
+            if (planned) v.note("payload: " + fetch::download_payload(*planned, nullptr));
             return finish("unreachable", u.message, v.details);
         }
         catch (const std::exception& e)
         {
+            if (planned) v.note("payload: " + fetch::download_payload(*planned, nullptr));
             return finish("error", std::string{"unexpected failure: "} + e.what(), v.details);
         }
     }

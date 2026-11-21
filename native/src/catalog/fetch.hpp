@@ -88,4 +88,9 @@ namespace catalog::fetch
     // only when its size and SHA-256 equal the index's. Throws Reject (size-mismatch, hash-mismatch, url-not-allowed,
     // error) or Unreachable; the temporary file is always removed. Returns the file.
     fs::path run_download(Verifier& v, Transport& t, const Plan& plan, const fs::path& downloads, const std::atomic<bool>& cancel);
+    // run_download as core's job and the test exe's -Download run it: state_file (may be empty) is read for back-off
+    // only (an unreadable one is dropped, never written), and a 403/429 back-off is flushed to it when the download fails.
+    fs::path download_with_state(Verifier& v, Transport& t, const Plan& plan, const fs::path& downloads, const fs::path& state_file, const std::atomic<bool>& cancel);
+    // A download job's payload: {"id","version","sha256","size","file"} with file (ok), else {"id","version"}.
+    std::string download_payload(const Plan& plan, const fs::path* file);
 } // namespace catalog::fetch
