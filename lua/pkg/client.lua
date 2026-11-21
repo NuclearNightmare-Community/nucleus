@@ -38,6 +38,8 @@ local uiOk, uiErr = pcall(function()
              image = require(BASE .. ".ui.image"),
              -- Mod Manager story 4 (core story 26): checkbox, choice and slider-with-number controls
              checkbox = require(BASE .. ".ui.checkbox"), choice = require(BASE .. ".ui.choice"), slider = require(BASE .. ".ui.slider"),
+             -- Mod Manager v2 story 4 (core 0.25.0): the single-line text box
+             textbox = require(BASE .. ".ui.textbox"),
              -- core story 31 (core 0.13.0): the game screens as hosts (createServer)
              game = require(BASE .. ".ui.game") }
 end)

@@ -84,12 +84,20 @@
 -- list cancels a carry (the pickup order back, no callback). Hovers are ignored during a hold, a carry or a drag. The
 -- hold and the carry are checked by reorder.lua's 16 ms loop; the pickup and the key paths run with C.inDispatch
 -- raised (cached assets only).
+-- Mod Manager v2 story 4 (0.25.0): a text box (textbox.lua) is focusable like a choice, its own widget the target, and
+-- gets the chip in a row (its text in the ink, as a slider's number). Accept on it gives its EditableText keyboard focus
+-- (typing); while typing every key is the box's except Escape (B), which hands focus back to the field (the text stays;
+-- the focus loss commits it), so the next Escape closes the window. Space is a navigation Accept too, so Enter is left to
+-- the box: it commits, and the commit hook hands focus back to the field 50 ms later (ExecuteInGameThreadWithDelay from
+-- the game thread; the UI tick too) unless the window went, the model moved on or an element of the window holds focus.
+-- Typing and committing move the model to the text box (look, band, focusId) without moving keyboard focus.
 local BASE = (...):gsub("%.ui%.focus$", "")
 local C = require(BASE .. ".ui.common")
 local H = require(BASE .. ".ui.hud")
 local X = require(BASE .. ".ui.text")
 local CH = require(BASE .. ".ui.choice")
 local SL = require(BASE .. ".ui.slider")
+local TB = require(BASE .. ".ui.textbox") -- Mod Manager v2 story 4
 local A = require(BASE .. ".ui.assets")
 local B = require(BASE .. ".ui.button")
 local theme = require(BASE .. ".ui.theme")
@@ -99,14 +107,15 @@ local F = {}
 F.DIR = { left = 0, right = 1, up = 2, down = 3, next = 4, previous = 5 }
 F.ACT = { accept = 0, back = 1 }
 F.NAV_FN = C.SCREEN_CLASS .. ":" .. C.NAME .. "_OnNav"
-local FOCUSABLE = { button = true, checkbox = true, choice = true, slider = true }
+local FOCUSABLE = { button = true, checkbox = true, choice = true, slider = true, textbox = true }
 local INPUT_DO_NOT_LOCK = 0
 local S = { navs = 0, handled = 0, ignored = 0, moves = 0, steps = 0, closes = 0, refocus = 0, recovered = 0,
     scrolls = 0, faults = 0, hooked = false, hookTries = 0, rowLooks = 0, faces = 0,
     hovers = 0, hoverIgnored = 0, hoverHooked = false, hoverTries = 0, -- story 36
     chips = 0, chipFaults = 0, -- story 39
     holds = 0, taps = 0, pickups = 0, carryMoves = 0, carryEdges = 0, drops = 0, carryCancels = 0, carryRefocus = 0,
-    ups = 0, upHooked = false, upOk = false, upTries = 0 } -- story 38
+    ups = 0, upHooked = false, upOk = false, upTries = 0, -- story 38
+    types = 0, leaves = 0, handBacks = 0 } -- Mod Manager v2 story 4: the text box
 
 local function firstLine(e) return (tostring(e):match("^[^\n]*")) end
 
@@ -296,7 +305,7 @@ end
 local mode = "keys"
 local hookDepth = 0
 F._noChip = false -- unit tests only: earlier stories' blocks prove their looks without the chip
-local CHIP_KINDS = { button = true, checkbox = true, choice = true, slider = true }
+local CHIP_KINDS = { button = true, checkbox = true, choice = true, slider = true, textbox = true }
 -- The one place a focus look is decided: what el shows (on: it holds the window's focus) in the current input mode.
 --   "off"   its own look (not focused)
 --   "chip"  keys mode, a button, checkbox, choice or slider inside a row: the focus chip (and its focus look)
@@ -371,7 +380,7 @@ local function chipOn(el, w)
 end
 -- The chip goes: the kind's own style draws it again (a button's style also puts its render scales back to 1).
 local function chipOff(el, w)
-    if el.kind == "choice" or el.kind == "slider" then el.lookKey = nil end -- its own look is drawn again
+    if el.kind == "choice" or el.kind == "slider" or el.kind == "textbox" then el.lookKey = nil end -- its own look is drawn again
     local ok, err = pcall(X.KIND[el.kind].style, el, w, false)
     el.chipOn, el.faceOn = nil, nil
     if not ok then
@@ -405,8 +414,8 @@ local function setLook(el, on)
     end
     local ok, err = pcall(function() C.count(); w:SetFocusLook(on) end)
     if not ok then C.warnOnce("focus look", "the focus look failed (is %s's pak current?): %s", C.NAME, firstLine(err)) end
-    if look == "chip" and el.kind == "slider" and el.chipOn then
-        -- after SetFocusLook (it sets the number box's content tint): the number in the ink
+    if look == "chip" and (el.kind == "slider" or el.kind == "textbox") and el.chipOn then
+        -- after SetFocusLook (it sets the number box's content tint): the number (a text box's text) in the ink
         local okT, errT = pcall(function() C.count(); w.Background:SetContentColorAndOpacity(inkTint()) end)
         if not okT then
             S.chipFaults = S.chipFaults + 1
@@ -582,6 +591,20 @@ local function focusedIn(rec, lines)
     return nil
 end
 F._focusedIn = focusedIn
+
+-- Mod Manager v2 story 4: the text box of these lines whose EditableText holds keyboard focus (typing), or nil.
+local function typingIn(lines)
+    for _, l in ipairs(lines) do
+        for _, e in ipairs(l.els) do
+            if e.kind == "textbox" then
+                local w = widgetOf(e)
+                if w and TB._typing(e, w) then return e end
+            end
+        end
+    end
+    return nil
+end
+F._typingIn = typingIn
 
 -- Core story 36: the platform cursor position when the keys or a window last took the band ({ x, y } | nil: unknown). A
 -- hover at that position is content moving under a still pointer, not a pointer move.
@@ -1011,7 +1034,20 @@ function F.nav(rec, dir, act)
     local host = C.windowHost(rec.id)
     local lines = F.lines(host, backIdOf(rec))
     local el = focusedIn(rec, lines)
-    if el == nil then return false end -- focus is on something else in the window (a text box): its key (Escape reverts)
+    if el == nil then
+        -- Focus is on something else in the window (the slider's number box, a text box's box): the key is its own.
+        -- Mod Manager v2 story 4: Escape (B) while typing in a text box leaves the box for its field and keeps the text
+        -- (the focus loss commits it); the next Escape closes the window. Every other key is the box's (Enter commits).
+        if aOk and act == F.ACT.back then
+            local tb = typingIn(lines)
+            if tb then
+                S.leaves = S.leaves + 1
+                focusEl(rec, tb, lines, false)
+                return true
+            end
+        end
+        return false
+    end
     if aOk and act == F.ACT.back then
         if rec.close then
             S.closes = S.closes + 1
@@ -1036,6 +1072,12 @@ function F.nav(rec, dir, act)
             end
         else
             hold = nil
+        end
+        -- Mod Manager v2 story 4: Accept on a text box's field gives its EditableText keyboard focus (typing).
+        if el.kind == "textbox" then
+            local w = widgetOf(el)
+            if w and TB._typeInto(el, w) then S.types = S.types + 1 end
+            return true
         end
         -- Accept: a Button clicks itself (its own Accept); on a choice or a slider nothing changes.
         if el.kind == "button" or el.kind == "checkbox" then
@@ -1230,6 +1272,77 @@ local function ensureUpHook()
     else C.warnOnce("nav up hook", "window keys: RegisterHook(%s) failed (is %s's pak current?): %s; rows can't be picked up with A or Enter", C.NAVUP_FN, C.NAME, firstLine(err)) end
 end
 F._ensureUpHook = ensureUpHook
+
+-- ---------------------------------------------------------------- Mod Manager v2 story 4: the text box
+
+-- The open window of this state an element is on, and its host; nil when it isn't on a screen host.
+local function windowOfEl(el)
+    local host = C.hostOf(el)
+    if type(host) ~= "string" or C.hostKind(host) ~= "screen" then return nil end
+    local rec = C.windows[host:sub(8)]
+    if not (rec and rec.open) then return nil end
+    return rec, host
+end
+
+-- The focus model moves to el (typing or a commit in its box) without moving keyboard focus: the old look goes, el's
+-- look and row band come, the window remembers it.
+local function modelTo(rec, host, el)
+    if rec.focusId == el.id and rec.lookId == el.id then return end
+    local lines = F.lines(host, backIdOf(rec))
+    local li, ci = F.find(lines, el)
+    if not li then return end
+    if rec.lookId and rec.lookId ~= el.id then
+        local old = C.els[rec.lookId]
+        if old and not old.removed then setLook(old, false) end
+    end
+    setLook(el, true)
+    setRow(rec, el)
+    rec.lookId, rec.focusId = el.id, el.id
+    rec.focusPos = { li = li, ci = ci, owner = lines[li].owner }
+    rec.openFresh = false
+end
+
+local function typedIn(el)
+    local rec, host = windowOfEl(el)
+    if not rec then return nil end
+    hold = nil
+    hookDepth = hookDepth + 1
+    local ok, err = pcall(modelTo, rec, host, el)
+    hookDepth = hookDepth - 1
+    if not ok then error(err, 0) end
+    return rec
+end
+TB.cb.typing = function(el) typedIn(el) end
+
+-- After a commit (Enter clears the box's keyboard focus after it): keyboard focus back on the field, unless the window
+-- went, another window covers it, the model moved on, the box is typed in again, or an element of the window holds
+-- focus (a click moved it there).
+local HAND_BACK_MS = 50
+local function handBack(recId, elId)
+    local rec = C.windows[recId]
+    if not (rec and rec.open and globalTop(rec)) or rec.focusId ~= elId then return end
+    local lines = F.lines(C.windowHost(rec.id), backIdOf(rec))
+    local el = C.els[elId]
+    if not (el and F.find(lines, el)) then return end
+    if typingIn(lines) then return end
+    local cur = focusedIn(rec, lines)
+    if cur ~= nil and cur ~= "window" then return end
+    S.handBacks = S.handBacks + 1
+    focusEl(rec, el, lines, false)
+end
+F._handBack = handBack
+TB.cb.committed = function(el)
+    local rec = typedIn(el)
+    if not rec then return end
+    -- From the game thread (inside the commit hook); the UI tick puts focus back too when this can't be scheduled.
+    if type(ExecuteInGameThreadWithDelay) ~= "function" then return end
+    local recId, elId = rec.id, el.id
+    local ok, err = pcall(ExecuteInGameThreadWithDelay, HAND_BACK_MS, function()
+        local okH, errH = pcall(handBack, recId, elId)
+        if not okH then C.warnOnce("textbox hand back", "text box: handing focus back to the field failed: %s", firstLine(errH)) end
+    end)
+    if not ok then C.warnOnce("textbox hand back schedule", "text box: handing focus back could not be scheduled: %s", firstLine(err)) end
+end
 
 RO.cb.globalTop = globalTop
 RO.cb.focusRow = focusRow

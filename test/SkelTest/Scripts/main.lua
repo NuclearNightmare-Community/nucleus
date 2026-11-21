@@ -4633,6 +4633,12 @@ local function buildMenu()
             CT.dcb = UIx.checkbox.create{ id = "ct.dcb", place = { row = r6 }, checked = true, enabled = false, onChange = rec("ct.dcb") }
             CT.dch = UIx.choice.create{ id = "ct.dch", place = { row = r6, fill = 1 }, options = OPTS, selected = 3, enabled = false, onChange = rec("ct.dch") }
             CT.dsl = UIx.slider.create{ id = "ct.dsl", place = { row = r6, fill = 2 }, min = 0, max = 10, step = 1, value = 4, enabled = false, onChange = rec("ct.dsl") }
+            -- Mod Manager v2 story 4 (core 0.25.0): a text box; CT.seq records the order of its two callbacks
+            local r8 = row(8, "TEXT")
+            CT.seq = {}
+            local function tbrec(id) local r = rec(id) return function(h, t) CT.seq[#CT.seq + 1] = id .. "=" .. tostring(t) r(h, t) end end
+            CT.tb = UIx.textbox.create{ id = "ct.tb", place = { row = r8, fill = 3 }, hint = "TYPE HERE", maxChars = 16, width = 300,
+                onChange = tbrec("ct.tb"), onCommit = tbrec("ct.tbc") }
             check(UIx.screen.isOpen(CT.W), "CTWIN window CT open with the controls")
             return msAfter(2), 5 -- the hooks are registered from the UI poll
         end)
@@ -4756,6 +4762,41 @@ local function buildMenu()
                 SLx.remove(h) SLx.remove(h)
                 return g
             end, E.nilret)
+            -- text box (Mod Manager v2 story 4): every bad input of the story's matrix
+            local TBx, TC = UI.textbox, UIP .. ".textbox.create: "
+            local function tb(o) o.id = o.id or "ct.bad"; o.place = o.place or rp return f(TBx.create, o) end
+            ccase("tb-none", "ui.textbox.create()", f(TBx.create), E.err(TC .. "expected a table"))
+            ccase("tb-args", "ui.textbox.create({...}, 2)", f(TBx.create, { id = "ct.bad" }, 2), E.err(TC .. "expected 1 argument (a table), got 2"))
+            ccase("tb-unknown", "ui.textbox.create{ label = 'x' }", tb({ label = "x" }), E.err(TC .. "unknown key 'label' (valid: enabled, hint, id, maxChars, onChange, onCommit, place, text, tooltip, width)"))
+            ccase("tb-id", "ui.textbox.create{ id = 5 }", tb({ id = 5 }), E.err(TC .. "id must be a string, got 5"))
+            ccase("tb-width-10", "ui.textbox.create{ width = 10 }", tb({ width = 10 }), E.err(TC .. "width must be a number from 64 to 1024 (canvas units) or nil, got 10"))
+            ccase("tb-width-str", "ui.textbox.create{ width = 'x' }", tb({ width = "x" }), E.err(TC .. "width must be a number from 64 to 1024 (canvas units) or nil, got 'x'"))
+            ccase("tb-max-0", "ui.textbox.create{ maxChars = 0 }", tb({ maxChars = 0 }), E.err(TC .. "maxChars must be an integer from 1 to 256 or nil, got 0"))
+            ccase("tb-max-300", "ui.textbox.create{ maxChars = 300 }", tb({ maxChars = 300 }), E.err(TC .. "maxChars must be an integer from 1 to 256 or nil, got 300"))
+            ccase("tb-hint-65", "ui.textbox.create{ hint = <65 bytes> }", tb({ hint = string.rep("h", 65) }), E.err(TC .. "hint must be a string of at most 64 bytes or nil, got 65 bytes"))
+            ccase("tb-text-num", "ui.textbox.create{ text = 5 }", tb({ text = 5 }), E.err(TC .. "text must be a string or nil, got 5"))
+            ccase("tb-text-long", "ui.textbox.create{ text = <65 chars> }", tb({ text = string.rep("t", 65) }), E.err(TC .. "text is 65 characters, at most 64 (maxChars)"))
+            ccase("tb-onchange", "ui.textbox.create{ onChange = 5 }", tb({ onChange = 5 }), E.err(TC .. "onChange must be a function or nil, got 5"))
+            ccase("tb-oncommit", "ui.textbox.create{ onCommit = 'x' }", tb({ onCommit = "x" }), E.err(TC .. "onCommit must be a function or nil, got 'x'"))
+            ccase("tb-enabled", "ui.textbox.create{ enabled = 1 }", tb({ enabled = 1 }), E.err(TC .. "enabled must be a boolean or nil, got 1"))
+            ccase("tb-hud", "ui.textbox.create{ place = <hud corner> }", tb({ place = HUD }), E.err(TC .. "text boxes need a host with a cursor (journal, menu, screen)"))
+            ccase("tb-place", "ui.textbox.create{ place = 'row' }", tb({ place = "row" }), E.err(TC .. "place must be a table or nil, got 'row'"))
+            ccase("tb-set-num", "ui.textbox.set(tb, 5)", f(TBx.set, CT.tb, 5), E.err(UIP .. ".textbox.set: text must be a string or nil, got 5"))
+            ccase("tb-set-long", "ui.textbox.set(tb, <17 chars>) [maxChars 16]", f(TBx.set, CT.tb, string.rep("s", 17)), E.err(UIP .. ".textbox.set: text is 17 characters, at most 16 (maxChars)"))
+            ccase("tb-set-noarg", "ui.textbox.set(tb)", f(TBx.set, CT.tb), E.err(UIP .. ".textbox.set: expected 2 arguments (handle, text), got 1"))
+            ccase("tb-get-choice", "ui.textbox.get(<choice handle>)", f(TBx.get, CT.ch), E.err(UIP .. ".textbox.get: not a text box handle ('ct.ch' is a choice)"))
+            ccase("tb-get-forged", "ui.textbox.get({ id = 'ct.tb' }) [forged]", f(TBx.get, { id = "ct.tb" }), E.err(UIP .. ".textbox.get: not a text box handle (use the handle that textbox.create returned)"))
+            ccase("tb-setenabled", "ui.textbox.setEnabled(tb, 0)", f(TBx.setEnabled, CT.tb, 0), E.err(UIP .. ".textbox.setEnabled: enabled must be a boolean, got 0"))
+            ccase("tb-setvis", "ui.textbox.setVisible(tb, 'yes')", f(TBx.setVisible, CT.tb, "yes"), E.err(UIP .. ".textbox.setVisible: visible must be a boolean, got string"))
+            ccase("tb-tip", "ui.textbox.setTooltip(tb, '')", f(TBx.setTooltip, CT.tb, ""), E.err(UIP .. ".textbox.setTooltip: tooltip must be a string of 1 to 512 bytes"))
+            ccase("tb-remove-slider", "ui.textbox.remove(<slider handle>)", f(TBx.remove, CT.s1), E.err(UIP .. ".textbox.remove: not a text box handle ('ct.s1' is a slider)"))
+            ccase("tb-ok", "ui.textbox.create{ text, maxChars = 4 } then set, get, remove [control]", function()
+                local h = TBx.create{ id = "ct.okt", place = rp, text = "ab", maxChars = 4 }
+                TBx.set(h, "wxyz")
+                local g = TBx.get(h)
+                TBx.remove(h) TBx.remove(h)
+                return g
+            end, E.ret("'wxyz'", function(r) return r[1] == "wxyz" end))
             UI.row.remove(rp.row)
             ccase("removed", "ui.choice.get(<a removed choice>)", function()
                 local h = CHx.create{ id = "ct.gone", place = { list = CT.list }, options = { "X" }, onChange = nop }
@@ -4799,6 +4840,14 @@ local function buildMenu()
                     off("sl-remove", "slider.remove", UI.slider.remove, {})
                     off("sl-isshown", "slider.isShown", UI.slider.isShown, {})
                     off("sl-settip", "slider.setTooltip", UI.slider.setTooltip, {}, "x")
+                    off("tb-create", "textbox.create", UI.textbox.create, { id = "off" })
+                    off("tb-get", "textbox.get", UI.textbox.get, {})
+                    off("tb-set", "textbox.set", UI.textbox.set, {}, "x")
+                    off("tb-setenabled", "textbox.setEnabled", UI.textbox.setEnabled, {}, true)
+                    off("tb-setvis", "textbox.setVisible", UI.textbox.setVisible, {}, true)
+                    off("tb-remove", "textbox.remove", UI.textbox.remove, {})
+                    off("tb-isshown", "textbox.isShown", UI.textbox.isShown, {})
+                    off("tb-settip", "textbox.setTooltip", UI.textbox.setTooltip, {}, "x")
                 end)
                 if not ok then check(false, "CASE menu3.ct-off block threw: %s", firstLine(err)) end
                 done = true
@@ -4809,6 +4858,7 @@ local function buildMenu()
         step("ct: features", function()
             check(core.has("ui.slider.create") and core.has("ui.choice.range") and core.has("ui.checkbox.create") and core.has("ui.slider.setDefault"),
                 "CTHAS core.has: ui.slider.create, ui.choice.range, ui.checkbox.create, ui.slider.setDefault")
+            check(core.has("ui.textbox") and core.has("ui.textbox.create") and core.has("ui.textbox.set"), "CTHAS core.has: ui.textbox, ui.textbox.create, ui.textbox.set")
         end)
 
         -- ---- the controls as created, read from the live widgets
@@ -4914,6 +4964,40 @@ local function buildMenu()
         step("ct: s2 2.3", function()
             local _, box = sliderState(cell(5, "ct.s2"))
             check(UI.slider.get(CT.s2) == 2.5 and calls("ct.s2") == 1 and (box == "2.5" or box == "2,5"), "CT slider step 0.5 typed 2.3 value=%s calls=%d box=%s", num(UI.slider.get(CT.s2)), calls("ct.s2"), box)
+        end)
+        -- ---- Mod Manager v2 story 4: the text box. A click into its box, "type abc", ENTER: onChange then onCommit with
+        -- abc, and keyboard focus back on the field; then ENTER (Accept on the field: typing again), "type x", ESCAPE:
+        -- the box left for the field, the text kept (committed by the focus loss), the window still open.
+        local function tbW() return cell(8, "ct.tb") end
+        local function tbText() return txt(prop(tbW(), "Box")) or "?" end
+        local function tbFocus() return try(function() return tbW():HasKeyboardFocus() end) == true end
+        step("ct: tb read", function()
+            local w = tbW()
+            if not check(w ~= nil and cname(w) == "WBP_" .. CORE .. "Textbox_C", "CTTB the text box is in row 8 (%s)", w and cname(w) or "missing") then return end
+            local hint = try(function() return w.Box:GetHintText():ToString() end)
+            check(tbText() == "" and hint == "TYPE HERE" and UI.textbox.get(CT.tb) == "", "CTTB empty with its hint (%s)", tostring(hint))
+        end)
+        click("tb focus", function() return prop(tbW(), "Box") end, 0.5, 0.5)
+        req("tb type", function() return "type abc" end, 0.8)
+        req("tb enter", function() return "key ENTER" end)
+        step("ct: tb abc", function()
+            local order = table.concat(CT.seq, " ")
+            local last = CT.last["ct.tb"]
+            check(UI.textbox.get(CT.tb) == "abc" and tbText() == "abc" and calls("ct.tb") >= 1 and last and last.a == "abc",
+                "CTTB typed abc: get=%s box=%s onChange calls=%d last=%s", tostring(UI.textbox.get(CT.tb)), tbText(), calls("ct.tb"), tostring(last and last.a))
+            local iChange, iCommit = order:find("ct.tb=abc", 1, true), order:find("ct.tbc=abc", 1, true)
+            check(calls("ct.tbc") == 1 and CT.last["ct.tbc"].a == "abc" and iChange ~= nil and iCommit ~= nil and iChange < iCommit,
+                "CTTB ENTER: onCommit once with abc, after onChange (%s)", order)
+            check(tbFocus(), "CTTB after ENTER keyboard focus is back on the field")
+        end)
+        req("tb retype", function() return "key ENTER" end) -- Accept on the field: typing again
+        req("tb type x", function() return "type x" end, 0.8)
+        req("tb escape", function() return "key ESCAPE" end)
+        step("ct: tb escape", function()
+            check(UI.screen.isOpen(CT.W) and UI.textbox.get(CT.tb) == "abcx" and tbText() == "abcx" and tbFocus(),
+                "CTTB Accept, x, ESCAPE: open=%s get=%s box=%s field focused=%s", tostring(UI.screen.isOpen(CT.W)), tostring(UI.textbox.get(CT.tb)), tbText(), tostring(tbFocus()))
+            local lastC = CT.last["ct.tbc"]
+            check(calls("ct.tbc") == 2 and lastC and lastC.a == "abcx", "CTTB ESCAPE committed abcx by the focus loss (commits=%d)", calls("ct.tbc"))
         end)
         -- ---- the disabled row: a click, a click on next, a drag and typing change nothing
         click("disabled checkbox", function() return cell(6, "ct.dcb") end)

@@ -718,8 +718,10 @@ $menuChecks = $started + @(
     # Mod Manager story 4 (core 0.10.0, UI-11): checkbox, choice and slider-with-number controls on window CT over the
     # third menu, driven by real clicks, a drag and typing (the I/O matrix rows), then SkelPeer's checkbox on the menu.
     "\[$T\] OK CTWIN window CT open with the controls"
-    "\[$T\] OK CTCASES ran 85 cases"
+    # Mod Manager v2 story 4 (core 0.25.0): 26 tb-* cases (the text box's bad input) join the 85.
+    "\[$T\] OK CTCASES ran 111 cases"
     "\[$T\] OK CTHAS core\.has: ui\.slider\.create, ui\.choice\.range, ui\.checkbox\.create"
+    "\[$T\] OK CTHAS core\.has: ui\.textbox, ui\.textbox\.create, ui\.textbox\.set"
     "\[$T\] OK CTROW every control is in its row"
     "\[$T\] OK CTCLASS checkbox WBP_${N}Button_C, choice WBP_${N}Choice_C, slider WBP_${N}Slider_C"
     "\[$T\] OK CT checkbox unchecked shows checkbox_unticked"
@@ -749,6 +751,18 @@ $menuChecks = $started + @(
     "\[$T\] OK CT slider emptied value=nil calls=4 box='' hint=DEFAULT \(100\) bar=100"
     "\[$T\] OK CT slider setDefault\(120\) moved the Default slider to 120"
     "\[$T\] OK CT slider step 0\.5 typed 2\.3 value=2\.5 calls=1"
+    # Mod Manager v2 story 4: the text box. A click into its box, "type abc", ENTER: onChange (a, ab, abc) then onCommit
+    # with abc once, focus back on the field; ENTER (Accept: typing again), "type x", ESCAPE: the field, abcx kept and
+    # committed, the window open.
+    "\[$T\] OK CTTB the text box is in row 8 \(WBP_${N}Textbox_C\)"
+    "\[$T\] OK CTTB empty with its hint \(TYPE HERE\)"
+    "\[$T\] OK CTTB typed abc: get=abc box=abc onChange calls=3 last=abc"
+    "\[$T\] OK CTTB ENTER: onCommit once with abc, after onChange "
+    "\[$T\] OK CTTB after ENTER keyboard focus is back on the field"
+    "\[$T\] OK CTTB Accept, x, ESCAPE: open=true get=abcx box=abcx field focused=true"
+    "\[$T\] OK CTTB ESCAPE committed abcx by the focus loss \(commits=2\)"
+    "#4|\[$T\] CTCB ct\.tb "
+    "#2|\[$T\] CTCB ct\.tbc "
     # Disabled: dimmed; a click, a drag and typing change nothing, no callback.
     "\[$T\] OK CT disabled click/drag/type: values unchanged \(true, 3, 4; box 4\), calls=0"
     "!\[$T\] CTCB ct\.d"

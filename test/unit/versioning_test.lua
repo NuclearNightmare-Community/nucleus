@@ -146,8 +146,18 @@ local want = {
     "ui.screen.focus", "ui.screen.panel",
     "ui.slider", "ui.slider.create", "ui.slider.get", "ui.slider.isShown", "ui.slider.remove", "ui.slider.set", "ui.slider.setDefault", "ui.slider.setEnabled",
     "ui.slider.setTooltip", "ui.slider.setVisible",
-    "ui.text", "ui.text.setTooltip" }
-eq(table.concat(declared, ","), table.concat(want, ","), "declared(): the 0.24.0 feature list (map.setup, ui.journal.regions, ui.look, story 24's, story 4's, story 22's, story 23's, story 27's, story 31's, story 32's, story 33's, story 38's, story 43's and story 44's names hand-named; settings, net, fn, restart, input, catalog, apply), sorted")
+    "ui.text", "ui.text.setTooltip",
+    -- Mod Manager v2 story 4 (0.25.0): the text box, every function hand-named
+    "ui.textbox", "ui.textbox.create", "ui.textbox.get", "ui.textbox.isShown", "ui.textbox.remove", "ui.textbox.set",
+    "ui.textbox.setEnabled", "ui.textbox.setTooltip", "ui.textbox.setVisible" }
+eq(table.concat(declared, ","), table.concat(want, ","), "declared(): the 0.25.0 feature list (map.setup, ui.journal.regions, ui.look, story 24's, story 4's, story 22's, story 23's, story 27's, story 31's, story 32's, story 33's, story 38's, story 43's, story 44's and v2 story 4's names hand-named; settings, net, fn, restart, input, catalog, apply), sorted")
+-- Mod Manager v2 story 4: a 0.24.x core's list answers false for ui.textbox and its functions; this one true.
+do
+    local old = {}
+    for _, n in ipairs(want) do if not n:find("^ui%.textbox") then old[#old + 1] = n end end
+    ok(F.set(old)["ui.textbox.create"] == nil and F.set(declared)["ui.textbox"] == true and F.set(declared)["ui.textbox.create"] == true,
+        "0.25.0: ui.textbox and ui.textbox.create are features, a 0.24.x core's list has neither")
+end
 -- Mod Manager v2 story 3: a 0.23.x core's list answers false for apply; this one true.
 do
     local old = {}

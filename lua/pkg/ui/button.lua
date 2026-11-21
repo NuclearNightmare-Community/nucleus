@@ -440,8 +440,9 @@ local BUTTONS, ROWS_LISTS = { button = true }, { row = true, list = true }
 -- Buttons need a host with a cursor; so do lists and rows (story 21), and a panel holding buttons. Called by the
 -- engine for every create and place.
 local NEEDS_CURSOR = { button = "buttons", list = "lists", row = "rows",
-    checkbox = "checkboxes", choice = "choices", slider = "sliders" } -- Mod Manager story 4: the controls
-local CONTROLS = { checkbox = true, choice = true, slider = true }
+    checkbox = "checkboxes", choice = "choices", slider = "sliders", -- Mod Manager story 4: the controls
+    textbox = "text boxes" } -- Mod Manager v2 story 4
+local CONTROLS = { checkbox = true, choice = true, slider = true, textbox = true }
 X.checkHost = function(kind, host, fn, el)
     if host ~= "hud" then return end
     if NEEDS_CURSOR[kind] then
@@ -455,7 +456,7 @@ X.checkHost = function(kind, host, fn, el)
             C.fail("%s.%s: panel '%s' holds rows or lists, which need a host with a cursor (%s); see input mode, story 16", C.UI, fn, el.id, C.CURSOR_HOSTS)
         end
         if holds(el, CONTROLS) then
-            C.fail("%s.%s: panel '%s' holds controls (checkboxes, choices or sliders), which need a host with a cursor (%s); see input mode, story 16", C.UI, fn, el.id, C.CURSOR_HOSTS)
+            C.fail("%s.%s: panel '%s' holds controls (checkboxes, choices, sliders or text boxes), which need a host with a cursor (%s); see input mode, story 16", C.UI, fn, el.id, C.CURSOR_HOSTS)
         end
     end
 end

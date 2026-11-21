@@ -39,7 +39,7 @@ local St = require(BASE .. ".ui.strings")
 local R = {}
 local CREATE_KEYS = { id = true, place = true, style = true, gap = true, like = true, label = true, help = true, control = true, locked = true }
 local LIKE_MAX = 64
-local CONTROL_KINDS = { checkbox = true, choice = true, gchoice = true, slider = true, button = true }
+local CONTROL_KINDS = { checkbox = true, choice = true, gchoice = true, slider = true, button = true, textbox = true }
 
 local function validGap(v)
     if v == nil then return "tight" end
@@ -58,15 +58,15 @@ local function validLike(v, pre)
     return v
 end
 
--- Core story 33: control is a live checkbox, choice, slider or button handle of this mod.
+-- Core story 33: control is a live checkbox, choice, slider, text box or button handle of this mod.
 local function validControl(h, pre)
-    if type(h) ~= "table" then C.fail("%s: control must be a checkbox, choice, slider or button handle, got %s", pre, C.describe(h)) end
+    if type(h) ~= "table" then C.fail("%s: control must be a checkbox, choice, slider, text box or button handle, got %s", pre, C.describe(h)) end
     local rid = C.removedHandle[h]
     if rid then C.fail("%s: control handle '%s' was removed", pre, rid) end
     local el = C.handleOf[h]
-    if not el then C.fail("%s: control is not an element handle of this mod (use the handle that checkbox, choice, slider or button.create returned)", pre) end
+    if not el then C.fail("%s: control is not an element handle of this mod (use the handle that checkbox, choice, slider, textbox or button.create returned)", pre) end
     if not CONTROL_KINDS[el.kind] then
-        C.fail("%s: control '%s' is %s, not a checkbox, choice, slider or button", pre, el.id, C.ARTICLE[el.kind] or el.kind)
+        C.fail("%s: control '%s' is %s, not a checkbox, choice, slider, text box or button", pre, el.id, C.ARTICLE[el.kind] or el.kind)
     end
     return el
 end

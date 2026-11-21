@@ -2,6 +2,23 @@
 
 All notable changes to Nucleus are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). From 0.5.0 a dependent's `need` and `dependsOn` are minimum versions (`>=0.5.0`), so a newer Nucleus never asks dependents to raise them. Up to 0.3.0, below 1.0.0 a dependent connected only to the same minor version (`need = "0.3.0"` accepted 0.3.x).
 
+## [0.25.0] - 2026-11-21
+
+Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
+
+For players: mods can now show a text box in their windows, such as the Mod Manager's search box. Click it and type, or move to it with the arrow keys and press Enter to type; Enter finishes, and Escape leaves the box and keeps what you typed (a second Escape closes the window). Typing needs a keyboard; the rest of a window still works with a gamepad.
+
+### Added
+
+- `core.ui.textbox` (Mod Manager v2 story 4): a single-line text box. `create{ id, text, hint, place, width, maxChars, tooltip, enabled, onChange, onCommit }` (width 64-1024 canvas units, default 320; maxChars 1-256, default 64; hint at most 64 bytes; text at most maxChars characters, valid UTF-8, no control characters), `set(h, text)`, `get(h) -> text`, `setEnabled`, `setVisible`, `setTooltip`, `remove`, `isShown`. Text read from the widget loses its control bytes and is cut to maxChars (then written back); `onChange(h, text)` runs only when the cleaned text changed, `onCommit(h, text)` on Enter or when the box loses focus (Enter and the focus clear it causes are one commit); both through `C.callDependent` in `pcall`, a throw logged once per box; `set` never calls back. Features `ui.textbox` and the path of every function (`ui.textbox.create` ... `ui.textbox.setTooltip`).
+- `WBP_NucleusTextbox` (CoreGen `BuildTextbox`): SizeBox `Frame` -> Border `Background` -> EditableText `Box` (RevertTextOnEscape off, ClearKeyboardFocusOnCommit on, SelectAllTextWhenFocused off), the slider's number-box look; `Box.OnTextChanged` and `OnTextCommitted` call the hookable counters `Nucleus_OnTextboxChanged` and `Nucleus_OnTextboxCommit`; the class default is focusable. `build.ps1` requires the widget in the pak.
+- Focus: a text box is focusable and gets the focus chip in a row. Accept on it gives the EditableText keyboard focus; Enter commits and hands focus back to the field; Escape while typing leaves the box for the field and keeps the text (the next Escape closes the window); a mouse click types directly. Typing and committing move the window's focus model to the text box without moving keyboard focus.
+- Tests: `controls_test.lua` and `focus_test.lua` cover the text box; the `menu` scenario gains 26 `tb-*` bad-input cases (CTCASES 111), the off-thread `tb-*` cases and a typed round trip (`type abc`, ENTER, then ENTER, `type x`, ESCAPE).
+
+### Changed
+
+- The error texts that list control kinds name the text box: `row.create`'s `control` ("a checkbox, choice, slider, text box or button handle") and a panel moved to the HUD ("holds controls (checkboxes, choices, sliders or text boxes)").
+
 ## [0.24.0] - 2026-11-21
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.

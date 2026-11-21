@@ -887,7 +887,7 @@ do
     local PNm = require("nucleus.ui.panel")
     local jp = PNm.create{ id = "jp", place = { host = "journal", corner = "bottom-left" } }
     CK.create{ id = "jcb", place = { panel = jp }, onChange = T.nop }
-    raises(function() P.place(jp, { host = "hud", corner = "top-left" }) end, "panel 'jp' holds controls (checkboxes, choices or sliders), which need a host with a cursor", "a panel with a checkbox can't go to the HUD")
+    raises(function() P.place(jp, { host = "hud", corner = "top-left" }) end, "panel 'jp' holds controls (checkboxes, choices, sliders or text boxes), which need a host with a cursor", "a panel with a checkbox can't go to the HUD")
     PNm.remove(jp)
 end
 -- removed handles; off the game thread; before connect
@@ -1085,6 +1085,185 @@ do
     tick()
     local n, keep = X._deferred()
     ok(T.tagged("ch37r") == nil and n == 0 and keep == nil, "story 37: removed before the tick: not attached, the queue empty, its token released")
+end
+
+-- ---------------------------------------------------------------- Mod Manager v2 story 4 (core 0.25.0): the text box
+do
+    local TBm = require("nucleus.ui.textbox")
+    T.TEXTBOXCLASS = cls("/Game/Mods/Nucleus/WBP_NucleusTextbox.WBP_NucleusTextbox_C")
+    function T.newTextboxW()
+        local w = widget("WBP_NucleusTextbox_C", "/Engine/Transient.WBP_NucleusTextbox_C_" .. (F.addr + 0x100), 40)
+        tagged(w)
+        w.Frame = T.inner(4)
+        w.text, w.hint, w.sets = "", "", 0
+        w.Box = { GetText = function() return { ToString = function() return w.text end } end,
+            SetKeyboardFocus = function() w.boxFocus = true end, HasKeyboardFocus = function() return w.boxFocus == true end }
+        function w:SetBoxText(t) self.text = t; self.sets = self.sets + 1 end
+        function w:SetHint(h) self.hint = h end
+        function w:SetWidth(v) self.width = v end
+        function w:SetEnabledState(e) self.enabled = e end
+        function w:SetBoxLook(f, size) self.look = { f, size } end
+        function w:SetRenderOpacity(o) self.opacity = o end
+        return w
+    end
+    local WBL = F.objects["/Script/UMG.Default__WidgetBlueprintLibrary"]
+    local base = WBL.Create
+    WBL.Create = function(self, world, c, owner)
+        if c == T.TEXTBOXCLASS then return T.newTextboxW() end
+        return base(self, world, c, owner)
+    end
+    local CHG, COM = "WBP_NucleusTextbox_C:Nucleus_OnTextboxChanged", "WBP_NucleusTextbox_C:Nucleus_OnTextboxCommit"
+    local commits = {}
+    local tb = TBm.create{ id = "tb", place = { row = T.row, fill = 2 }, hint = "SEARCH", maxChars = 8, onChange = T.rec("tb"),
+        onCommit = function(h, t) commits[#commits + 1] = { h = h, t = t } end }
+    local w = T.tagged("tb")
+    ok(w and w.__class == "WBP_NucleusTextbox_C", "textbox: a WBP_NucleusTextbox widget, tagged")
+    ok(w.width == 320 and w.text == "" and w.hint == "SEARCH" and w.mat and w.look and w.look[2] == theme.game.controlFont.size,
+        "textbox: width 320 by default, empty, its hint, the game look")
+    ok(TBm.get(tb) == "", "textbox: get() is empty")
+    tick()
+    ok(hookCount(CHG) == 1 and hookCount(COM) == 1, "textbox: change and commit hooks registered once, from the poll")
+    tick()
+    ok(hookCount(CHG) == 1 and hookCount(COM) == 1, "textbox: not registered twice")
+    -- typing
+    w.text = "ab"; T.fire(CHG, w)
+    ok(TBm.get(tb) == "ab" and T.ncalls("tb") == 1 and T.last("tb").a == "ab" and T.last("tb").h == tb, "textbox typed ab: onChange(h, 'ab') once")
+    T.fire(CHG, w)
+    ok(T.ncalls("tb") == 1, "textbox: a change event with the same text: no callback")
+    -- cleaning: control bytes go, the text is cut to maxChars characters and written back (its echo is no change)
+    local sets0 = w.sets
+    w.text = "a\tb\1c"; T.fire(CHG, w)
+    ok(TBm.get(tb) == "abc" and w.text == "abc" and w.sets == sets0 + 1 and T.ncalls("tb") == 2, "textbox: control bytes removed and written back, one callback")
+    T.fire(CHG, w)
+    ok(T.ncalls("tb") == 2, "textbox: the written-back text's own change event: no callback")
+    w.text = "123456789012"; T.fire(CHG, w)
+    ok(TBm.get(tb) == "12345678" and w.text == "12345678" and T.ncalls("tb") == 3, "textbox: cut to maxChars (8) and written back")
+    w.text = "\195\169\195\169\195\169\195\169\195\169\195\169\195\169\195\169\195\169"; T.fire(CHG, w) -- nine e-acute
+    ok(TBm.get(tb) == string.rep("\195\169", 8) and T.ncalls("tb") == 4, "textbox: the cut counts characters (UTF-8), not bytes")
+    ok(TBm._clean("x\127y", 5) == "xy" and select(2, TBm._clean("ok", 5)) == false and select(1, TBm._clean(nil, 5)) == "", "textbox: clean() pure cases")
+    -- commit: Enter, then its focus clear with the same text, is one commit
+    w.text = "clock"; T.fire(CHG, w)
+    T.fire(COM, w)
+    ok(#commits == 1 and commits[1].t == "clock" and commits[1].h == tb and T.ncalls("tb") == 5, "textbox commit: onCommit(h, 'clock') once, after onChange")
+    fireHook(COM, w)
+    ok(#commits == 1 and TBm._S.sameCommits >= 1, "textbox: a second commit of the same text within 250 ms is the same commit")
+    T.fire(COM, w)
+    ok(#commits == 2, "textbox: a later commit of the same text (focus lost again) commits again")
+    -- a commit carrying a change it didn't report first
+    w.text = "hud"; T.fire(COM, w)
+    ok(T.ncalls("tb") == 6 and T.last("tb").a == "hud" and #commits == 3 and commits[3].t == "hud", "textbox: a commit with new text: onChange then onCommit")
+    -- set never calls back; get
+    local s1 = w.sets
+    TBm.set(tb, "zz")
+    ok(TBm.get(tb) == "zz" and w.text == "zz" and w.sets == s1 + 1 and T.ncalls("tb") == 6, "textbox set('zz'): shown, no callback")
+    T.fire(CHG, w)
+    ok(T.ncalls("tb") == 6, "textbox: set's own change event: no callback")
+    TBm.set(tb, "zz")
+    ok(w.sets == s1 + 1, "textbox set with the same text: no UObject call")
+    -- width, enabled, visible, tooltip
+    local tw = TBm.create{ id = "tw", place = { row = T.row }, width = 512, text = "x", tooltip = "TIP", enabled = false, onChange = T.rec("tw") }
+    local tww = T.tagged("tw")
+    ok(tww.width == 512 and tww.text == "x" and tww.Frame.tip == "TIP" and tww.enabled == false and tww.opacity == theme.disabledOpacity,
+        "textbox: width 512, text, tooltip on its Frame, disabled and dimmed")
+    tww.text = "y"; T.fire(CHG, tww); T.fire(COM, tww)
+    ok(TBm.get(tw) == "x" and T.ncalls("tw") == 0, "textbox enabled = false: input ignored")
+    TBm.setEnabled(tw, true)
+    ok(tww.enabled == true and tww.opacity == 1, "textbox setEnabled(true): enabled, full opacity")
+    TBm.setTooltip(tw, nil)
+    ok(tww.Frame.tip == "", "textbox setTooltip(nil): cleared")
+    TBm.setVisible(tw, false)
+    ok(TBm.isShown(tw) == false, "textbox setVisible(false): hidden")
+    TBm.remove(tw); TBm.remove(tw)
+    raises(function() TBm.get(tw) end, "nucleus.ui.textbox: handle 'tw' was removed", "textbox removed (remove is idempotent)")
+    -- a throwing callback is logged once; the box keeps working
+    local tt = TBm.create{ id = "tt", place = { list = T.list }, onChange = function() error("bad box") end, onCommit = function() error("bad commit") end }
+    local ttw = T.tagged("tt")
+    ttw.text = "a"; T.fire(CHG, ttw)
+    ttw.text = "b"; T.fire(CHG, ttw)
+    T.fire(COM, ttw); ttw.text = "c"; T.fire(COM, ttw)
+    ok(TBm.get(tt) == "c" and countLogs("WARN text box 'tt' onChange: ") == 1 and countLogs("WARN text box 'tt' onCommit: ") == 1,
+        "textbox: throwing onChange and onCommit logged once each, the box keeps working")
+    -- another mod's text box
+    do
+        local other = T.newTextboxW()
+        other:SetTag("nucleus:OtherMod:tb")
+        other.text = "nope"
+        local i0 = TBm._S.ignored
+        T.fire(CHG, other)
+        ok(TBm.get(tb) == "zz" and TBm._S.ignored == i0 + 1, "textbox: another mod's widget ignored")
+    end
+    -- a stale widget of the element (not its live one)
+    do
+        local stale = T.newTextboxW()
+        stale:SetTag("nucleus:TestMod:tb")
+        stale.text = "stale"
+        local i0 = TBm._S.ignored
+        T.fire(CHG, stale)
+        ok(TBm.get(tb) == "zz" and TBm._S.ignored == i0 + 1, "textbox: a widget that isn't the element's live one ignored")
+    end
+    -- same id: updated in place
+    TBm.create{ id = "tb", place = { row = T.row, fill = 2 }, text = "new", hint = "FIND", maxChars = 8, onChange = T.rec("tb") }
+    ok(w.text == "new" and w.hint == "FIND" and TBm.get(tb) == "new" and T.tagged("tb") == w, "textbox create with the same id: text and hint updated in place")
+
+    -- bad input (the story's matrix): every message names <core>.ui.textbox.<fn>
+    local KT = "nucleus.ui.textbox.create: "
+    local function tbo(extra)
+        return function()
+            local o = { id = "tbx", place = { row = T.row } }
+            for k, v in pairs(extra) do o[k] = v end
+            TBm.create(o)
+        end
+    end
+    T.bad(function() TBm.create() end, KT .. "expected a table", "textbox.create(nil)")
+    T.bad(function() TBm.create({ id = "tbx" }, 2) end, KT .. "expected 1 argument (a table), got 2", "textbox.create two args")
+    T.bad(tbo({ label = "x" }), KT .. "unknown key 'label' (valid: enabled, hint, id, maxChars, onChange, onCommit, place, text, tooltip, width)", "textbox unknown key")
+    T.bad(function() TBm.create{ id = 5 } end, KT .. "id must be a string, got 5", "textbox id a number")
+    T.bad(tbo({ width = 10 }), KT .. "width must be a number from 64 to 1024 (canvas units) or nil, got 10", "textbox width 10")
+    T.bad(tbo({ width = 2000 }), KT .. "width must be a number from 64 to 1024", "textbox width 2000")
+    T.bad(tbo({ width = "wide" }), KT .. "width must be a number from 64 to 1024 (canvas units) or nil, got 'wide'", "textbox width a string")
+    T.bad(tbo({ width = 0 / 0 }), KT .. "width must be a number from 64 to 1024 (canvas units) or nil, got NaN", "textbox width NaN")
+    T.bad(tbo({ maxChars = 0 }), KT .. "maxChars must be an integer from 1 to 256 or nil, got 0", "textbox maxChars 0")
+    T.bad(tbo({ maxChars = 300 }), KT .. "maxChars must be an integer from 1 to 256 or nil, got 300", "textbox maxChars 300")
+    T.bad(tbo({ maxChars = 2.5 }), KT .. "maxChars must be an integer from 1 to 256 or nil, got 2.5", "textbox maxChars 2.5")
+    T.bad(tbo({ hint = string.rep("h", 65) }), KT .. "hint must be a string of at most 64 bytes or nil, got 65 bytes", "textbox hint 65 bytes")
+    T.bad(tbo({ hint = 5 }), KT .. "hint must be a string of at most 64 bytes or nil, got 5", "textbox hint a number")
+    T.bad(tbo({ text = 5 }), KT .. "text must be a string or nil, got 5", "textbox text a number")
+    T.bad(tbo({ text = string.rep("t", 65) }), KT .. "text is 65 characters, at most 64 (maxChars)", "textbox text over maxChars")
+    T.bad(tbo({ text = "a\nb" }), KT .. "text must not contain control characters", "textbox text with a newline")
+    T.bad(tbo({ text = "\255" }), KT .. "text is not valid UTF-8", "textbox text not UTF-8")
+    T.bad(tbo({ onChange = 5 }), KT .. "onChange must be a function or nil, got 5", "textbox non-function onChange")
+    T.bad(tbo({ onCommit = "x" }), KT .. "onCommit must be a function or nil, got 'x'", "textbox non-function onCommit")
+    T.bad(tbo({ enabled = 1 }), KT .. "enabled must be a boolean or nil, got 1", "textbox enabled 1")
+    T.bad(tbo({ tooltip = "" }), KT .. "tooltip must be a string of 1 to 512 bytes", "textbox empty tooltip")
+    T.bad(tbo({ place = 5 }), KT .. "place must be a table or nil, got 5", "textbox place 5")
+    T.bad(function() TBm.create{ id = "tbx", place = { host = "hud", corner = "top-left" } } end, "text boxes need a host with a cursor", "textbox on the HUD")
+    raises(function() TBm.set(tb) end, "nucleus.ui.textbox.set: expected 2 arguments (handle, text), got 1", "textbox.set one arg")
+    raises(function() TBm.set(tb, 5) end, "nucleus.ui.textbox.set: text must be a string or nil, got 5", "textbox.set a number")
+    raises(function() TBm.set(tb, "123456789") end, "nucleus.ui.textbox.set: text is 9 characters, at most 8 (maxChars)", "textbox.set over maxChars")
+    raises(function() TBm.get(tb, 1) end, "nucleus.ui.textbox.get: expected 1 argument (handle), got 2", "textbox.get two args")
+    raises(function() TBm.get(cb) end, "nucleus.ui.textbox.get: not a text box handle ('cb' is a checkbox)", "textbox.get(checkbox)")
+    raises(function() TBm.get({}) end, "nucleus.ui.textbox.get: not a text box handle", "textbox.get(forged)")
+    raises(function() TBm.setEnabled(tb, 0) end, "nucleus.ui.textbox.setEnabled: enabled must be a boolean, got 0", "textbox.setEnabled 0")
+    raises(function() TBm.setVisible(tb, "x") end, "nucleus.ui.textbox.setVisible: visible must be a boolean, got string", "textbox.setVisible 'x'")
+    raises(function() TBm.setTooltip(tb, "") end, "nucleus.ui.textbox.setTooltip: tooltip must be a string of 1 to 512 bytes", "textbox.setTooltip empty")
+    raises(function() TBm.setTooltip(tb, "a", "b") end, "nucleus.ui.textbox.setTooltip: expected 2 arguments (handle, tooltip), got 3", "textbox.setTooltip three args")
+    raises(function() RS.create{ id = "rx", like = "Overlay_28", control = 5, place = { row = T.row } } end, "control must be a checkbox, choice, slider, text box or button handle, got 5", "row control message names the text box")
+    do
+        local saved = _G.Nucleus_Deref
+        _G.Nucleus_Deref = function() error("Nucleus_Deref refused: called off the game thread") end
+        for _, d in ipairs({ { "textbox.create", function() TBm.create{ id = "o" } end }, { "textbox.set", function() TBm.set(tb, "a") end },
+            { "textbox.get", function() TBm.get(tb) end }, { "textbox.setEnabled", function() TBm.setEnabled(tb, true) end },
+            { "textbox.setVisible", function() TBm.setVisible(tb, true) end }, { "textbox.setTooltip", function() TBm.setTooltip(tb, nil) end },
+            { "textbox.remove", function() TBm.remove(tb) end }, { "textbox.isShown", function() TBm.isShown(tb) end } }) do
+            raises(d[2], "nucleus.ui." .. d[1] .. " called off the game thread", "off thread: " .. d[1])
+        end
+        _G.Nucleus_Deref = saved
+        C.bound = false
+        raises(function() TBm.create{ id = "o" } end, "nucleus.ui: textbox.create called before connect", "before connect: textbox.create")
+        C.bound = true
+    end
+    TBm.remove(tt)
+    TBm.remove(tb)
 end
 
 print(string.format("controls_test: %d passed, %d failed", pass, failN))

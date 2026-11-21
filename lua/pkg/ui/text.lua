@@ -266,7 +266,8 @@ end
 -- Mod Manager story 4: a checkbox's on its Btn (it is a button widget), a choice's and a slider's on their Frame (the
 -- arrows, the bar and the box are its hit-testable children, so hovering any of them finds it; a choice's Background
 -- is made hit-testable while it has one, so its value text shows it too).
-local TIP_INNER = { text = "Text", button = "Btn", image = "Img", checkbox = "Btn", choice = "Frame", slider = "Frame" }
+local TIP_INNER = { text = "Text", button = "Btn", image = "Img", checkbox = "Btn", choice = "Frame", slider = "Frame",
+    textbox = "Frame" } -- Mod Manager v2 story 4: the box is the Frame's hit-testable child
 local function applyTooltip(el, w, fresh)
     if fresh then el.appliedTip = nil end
     local s = el.tooltip and S.pick(el.tooltip) or nil
@@ -335,7 +336,7 @@ local EXTRA_CLASS = { screen = { pkg = C.SCREEN_PKG, short = C.SCREEN_SHORT },
 
 -- Mod Manager story 4: a checkbox is a button widget, so two kinds share one class. A widget's class names a kind (the
 -- first of them, in a fixed order) only to read its tag; whether it belongs to an element compares classes (sameClass).
-local KIND_ORDER = { "text", "panel", "button", "list", "row", "image", "checkbox", "choice", "slider" }
+local KIND_ORDER = { "text", "panel", "button", "list", "row", "image", "checkbox", "choice", "slider", "textbox" }
 local function kindOfClass(short)
     for _, k in ipairs(KIND_ORDER) do
         local K = KIND[k]
