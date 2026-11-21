@@ -191,9 +191,16 @@ end
 local seq = 0
 local function request(cmd)
     seq = seq + 1
-    local f = io.open(REQ, "w"); f:write(seq .. " " .. cmd); f:close()
-    local mine = seq
+    local mine, line = seq, seq .. " " .. cmd
+    -- The runner may hold the request file open for a moment: a failed open is retried on each wait tick.
+    local written = false
+    local function write()
+        local f = io.open(REQ, "w")
+        if f then f:write(line); f:close(); written = true end
+    end
+    write()
     return function()
+        if not written then write() return false end
         local d = io.open(DONE, "r")
         if not d then return false end
         local s = d:read("*a"); d:close()
