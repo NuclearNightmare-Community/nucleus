@@ -24,6 +24,19 @@
     - then story 3's helper (<Core>RestartTest --apply --root) applies a staged plan: the zip's files in the tree,
       the mods.txt line above Keybinds : 1, installed.txt; a later stage of a version lacking a file gets its delete
       line (with the recorded SHA-256), and the next apply removes it
+  Mod Manager v2 story 6 (updates, revocations, removals; -Unstage, <Core>_CatalogUnstage's code):
+    - removal refused before anything is staged: base-pack (Nucleus, Mod Manager), not-installed, changed,
+      not-in-catalog (an unknown id; a version neither installed.txt nor the index knows), applying; plan.txt and
+      staged\ byte-identical
+    - revocation match: a newer installed version whose revoked entry has another sha256 is not revoked (downgrade
+      refused); one revoked and no longer in the index allows the downgrade (no deletes: its files are unknown)
+    - revoked, older fix: an installer-installed revoked 0.4.0 -> 0.3.1, the delete for the file only 0.4.0 had taken
+      from 0.4.0's own verified release (downloaded although revoked, only read); a plain update of an
+      installer-installed mod gets its delete the same way
+    - uninstall: a pending install of the same owner replaced, a delete per owned file, modstxt remove, an edited file
+      kept (kept=1), the payload {txn, owners [{id, version, name, files, kept}], ops}; then the helper applies it all
+      (tree and mods.txt checked); an uninstall from installed.txt's records, after whose apply installed.txt has lost
+      the owner's records
   Prints ok:/FAIL: lines and exits 1 on any failure. Needs minisign on PATH and this workspace; under NN_CI=1 it skips.
 .EXAMPLE
   pwsh -NoProfile -File native/test/stage.tests.ps1
@@ -166,6 +179,16 @@ try {
     Add-Zip 'tamper-short.zip' ([byte[]]$tamperOk[0..($tamperOk.Length - 2)])
     $flip = [byte[]]$tamperOk.Clone(); $flip[10] = $flip[10] -bxor 0xFF
     Add-Zip 'tamper-flip.zip' $flip
+    # Story 6: updates, revocations and removals.
+    $REV = 'nuclearnightmare-community.rev'; $UPD = 'nuclearnightmare-community.upd'; $WM = 'nuclearnightmare-community.whistle-mute'
+    Add-Zip 'rev-0.4.0.zip' (New-ZipBytes @(@{ Name = "$M/Rev/mod.json"; Text = (ModJson $REV 'Rev' '0.4.0') }, @{ Name = "$M/Rev/Scripts/main.lua"; Text = 'print("rev 0.4.0")' },
+            @{ Name = "$M/Rev/Scripts/old.lua"; Text = 'print("only in 0.4.0")' }))
+    Add-Zip 'rev-0.3.1.zip' (New-ZipBytes @(@{ Name = "$M/Rev/mod.json"; Text = (ModJson $REV 'Rev' '0.3.1') }, @{ Name = "$M/Rev/Scripts/main.lua"; Text = 'print("rev 0.3.1")' }))
+    Add-Zip 'rev-0.6.0.zip' (New-ZipBytes @(@{ Name = "$M/Rev/mod.json"; Text = (ModJson $REV 'Rev' '0.6.0') }, @{ Name = "$M/Rev/Scripts/main.lua"; Text = 'print("rev 0.6.0")' }))
+    Add-Zip 'upd-1.0.0.zip' (New-ZipBytes @(@{ Name = "$M/Upd/mod.json"; Text = (ModJson $UPD 'Upd' '1.0.0') }, @{ Name = "$M/Upd/a.lua"; Text = 'a 1.0.0' }, @{ Name = "$M/Upd/b.lua"; Text = 'b 1.0.0' }))
+    Add-Zip 'upd-1.1.0.zip' (New-ZipBytes @(@{ Name = "$M/Upd/mod.json"; Text = (ModJson $UPD 'Upd' '1.1.0') }, @{ Name = "$M/Upd/a.lua"; Text = 'a 1.1.0' }))
+    Add-Zip 'wm-0.2.1.zip' (New-ZipBytes @(@{ Name = "$M/WhistleMute/mod.json"; Text = (ModJson $WM 'WhistleMute' '0.2.1') }, @{ Name = "$M/WhistleMute/Scripts/main.lua"; Text = 'print("wm")' },
+            @{ Name = "$M/WhistleMute/Scripts/b.lua"; Text = 'print("wm b")' }, @{ Name = "$P/LogicMods/WhistleMute.pak"; Text = 'wm pak' }))
 
     # ---------------------------------------------------------------- the signed index, the fixture server
     $keys = @{}
@@ -200,13 +223,22 @@ try {
         (Pkg 'bad' 'Bad' @(foreach ($v in $bad.Keys) { Ver 'bad' $v "bad-$v.zip" })),
         (Pkg 'taken' 'Taken' @((Ver 'taken' '1.0.0' 'taken-1.0.0.zip'))),
         (Pkg 'downy' 'Downy' @((Ver 'downy' '1.0.0' 'downy-1.0.0.zip'))),
-        (Pkg 'tamper' 'Tamper' @((Ver 'tamper' '1.0.0' 'tamper-short.zip' $tamperOk), (Ver 'tamper' '1.0.1' 'tamper-flip.zip' $tamperOk))))
+        (Pkg 'tamper' 'Tamper' @((Ver 'tamper' '1.0.0' 'tamper-short.zip' $tamperOk), (Ver 'tamper' '1.0.1' 'tamper-flip.zip' $tamperOk))),
+        (Pkg 'rev' 'Rev' @((Ver 'rev' '0.6.0' 'rev-0.6.0.zip'), (Ver 'rev' '0.4.0' 'rev-0.4.0.zip'), (Ver 'rev' '0.3.1' 'rev-0.3.1.zip'))),
+        (Pkg 'upd' 'Upd' @((Ver 'upd' '1.1.0' 'upd-1.1.0.zip'), (Ver 'upd' '1.0.0' 'upd-1.0.0.zip'))),
+        (Pkg 'whistle-mute' 'WhistleMute' @((Ver 'whistle-mute' '0.2.1' 'wm-0.2.1.zip'))))
     $ix = [ordered]@{ schema = 2; serial = 7; issued = '2026-11-21T10:00:00Z'; packages = $packages }
     $ixFile = Join-Path $tmp 'index.json'
     $ix | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath $ixFile -Encoding utf8NoBOM
     Sign $ixFile 'release'
     $rv = [ordered]@{ schema = 1; serial = 1; issued = '2026-11-21T10:00:00Z'; revoked = @(
-            [ordered]@{ id = $HC; version = '0.1.0'; sha256 = (Sha $zips['hud-clock-0.3.0.zip']); reason = 'broken'; action = 'block' }) }
+            [ordered]@{ id = $HC; version = '0.1.0'; sha256 = (Sha $zips['hud-clock-0.3.0.zip']); reason = 'broken'; action = 'block' },
+            # Story 6: an installed version is revoked when the revoked sha256 is the index's for it (any case) ...
+            [ordered]@{ id = $REV; version = '0.4.0'; sha256 = (Sha $zips['rev-0.4.0.zip']).ToUpperInvariant(); reason = 'crash on map load'; action = 'disable' },
+            # ... not when it differs ...
+            [ordered]@{ id = $REV; version = '0.6.0'; sha256 = ('ab' * 32); reason = 'another build'; action = 'block' },
+            # ... and also when the index no longer lists that version.
+            [ordered]@{ id = $REV; version = '0.7.0'; sha256 = ('cd' * 32); reason = 'withdrawn'; action = 'block' }) }
     $rvFile = Join-Path $tmp 'revoked.json'
     $rv | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath $rvFile -Encoding utf8NoBOM
     Sign $rvFile 'revoke'
@@ -395,6 +427,115 @@ try {
     # Now 0.4.0 is on disk: 0.3.0 is a downgrade.
     $before = Snap $staged
     Refused @($HC, '0.3.0') 'downgrade' 'an older version than the one installed'
+
+    # ================================================================ story 6: updates, revocations and removals
+    function Unstage([string] $id, [string] $v, [string[]] $more = @()) { Run-Exe -Unstage $id $v -Root $root @net @more }
+    function RefusedU([string] $id, [string] $v, [string] $want, [string] $what, [string] $text) {
+        Unstage $id $v
+        $after = Snap $staged
+        $dl = @(Get-ChildItem -LiteralPath (Join-Path $data 'downloads') -File -Force -ErrorAction SilentlyContinue)
+        Ok ((Outcome) -eq "outcome: $want" -and $script:code -eq 1 -and (Same $before $after) -and $dl.Count -eq 0 -and (-not $text -or (Has-Line $text)) -and
+            -not (Test-Path (Join-Path $data 'apply.lock'))) "unstage ${what}: $want; plan.txt and staged\ byte-identical, nothing new kept" "$(Shown); downloads: $($dl.Name -join ', ')"
+    }
+    # The installer's layout: a release zip's files written into the tree (no installed.txt records), a mods.txt line.
+    function Install-Zip([string] $file, [string] $line) {
+        $za = [IO.Compression.ZipArchive]::new([IO.MemoryStream]::new($zips[$file]), [IO.Compression.ZipArchiveMode]::Read)
+        try {
+            foreach ($e in $za.Entries) {
+                $dest = Join-Path $root ($e.FullName -replace '/', '\')
+                New-Item -ItemType Directory -Force (Split-Path $dest) | Out-Null
+                $s = $e.Open(); $fs = [IO.File]::Create($dest); $s.CopyTo($fs); $fs.Dispose(); $s.Dispose()
+            }
+        } finally { $za.Dispose() }
+        if ($line) { $t = [IO.File]::ReadAllText($modsTxt); [IO.File]::WriteAllText($modsTxt, $t.Replace('Keybinds : 1', "$line : 1`r`nKeybinds : 1"), $utf8) }
+    }
+    $RVM = 'NuclearNightmare\Binaries\Win64\ue4ss\Mods\Rev'
+    $UPM = 'NuclearNightmare\Binaries\Win64\ue4ss\Mods\Upd'
+    $WMM = 'NuclearNightmare\Binaries\Win64\ue4ss\Mods\WhistleMute'
+    function DeleteLines { @(PlanLines | Where-Object { $_ -like "delete`t*" }) }
+
+    # Base pack, not installed, changed, not in the catalog: refused before anything is staged.
+    $before = Snap $staged
+    RefusedU 'nuclearnightmare-community.nucleus' '0.30.0' 'base-pack' 'Nucleus' 'the installer removes'
+    RefusedU 'NuclearNightmare-Community.Mod-Manager' '0.7.0' 'base-pack' 'Mod Manager'
+    RefusedU $WM '0.2.1' 'not-installed' 'a mod that is not installed' 'is not there'
+    Install-Zip 'wm-0.2.1.zip' 'WhistleMute'
+    RefusedU $WM '0.2.0' 'changed' 'another version than the one installed' 'holds 0.2.1'
+    RefusedU 'nuclearnightmare-community.nothing' '1.0.0' 'not-in-catalog' 'an id the catalog lacks'
+    New-Item -ItemType Directory -Force (Join-Path $mods 'Rev') | Out-Null
+    [IO.File]::WriteAllText((Join-Path $mods 'Rev\mod.json'), (ModJson $REV 'Rev' '0.9.0'), $utf8)
+    RefusedU $REV '0.9.0' 'not-in-catalog' 'a version neither installed.txt nor the catalog knows' 'not in installed.txt nor in the catalog'
+    $lock = [IO.File]::Open((Join-Path $data 'apply.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
+    try {
+        Unstage $WM '0.2.1'
+        Ok ((Outcome) -eq 'outcome: applying' -and (Same $before (Snap $staged))) 'unstage while apply.lock is held: applying, nothing staged' (Shown)
+    } finally { $lock.Dispose(); Remove-Item -LiteralPath (Join-Path $data 'apply.lock') -ErrorAction SilentlyContinue }
+
+    # Revocation and downgrades: a newer installed version is a downgrade unless it is revoked (the index's sha256).
+    [IO.File]::WriteAllText((Join-Path $mods 'Rev\mod.json'), (ModJson $REV 'Rev' '0.6.0'), $utf8)
+    Refused @($REV, '0.3.1') 'downgrade' 'away from 0.6.0, whose revoked entry has another sha256 (not revoked)' 'holds 0.6.0'
+    [IO.File]::WriteAllText((Join-Path $mods 'Rev\mod.json'), (ModJson $REV 'Rev' '0.7.0'), $utf8)
+    Stage $REV, '0.3.1'
+    Ok ((Outcome) -eq 'outcome: ok' -and (Has-Line 'downgrade allowed: the installed nuclearnightmare-community.rev 0.7.0 is revoked') -and (DeleteLines).Count -eq 0 -and
+        (Has-Line 'is not in installed.txt nor in the catalog; no files of it are deleted')) 'away from 0.7.0, revoked and no longer in the index: the downgrade is staged (no deletes: its files are unknown)' (Shown)
+    # Back to the plan before, for the next cases: unstage of the pending Rev isn't possible (0.7.0 on disk is not in
+    # the catalog), so the plan is rebuilt by staging Rev from a revoked 0.4.0 on disk.
+    Remove-Item -LiteralPath (Join-Path $mods 'Rev') -Recurse -Force
+    Install-Zip 'rev-0.4.0.zip' 'Rev'
+    Install-Zip 'upd-1.0.0.zip' 'Upd'
+    # Revoked, older fix: installer-installed 0.4.0 (no installed.txt records) -> 0.3.1. The deletes come from 0.4.0's own
+    # verified release, downloaded although it is revoked (only read), and the update is allowed only because it is revoked.
+    Stage $REV, '0.3.1'
+    $oldSha = Sha (ZipEntryBytes 'rev-0.4.0.zip' "$M/Rev/Scripts/old.lua")
+    $dels = DeleteLines
+    Ok ((Outcome) -eq 'outcome: ok' -and $dels.Count -eq 1 -and ($dels -ccontains "delete`tRev`t$oldSha`t$RVM\Scripts\old.lua") -and (Has-Line 'downgrade allowed') -and
+        (Has-Line 'files listed (release zip)') -and ((PlanLines) -ccontains "modstxt`tRev`ton") -and
+        @(Get-ChildItem -LiteralPath (Join-Path $data 'downloads') -File -ErrorAction SilentlyContinue).Count -eq 0) 'revoked, older fix: 0.4.0 -> 0.3.1 staged, delete for the file only 0.4.0 had (from its verified release), downloads cleaned' "$(Shown); deletes: $($dels -join ' / ')"
+    # A plain update of an installer-installed mod: 1.0.0 -> 1.1.0, delete for b.lua (only 1.0.0 had it).
+    Stage $UPD, '1.1.0'
+    $bSha = Sha (ZipEntryBytes 'upd-1.0.0.zip' "$M/Upd/b.lua")
+    $dels = @(DeleteLines | Where-Object { $_ -like "delete`tUpd`t*" })
+    Ok ((Outcome) -eq 'outcome: ok' -and $dels.Count -eq 1 -and ($dels -ccontains "delete`tUpd`t$bSha`t$UPM\b.lua") -and
+        @(PlanLines | Where-Object { $_ -like "put`tRev`t*" }).Count -eq 2) 'update 1.0.0 -> 1.1.0 (installer layout): new puts, delete for b.lua, Rev kept' "$(Shown); plan: $((PlanLines) -join ' / ')"
+    # Uninstall with one owned file edited on disk: kept (kept=1), the rest deleted, modstxt remove. A pending install of
+    # the same owner is replaced first: WhistleMute staged again, then unstaged.
+    Stage $WM, '0.2.1'
+    Ok ((Outcome) -eq 'outcome: ok' -and @(PlanLines | Where-Object { $_ -like "put`tWhistleMute`t*" }).Count -eq 4) 'a pending (re)install of WhistleMute staged' (Shown)
+    [IO.File]::WriteAllText((Join-Path $root "$WMM\Scripts\b.lua"), 'print("edited by the player")', $utf8)
+    Unstage $WM '0.2.1'
+    $pl = Payload
+    $lines = PlanLines
+    $wmDels = @($lines | Where-Object { $_ -like "delete`tWhistleMute`t*" })
+    $wmFiles = StagedFiles
+    Ok ((Outcome) -eq 'outcome: ok' -and $wmDels.Count -eq 3 -and -not ($wmDels | Where-Object { $_ -like '*b.lua' }) -and ($lines -ccontains "modstxt`tWhistleMute`tremove") -and
+        -not ($lines | Where-Object { $_ -like "put`tWhistleMute`t*" }) -and -not ($lines -ccontains "modstxt`tWhistleMute`ton") -and
+        ($lines | Where-Object { $_ -like "delete`tWhistleMute`t*`tNuclearNightmare\Content\Paks\LogicMods\WhistleMute.pak" })) 'uninstall: a delete per owned file and modstxt remove, the pending install replaced, the edited file kept' "$(Shown); plan: $($lines -join ' / ')"
+    Ok ($pl -and $pl.txn -ceq (PlanTxn) -and $pl.ops -eq ($lines.Count - 2) -and $pl.owners.Count -eq 1 -and $pl.owners[0].id -ceq $WM -and $pl.owners[0].version -ceq '0.2.1' -and
+        $pl.owners[0].name -ceq 'WhistleMute' -and $pl.owners[0].files -eq 3 -and $pl.owners[0].kept -eq 1 -and (Has-Line 'kept: ')) 'uninstall: payload {txn, owners [{id, version, name, files, kept=1}], ops}' (Shown)
+    $wmMain = Sha (ZipEntryBytes 'wm-0.2.1.zip' "$M/WhistleMute/Scripts/main.lua")
+    Ok (($wmFiles -notcontains $wmMain) -and (Has-Line "removed: staged file $wmMain")) 'uninstall: the replaced install''s staged files removed' ($wmFiles -join ', ')
+    # Apply: Rev 0.3.1 without old.lua, Upd 1.1.0 without b.lua, WhistleMute gone but the edited file, its line removed.
+    $applied = Apply
+    $result = [IO.File]::ReadAllText((Join-Path $data 'apply-result.txt'))
+    $txt = [IO.File]::ReadAllText($modsTxt)
+    Ok ($result -match "(?m)^outcome`tapplied" -and -not (Test-Path -LiteralPath (Join-Path $root "$RVM\Scripts\old.lua")) -and
+        ([IO.File]::ReadAllText((Join-Path $root "$RVM\Scripts\main.lua")) -ceq 'print("rev 0.3.1")') -and -not (Test-Path -LiteralPath (Join-Path $root "$UPM\b.lua")) -and
+        ([IO.File]::ReadAllText((Join-Path $root "$UPM\a.lua")) -ceq 'a 1.1.0')) 'apply: Rev 0.3.1 in place and old.lua gone, Upd 1.1.0 and b.lua gone' "helper: $applied; $($result -replace "`n", ' / ')"
+    Ok (-not (Test-Path -LiteralPath (Join-Path $root "$WMM\mod.json")) -and -not (Test-Path -LiteralPath (Join-Path $root "$WMM\Scripts\main.lua")) -and
+        -not (Test-Path -LiteralPath (Join-Path $paks 'LogicMods\WhistleMute.pak')) -and (Test-Path -LiteralPath (Join-Path $root "$WMM\Scripts\b.lua")) -and
+        -not $txt.Contains('WhistleMute') -and $txt.Contains("Rev : 1`r`n") -and $txt.Contains("Upd : 1`r`n")) 'apply: WhistleMute''s files and mods.txt line gone, the edited file kept' ($txt -replace "`r`n", ' / ')
+    # Uninstall through installed.txt: HudClock 0.4.0 (applied by the helper above); after the apply its records are gone.
+    $inst = [IO.File]::ReadAllText((Join-Path $data 'installed.txt'))
+    Ok ($inst.Contains("HudClock`t") -and $inst.Contains("Rev`t")) 'installed.txt records HudClock and the updated Rev' ($inst -replace "`n", ' / ')
+    Unstage $HC '0.4.0'
+    $dels = DeleteLines
+    Ok ((Outcome) -eq 'outcome: ok' -and $dels.Count -eq 2 -and (Has-Line 'files listed (installed.txt)') -and ((PlanLines) -ccontains "modstxt`tHudClock`tremove") -and
+        ($dels -ccontains "delete`tHudClock`t$newMain`t$HCM\Scripts\main.lua")) 'uninstall from installed.txt: a delete per recorded file with its recorded SHA-256' "$(Shown); deletes: $($dels -join ' / ')"
+    $applied = Apply
+    $result = [IO.File]::ReadAllText((Join-Path $data 'apply-result.txt'))
+    $inst = [IO.File]::ReadAllText((Join-Path $data 'installed.txt'))
+    Ok ($result -match "(?m)^outcome`tapplied" -and -not (Test-Path -LiteralPath (Join-Path $root "$HCM\mod.json")) -and -not $inst.Contains("HudClock`t") -and $inst.Contains("Rev`t") -and
+        -not [IO.File]::ReadAllText($modsTxt).Contains('HudClock')) 'apply: HudClock removed, its installed.txt records and mods.txt line gone, Rev''s records kept' "helper: $applied; installed: $($inst -replace "`n", ' / ')"
 } catch {
     $script:failed++
     Write-Host "FAIL: runner failure: $($_.Exception.Message) at line $($_.InvocationInfo.ScriptLineNumber)"

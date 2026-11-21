@@ -1113,10 +1113,14 @@ $catCaseIds = @('refresh-1', 'refresh-nil', 'refresh-str', 'refresh-table', 'ref
 $catCaseIds += @('stage-none', 'stage-one', 'stage-odd', 'stage-17', 'stage-33', 'stage-id-int', 'stage-ver-nil', 'stage-id3-table', 'stage-ver4-float',
                  'stage-ver-bool', 'stage-id-bare', 'stage-id-empty', 'stage-id-201', 'stage-id-huge', 'stage-ver-semver', 'stage-ver2-semver',
                  'stage-ver-129', 'stage-ver-ctrl', 'stage-dup')
+# Mod Manager v2 story 6 (core 0.27.0): <Core>_CatalogUnstage's argument checks, in both worlds and off the game thread.
+$catCaseIds += @('unstage-none', 'unstage-one', 'unstage-three', 'unstage-id-int', 'unstage-id-nil', 'unstage-id-table', 'unstage-ver-float', 'unstage-ver-bool',
+                 'unstage-id-bare', 'unstage-id-empty', 'unstage-id-201', 'unstage-id-huge', 'unstage-ver-semver', 'unstage-ver-empty', 'unstage-ver-129',
+                 'unstage-ver-ctrl')
 foreach ($p in 'menu1', 'match1') {
     foreach ($id in $catCaseIds) { $badInput += "\[$T\] OK CASE $p\.cat-$id "; $badInput += "\[$T\] OK CASE $p\.off-cat-$id " }
     foreach ($id in 'has', 'wrap-poll-float', 'wrap-poll-max', 'wrap-dl-nul', 'wrap-dl-bare', 'wrap-stage-empty', 'wrap-stage-str', 'wrap-stage-nul',
-                    'wrap-stage-dup') { $badInput += "\[$T\] OK CASE $p\.cat-$id " }
+                    'wrap-stage-dup', 'wrap-unstage-nul', 'wrap-unstage-num', 'wrap-unstage-bare') { $badInput += "\[$T\] OK CASE $p\.cat-$id " }
 }
 # Mod Manager v2 story 3 (core 0.24.0): the staged-change natives' bad-input group (apply.lua), in both worlds and off
 # the game thread: argument checks, and on the dev copy (nothing staged, no result) status "none none", start "nothing
@@ -1129,7 +1133,7 @@ foreach ($p in 'menu1', 'match1') {
     foreach ($id in 'has', 'wrap-status', 'wrap-start', 'wrap-ack-bad', 'wrap-ack') { $badInput += "\[$T\] OK CASE $p\.apply-$id " }
 }
 foreach ($id in 'dl-unverified', 'refresh', 'refresh-busy', 'dl-busy', 'wrap-refresh-busy', 'poll-gap', 'poll-done', 'wrap-poll-done', 'dl-after', 'poll-again',
-                'stage-unverified', 'stage-busy', 'stage-after') {
+                'stage-unverified', 'stage-busy', 'stage-after', 'unstage-unverified', 'unstage-busy', 'unstage-after') {
     $badInput += "\[$T\] OK CASE menu1\.cat-$id "
 }
 $badInput += "\[$N\] native: catalog: refresh job \d+ started"

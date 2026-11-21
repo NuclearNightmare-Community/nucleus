@@ -321,6 +321,7 @@ class CoreNative : public CppUserModBase
                 lua.register_function(catalog_natives::g_fn_download.c_str(), &catalog_natives::l_download);
                 lua.register_function(catalog_natives::g_fn_poll.c_str(), &catalog_natives::l_poll);
                 lua.register_function(catalog_natives::g_fn_stage.c_str(), &catalog_natives::l_stage);
+                lua.register_function(catalog_natives::g_fn_unstage.c_str(), &catalog_natives::l_unstage);
                 lua.register_function(apply::g_fn_status.c_str(), &apply::l_status);
                 lua.register_function(apply::g_fn_start.c_str(), &apply::l_start);
                 lua.register_function(apply::g_fn_ack.c_str(), &apply::l_ack);

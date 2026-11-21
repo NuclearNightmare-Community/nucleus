@@ -204,7 +204,7 @@ local function start()
     -- The catalog natives (native/src/catalog.cpp, Mod Manager v2 story 2). Checked once; without them core.catalog
     -- answers nil, "native part missing" (lua/pkg/catalog.lua).
     local missingCatalog = {}
-    for _, suffix in ipairs({ "_CatalogRefresh", "_CatalogDownload", "_CatalogPoll", "_CatalogStage" }) do
+    for _, suffix in ipairs({ "_CatalogRefresh", "_CatalogDownload", "_CatalogPoll", "_CatalogStage", "_CatalogUnstage" }) do
         if type(_G[NAME .. suffix]) ~= "function" then missingCatalog[#missingCatalog + 1] = NAME .. suffix end
     end
     if #missingCatalog > 0 then

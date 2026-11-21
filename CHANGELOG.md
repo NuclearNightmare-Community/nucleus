@@ -2,6 +2,24 @@
 
 All notable changes to Nucleus are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). From 0.5.0 a dependent's `need` and `dependsOn` are minimum versions (`>=0.5.0`), so a newer Nucleus never asks dependents to raise them. Up to 0.3.0, below 1.0.0 a dependent connected only to the same minor version (`need = "0.3.0"` accepted 0.3.x).
 
+## [0.27.0] - 2026-11-21
+
+Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.
+
+For players: the Mod Manager can now update and uninstall mods from the community catalog, Nucleus and the Mod Manager included for updates. An update removes the old version's files the new one no longer has, and an uninstall removes a mod's files and its `mods.txt` line, both when the game closes. Only files that are exactly what that version installed are removed: a file you changed is kept. A version the catalog has revoked can be replaced by an older good version.
+
+### Added
+
+- `Nucleus_CatalogUnstage(id, version)` (Mod Manager v2 story 6; README "Updates and removals"): stages the removal of an installed catalog mod on the catalog worker; the argument checks of one `Nucleus_CatalogStage` pair (exactly 2 arguments) and the same `nil, reason` answers up front. A `delete` line for each file the installed version owns and `modstxt <Name> remove`, merged by owner into the staged plan under `apply.lock` (a pending install of the same mod is replaced; staged files nothing references any more are removed). Outcomes `ok`, `not-installed`, `changed`, `not-in-catalog`, `base-pack` (Nucleus and Mod Manager: the installer removes those), the download outcomes, `applying`, `interrupted`, `error`; payload of `ok` `{"txn","owners":[{"id","version","name","files","kept"}],"ops"}`, else `{"failed":<id>}`.
+- "Files of the installed version" (`native/src/stage/install.cpp`, shared by update and removal): `installed.txt`'s records for the owner when it has any, else the installed (id, version)'s release named by the verified index (any game build), downloaded and verified like an install even when revoked (only read, never staged) and mapped like an install, else `not-in-catalog`. A listed file counts as owned only when it is on disk with that SHA-256; another hash is kept (counted as `kept`), a missing one skipped; player data is never listed.
+- `core.catalog.unstage(id, version)` (also `require("nucleus.catalog").unstage`): checks its arguments before any native call; never raises.
+- The test flavour of `main.dll` (`build.ps1 -TestCatalog`, target `CoreNativeCatalogTest`, built with `CORE_CATALOG_TEST` into `native/build-test/main.dll`, never packaged): only it reads `NucleusData\catalog-test.json` (`keys`, `proxy`, `pinCert`: story 2's test-exe options) so the VM can run against a fixture catalog signed with test keys. `build.ps1`'s package step refuses any `main.dll` carrying its marker.
+- The catalog test exe's `-Unstage <id> <version>`; `stage.tests.ps1` gains the update, revocation and removal cases (63 checks); `cat-unstage-*` bad-input cases on and off the game thread and one unstage of an id no catalog has; `catalog_test.lua` covers `unstage`.
+
+### Changed
+
+- `Nucleus_CatalogStage` with an installed owner is an update: the installed version's files (above) that the new release doesn't put get `delete` lines, also for a mod the installer put there (before, only `installed.txt`'s records did). An installed version neither `installed.txt` nor the catalog knows gets no deletes. A `downgrade` is now allowed when the installed (id, version) is revoked: a verified `revoked.json` entry with its normalized id and version whose sha256 is the index's for that version (any case), or whose version the index no longer lists. Both revocation actions only flag; nothing is turned off.
+
 ## [0.26.0] - 2026-11-21
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635.

@@ -15,8 +15,22 @@
 //      kept leaves) is bad-layout; a <Name> or <X> other than the index name (compared without case) is name-mismatch;
 //   5. with a Mods/<Name>/ folder: Mods/<Name>/mod.json must be in the zip with the pair's id (normalized; else
 //      id-mismatch), and modstxt <Name> on is added; the mod.json already on disk (at most 64 KiB) must have the same id
-//      (else folder-in-use) and a version not newer than the pair's (else downgrade);
-//   6. files installed.txt records for this owner that the new zip lacks get delete lines (with the recorded SHA-256).
+//      (else folder-in-use) and a version not newer than the pair's (else downgrade), except when that installed
+//      (id, version) is revoked (find_revoked_installed against the verified list: story 6, a downgrade only away
+//      from a revoked version);
+//   6. (story 6: an update) the files of the installed version ("files of the installed version" below) that the new
+//      zip doesn't put get delete lines with their SHA-256. An installed version neither installed.txt nor the
+//      catalog knows gets no deletes.
+// Files of the installed version (owner <Name>, the index name): installed.txt's records for <Name> when it has any;
+// otherwise the release of the installed (id, version) named by the verified index, for any game build, downloaded and
+// verified through story 2 even when revoked (its bytes are only read, never staged) and mapped as in step 4, each
+// target with its entry's hash; otherwise not-in-catalog. A listed file is owned only when it is on disk with that
+// hash; another hash is kept (counted), a missing one skipped. Player data is never listed.
+// run_unstage (story 6, <Core>_CatalogUnstage) stages the removal of an installed (id, version): base-pack (Nucleus or
+// Mod Manager: the installer removes those), not-installed (no Mods/<Name>/mod.json with this id), changed (its
+// version isn't the pair's), not-in-catalog, story 2's download outcomes, applying, interrupted, error; on ok a delete
+// line per owned file and modstxt <Name> remove, merged by owner like a stage (a pending install of <Name> is
+// replaced). Payload of ok: {"txn","owners":[{"id","version","name","files","kept"}],"ops"}; else {"failed":<id>}.
 // Then, holding <Core>Data\apply.lock (refused as applying while held, interrupted while a journal lacks "done"): the
 // staged files are written as staged\files\<sha256>.tmp and renamed (a file already there with the right size and hash
 // is reused); the existing plan.txt (if any) is read with story 3's parser, every operation of an owner (or modstxt
@@ -69,6 +83,14 @@ namespace core_stage::install
     // once apply.lock is taken can be tested; they always run.
     Outcome run_stage(const Layout& l, const catalog::json::Value& ix, const catalog::json::Value* rv, const std::vector<Item>& items, catalog::fetch::Transport& t,
                       const std::filesystem::path& state_file, const std::atomic<bool>& cancel, bool precheck = true);
+
+    // Story 6: the removal of one installed (id, version) (above). Never throws.
+    Outcome run_unstage(const Layout& l, const catalog::json::Value& ix, const Item& item, catalog::fetch::Transport& t, const std::filesystem::path& state_file,
+                        const std::atomic<bool>& cancel, bool precheck = true);
+
+    // The base pack's mods, which only the installer removes: core (<namespace>.<core name in lower case>) and Mod Manager.
+    inline constexpr const char* k_base_namespace = "nuclearnightmare-community";
+    bool is_base_pack(const std::string& normalized_id);
 
     // semver precedence: <0, 0, >0; nullopt-like 2 when either isn't semver.
     int semver_compare(const std::string& a, const std::string& b);

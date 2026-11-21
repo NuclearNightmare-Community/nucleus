@@ -34,8 +34,8 @@ local function P(...) return table.pack(...) end
 
 local C = require("nucleus.catalog")
 local json = require("nucleus.json")
-ok(type(C.refresh) == "function" and type(C.download) == "function" and type(C.poll) == "function" and type(C.stage) == "function",
-    "the module has refresh, download, poll and stage")
+ok(type(C.refresh) == "function" and type(C.download) == "function" and type(C.poll) == "function" and type(C.stage) == "function" and type(C.unstage) == "function",
+    "the module has refresh, download, poll, stage and unstage")
 
 -- ---------------------------------------------------------------- no natives
 _G.Nucleus_CatalogRefresh, _G.Nucleus_CatalogDownload, _G.Nucleus_CatalogPoll, _G.Nucleus_CatalogStage = nil, nil, nil, nil
@@ -198,11 +198,47 @@ _G.Nucleus_CatalogPoll = function() return "done", "bad-zip", "o.a 1.0.0: entry 
 st, r = C.poll(13)
 ok(st == "done" and r.outcome == "bad-zip" and r.payload.failed == "o.a", "poll: a refused stage keeps its code and names the pair")
 
+-- ---------------------------------------------------------------- unstage (Mod Manager v2 story 6)
+_G.Nucleus_CatalogUnstage = nil
+same("unstage: native part missing", P(nil, "native part missing"), C.unstage("a.b", "1.0.0"))
+calls = 0
+_G.Nucleus_CatalogUnstage = function(...) calls = calls + 1; args = table.pack(...) return 21 end
+same("unstage: the job", P(21), C.unstage("NuclearNightmare-Community.Whistle-Mute", "0.2.1"))
+ok(args.n == 2 and args[1] == "NuclearNightmare-Community.Whistle-Mute" and args[2] == "0.2.1", "unstage: exactly the id and version reach the native", args.n)
+calls = 0
+for _, c in ipairs({
+    { "id nil", { nil, "1.0.0" }, "bad arguments: id must be a string" },
+    { "id a number", { 1, "1.0.0" }, "bad arguments: id must be a string" },
+    { "id empty", { "", "1.0.0" }, "bad arguments: id must be 1 to 200 bytes" },
+    { "id over 200 bytes", { ("a"):rep(100) .. "." .. ("b"):rep(100), "1.0.0" }, "bad arguments: id must be 1 to 200 bytes" },
+    { "id with a NUL", { "a.b\0", "1.0.0" }, "bad arguments: id must not contain a NUL byte" },
+    { "version a table", { "a.b", {} }, "bad arguments: version must be a string" },
+    { "version over 128 bytes", { "a.b", "1.0.0-" .. ("x"):rep(123) }, "bad arguments: version must be 1 to 128 bytes" },
+}) do
+    same("unstage: " .. c[1], P(nil, c[3]), C.unstage(c[2][1], c[2][2]))
+end
+ok(calls == 0, "unstage: bad arguments never reach the native", calls)
+for _, why in ipairs({ "busy", "no verified index", "applying", "interrupted", "data folder unknown" }) do
+    _G.Nucleus_CatalogUnstage = function() return nil, why end
+    same("unstage: reason " .. why, P(nil, why), C.unstage("a.b", "1.0.0"))
+end
+_G.Nucleus_CatalogUnstage = function() error("Nucleus_CatalogUnstage: argument 2 (version) is not semver: '1.0'\nmore", 0) end
+same("unstage: a raised error is a reason, first line only", P(nil, "error: Nucleus_CatalogUnstage: argument 2 (version) is not semver: '1.0'"), C.unstage("a.b", "1.0"))
+_G.Nucleus_CatalogUnstage = function() return 3.5 end
+same("unstage: a float job is no job", P(nil, "error: no job"), C.unstage("a.b", "1.0.0"))
+_G.Nucleus_CatalogPoll = function() return "done", "ok", "WhistleMute removal staged", '{"txn":"0123456789abcdef0123456789abcdef","owners":[{"id":"o.wm","version":"0.2.1","name":"WhistleMute","files":3,"kept":1}],"ops":4}' end
+st, r = C.poll(22)
+ok(st == "done" and r.outcome == "ok" and #r.payload.owners == 1 and r.payload.owners[1].files == 3 and r.payload.owners[1].kept == 1 and r.payload.ops == 4,
+    "poll: an unstage's payload { txn, owners [{ id, version, name, files, kept }], ops }")
+_G.Nucleus_CatalogPoll = function() return "done", "not-in-catalog", "o.wm 0.1.0: not in installed.txt nor in the catalog", '{"failed":"o.wm"}' end
+st, r = C.poll(23)
+ok(st == "done" and r.outcome == "not-in-catalog" and r.payload.failed == "o.wm", "poll: a refused unstage keeps its code")
+
 -- ---------------------------------------------------------------- never raises
 local garbage = { nil, true, 1, 1.5, "x", {}, function() end, ("z"):rep(1000) }
 local raised = 0
 for _, g in ipairs({ function() error("boom") end, function() return nil end, 5, "x" }) do
-    _G.Nucleus_CatalogRefresh, _G.Nucleus_CatalogDownload, _G.Nucleus_CatalogPoll, _G.Nucleus_CatalogStage = g, g, g, g
+    _G.Nucleus_CatalogRefresh, _G.Nucleus_CatalogDownload, _G.Nucleus_CatalogPoll, _G.Nucleus_CatalogStage, _G.Nucleus_CatalogUnstage = g, g, g, g, g
     for i = 1, #garbage + 1 do
         for j = 1, #garbage + 1 do
             if not pcall(C.download, garbage[i], garbage[j]) then raised = raised + 1 end
@@ -210,6 +246,7 @@ for _, g in ipairs({ function() error("boom") end, function() return nil end, 5,
         if not pcall(C.poll, garbage[i]) then raised = raised + 1 end
         if not pcall(C.refresh, garbage[i]) then raised = raised + 1 end
         if not pcall(C.stage, garbage[i]) then raised = raised + 1 end
+        for j = 1, #garbage + 1 do if not pcall(C.unstage, garbage[i], garbage[j]) then raised = raised + 1 end end
         if not pcall(C.stage, { garbage[i] }) then raised = raised + 1 end
         if not pcall(C.stage, { { id = garbage[i], version = garbage[i] } }) then raised = raised + 1 end
     end

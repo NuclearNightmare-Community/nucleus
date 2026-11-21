@@ -46,6 +46,17 @@ target_link_libraries(${TARGET} PRIVATE CoreMonocypher CoreMiniz winhttp bcrypt 
 # Record only the PDB's file name in the DLL, not the absolute build path (which contains the Windows user name).
 target_link_options(${TARGET} PRIVATE "/PDBALTPATH:%_PDB%")
 
+# Mod Manager v2 story 6: the test flavour of core's main.dll (build.ps1 -TestCatalog: native/build-test/main.dll, never
+# packaged; the package step refuses a main.dll carrying its marker). The same sources with CORE_CATALOG_TEST: it reads
+# <Core>Data/catalog-test.json (test keys, a named proxy, a pinned certificate) for the VM's fixture catalog.
+set(CATALOG_DLL_TEST_TARGET CoreNativeCatalogTest)
+add_library(${CATALOG_DLL_TEST_TARGET} SHARED EXCLUDE_FROM_ALL dllmain.cpp core_shared.cpp objectives.cpp intercept.cpp restart.cpp apply.cpp catalog.cpp ${CATALOG_SRC} ${STAGE_SRC} ${INSTALL_SRC})
+target_include_directories(${CATALOG_DLL_TEST_TARGET} PRIVATE . ${CMAKE_CURRENT_BINARY_DIR})
+target_compile_definitions(${CATALOG_DLL_TEST_TARGET} PRIVATE CORE_CATALOG_TEST=1)
+target_link_libraries(${CATALOG_DLL_TEST_TARGET} PUBLIC UE4SS)
+target_link_libraries(${CATALOG_DLL_TEST_TARGET} PRIVATE CoreMonocypher CoreMiniz winhttp bcrypt crypt32)
+target_link_options(${CATALOG_DLL_TEST_TARGET} PRIVATE "/PDBALTPATH:%_PDB%")
+
 # Core's test-only DLL (test/SkelNative, never shipped): core's objectives code built with CORE_OBJECTIVES_TEST, for the
 # bad-input scenario's forced missing struct member.
 set(TEST_TARGET CoreNativeTest)

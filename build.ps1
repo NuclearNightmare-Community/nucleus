@@ -38,6 +38,10 @@
                LICENCE.md (main.dll contains Monocypher, CC0-1.0 OR BSD-2-Clause; native/third_party/monocypher-4.0.2/
                README.md); LICENSES/miniz.txt is miniz's LICENSE (main.dll contains miniz's inflate and CRC-32, MIT;
                native/third_party/miniz-3.0.2/README.md, Mod Manager v2 story 5).
+  -TestCatalog (Mod Manager v2 story 6) runs only a native step that builds CoreNativeCatalogTest, the test flavour of
+  main.dll (CORE_CATALOG_TEST: it reads <name>Data/catalog-test.json for test keys, a proxy and a pinned certificate),
+  into native/build-test/main.dll with abi-check. It is never packaged: the package step refuses any main.dll carrying
+  its marker.
   Never builds anything into or copies UE4SS.dll. Only our own generated assets go into the pak.
   -Ue4ssSrc defaults to ue4ss-src/ here, then ue4ss-src/ in this repo's main checkout. It must be the pinned
   commit with submodules (tools/README.md, "UE4SS C++ mods"); clone it as mods/cpp-spike/build.ps1 does.
@@ -54,6 +58,10 @@ param(
     [string] $Template,
     # Rewrite the template's 13 map files (12 markers and E_MarkerItem) from this build.
     [switch] $RefreshTemplate,
+    # Mod Manager v2 story 6: build only the test flavour of main.dll (CoreNativeCatalogTest, CORE_CATALOG_TEST: it reads
+    # <name>Data/catalog-test.json for test keys, a proxy and a pinned certificate) into native/build-test/main.dll, with
+    # abi-check. Never packaged: the package step refuses any main.dll carrying its marker.
+    [switch] $TestCatalog,
     [switch] $Clean
 )
 $ErrorActionPreference = 'Stop'
@@ -124,6 +132,14 @@ function Assert-Layout([string] $file, [string] $what, [string] $hint) {
     Write-Host "   layout of $what = golden ($($want.Count) lines): OK"
 }
 
+# Mod Manager v2 story 6: the bytes only the test flavour of main.dll carries (catalog.cpp k_test_marker).
+$testMarker = 'NN-CORE-CATALOG-TEST-BUILD-NEVER-PACKAGE'
+function Test-HasMarker([string] $file) {
+    $bytes = [IO.File]::ReadAllBytes($file)
+    [Text.Encoding]::ASCII.GetString($bytes).Contains($testMarker)
+}
+if ($TestCatalog) { $Steps = @('native') }
+
 if ($Clean) { Remove-Item $out -Recurse -Force -ErrorAction SilentlyContinue }
 New-Item -ItemType Directory -Force $logs | Out-Null
 
@@ -167,6 +183,20 @@ Step 'native' {
     $src = Join-Path $here 'native'
     Run 'native-configure.log' cmake @('-S', $src, '-B', $nativeB, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Game__Shipping__Win64',
         "-DUE4SS_SRC=$($Ue4ssSrc -replace '\\', '/')", "-DCORE_NAME=$name", "-DCORE_VERSION=$version")
+    if ($TestCatalog) {
+        Run 'native-build-test.log' cmake @('--build', $nativeB, '--target', 'CoreNativeCatalogTest')
+        $dll = Get-ChildItem $nativeB -Recurse -Filter 'CoreNativeCatalogTest.dll' | Where-Object { $_.FullName -notlike '*\_deps\*' } | Select-Object -First 1
+        if (-not $dll) { throw 'CoreNativeCatalogTest.dll was not produced' }
+        $testOut = Join-Path $here 'native\build-test'
+        New-Item -ItemType Directory -Force $testOut | Out-Null
+        $dest = Join-Path $testOut 'main.dll'
+        Copy-Item $dll.FullName $dest -Force
+        if (-not (Test-HasMarker $dest)) { throw "$dest lacks the test marker $testMarker" }
+        Write-Host ("   native/build-test/main.dll {0:N0} bytes (CoreNativeCatalogTest, the test flavour: never package it)" -f $dll.Length)
+        & $abiCheck -Dll $dest
+        if ($LASTEXITCODE) { throw 'abi-check.ps1 reports imports the shipped UE4SS.dll lacks (CoreNativeCatalogTest)' }
+        return
+    }
     Run 'native-build.log' cmake @('--build', $nativeB, '--target', 'CoreNative', 'CoreNativeTest', "$($name)Restart", "$($name)RestartTest", "$($name)CatalogTest")
     $staged = Join-Path $out 'native-out'
     # Core's DLL (shipped) and core's test-only DLL (test/SkelNative; deploy.ps1 -Test installs it, never packaged).
@@ -373,6 +403,8 @@ Step 'package' {
         'miniz'       = Join-Path $here 'native\third_party\miniz-3.0.2\LICENSE'
     }
     foreach ($p in $parts.GetEnumerator()) { if (-not (Test-Path $p.Value)) { throw "Missing $($p.Key) ($($p.Value)); run its build step" } }
+    # Mod Manager v2 story 6: the test flavour of main.dll (build.ps1 -TestCatalog) never ships.
+    if (Test-HasMarker $parts['main.dll']) { throw "$($parts['main.dll']) is the test flavour of main.dll (it carries $testMarker): rebuild with build.ps1 -Steps native; never package it" }
     Copy-Item (Join-Path $here 'mod.json') $modDir
     Copy-Item $parts['main.dll'] (Join-Path $modDir 'dlls\main.dll')
     Copy-Item $parts['helper'] (Join-Path $modDir "bin\$($name)Restart.exe")
